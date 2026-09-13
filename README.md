@@ -99,16 +99,13 @@ install needed beyond generating the wrapper once, if it's ever missing:
 
 ## Project layout
 
-```
-src/main/java/com/nordstrom/emulator/cpu/    the CPU core (see above)
-src/main/java/com/nordstrom/emulator/disk/   Disk II boot ROM and LSS sequencer table
-                                              (verified byte-for-byte against MAME's
-                                              published checksums), not yet wired to
-                                              a live disk controller
-src/test/java/com/nordstrom/emulator/cpu/    verification tests, see above
-src/test/resources/                          the Klaus2m5 test ROM (binary and source --
-                                              see NOTICE for its license)
-```
+- `src/main/java/com/nordstrom/emulator/cpu/` — the CPU core (see above)
+- `src/main/java/com/nordstrom/emulator/disk/` — Disk II boot ROM and LSS
+  sequencer table (verified byte-for-byte against MAME's published
+  checksums), not yet wired to a live disk controller
+- `src/test/java/com/nordstrom/emulator/cpu/` — verification tests, see above
+- `src/test/resources/` — the Klaus2m5 test ROM (binary and source — see
+  NOTICE for its license)
 
 ## Design conventions
 
