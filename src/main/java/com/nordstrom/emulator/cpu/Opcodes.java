@@ -468,6 +468,58 @@ final class Opcodes {
         });
     }
 
+    /** LAS: despite its reputation, this one is NOT unstable -- oxyron.de carries no instability marker for it, and the 64doc reference explicitly says the "probably unreliable" claim from one source "does not seem to be the case." A: X: SP := memory & SP; N/Z from the result. */
+    private static void las(int opcode) {
+        CycleCosts.CycleCost cost = CycleCosts.of(ABSOLUTE_Y, AccessType.READ);
+        TABLE[opcode] = new OpcodeDef("LAS*", ABSOLUTE_Y, (cpu, operand) -> {
+            int value = cpu.readOperand(operand) & cpu.sp;
+            cpu.a = value;
+            cpu.x = value;
+            cpu.sp = value;
+            cpu.status.updateNZ(value);
+            return cost.totalCycles(operand);
+        });
+    }
+
+    /**
+     * Genuinely chip-unstable opcodes: ANE/XAA, LXA, SHA, SHX, SHY, TAS.
+     * Different real NMOS 6502/6510 chips disagree with each other on
+     * these -- some behaviors are documented as temperature-dependent
+     * even on a SINGLE chip. There is no canonical NMOS behavior to be
+     * faithful to here, so encoding any one chip's typical result would
+     * be a confident-looking wrong answer, not a more complete emulation.
+     * Consistent with how ARR's decimal mode and JAM/KIL were each
+     * handled on their own terms: this throws rather than guesses. Real
+     * software essentially never depends on these -- they were explored
+     * almost entirely on Commodore 64/Atari hardware, not the Apple II+,
+     * whose copy-protection ecosystem got its uniqueness from the disk
+     * controller quirks built earlier in this project instead.
+     */
+    private static void unstable(int opcode, String mnemonic, AddressingMode mode) {
+        TABLE[opcode] = new OpcodeDef(mnemonic, mode, (cpu, operand) -> {
+            throw new UnsupportedOperationException(mnemonic + " ($" + Integer.toHexString(opcode).toUpperCase()
+                + "): chip-dependent and unstable across real NMOS 6502/6510 hardware -- no canonical "
+                + "behavior exists to emulate; see Opcodes.unstable() javadoc");
+        });
+    }
+
+    /**
+     * JAM/KIL: halts the CPU permanently -- see {@link Cpu6502#jam}. All
+     * twelve opcode encodings share identical behavior; unlike every
+     * other illegal opcode here, this isn't a combination of two legal
+     * operations, it's a real hardware dead end. The cycle count returned
+     * here is a pragmatic placeholder (2, the typical implied-mode cost)
+     * rather than a documented value -- the reference table lists
+     * "Cycles: -" for JAM precisely because the concept stops being
+     * meaningful once nothing can execute afterward.
+     */
+    private static void jam(int opcode) {
+        TABLE[opcode] = new OpcodeDef("JAM*", IMPLIED, (cpu, operand) -> {
+            cpu.jam();
+            return 2;
+        });
+    }
+
     static {
         adc(0x69, IMMEDIATE);
         adc(0x65, ZERO_PAGE);
@@ -640,6 +692,7 @@ final class Opcodes {
             cpu.push(cpu.pc & 0xFF);
             cpu.push(cpu.status.toPushedByteSoftware());
             cpu.status.setFlag(Status6502.IRQ_DISABLE);
+            cpu.maskInterruptsImmediately(); // BRK shares hardware interrupt-entry microcode -- no polling lag, unlike SEI
             cpu.pc = cpu.readVector(0xFFFE);
             return 7;
         });
@@ -754,6 +807,29 @@ final class Opcodes {
             cpu.a = Arithmetic6502.sbc(cpu.a, cpu.readOperand(operand), cpu.status);
             return 2;
         });
+
+        las(0xBB);
+
+        unstable(0x8B, "ANE*", IMMEDIATE);
+        unstable(0xAB, "LXA*", IMMEDIATE);
+        unstable(0x93, "SHA*", INDIRECT_INDEXED_Y);
+        unstable(0x9F, "SHA*", ABSOLUTE_Y);
+        unstable(0x9E, "SHX*", ABSOLUTE_Y);
+        unstable(0x9C, "SHY*", ABSOLUTE_X);
+        unstable(0x9B, "TAS*", ABSOLUTE_Y);
+
+        jam(0x02);
+        jam(0x12);
+        jam(0x22);
+        jam(0x32);
+        jam(0x42);
+        jam(0x52);
+        jam(0x62);
+        jam(0x72);
+        jam(0x92);
+        jam(0xB2);
+        jam(0xD2);
+        jam(0xF2);
 
         // No STA IMMEDIATE -- storing to an immediate value is not a real operation.
         sta(0x85, ZERO_PAGE);

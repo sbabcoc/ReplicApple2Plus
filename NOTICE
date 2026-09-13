@@ -1,0 +1,92 @@
+NOTICE
+======
+
+ReplicApple2Plus is licensed under the Apache License, Version 2.0 (see
+LICENSE). This file lists third-party materials included in or used to
+build this project, per the attribution conventions of that license and,
+where applicable, the terms of the third-party material's own license.
+
+------------------------------------------------------------------------
+Bundled under GPLv3-or-later
+------------------------------------------------------------------------
+
+src/test/resources/6502_functional_test.bin
+src/test/resources/6502_functional_test.a65
+
+    6502 FUNCTIONAL TEST
+    Copyright (C) 2012-2020 Klaus Dormann
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+    Source: https://github.com/Klaus2m5/6502_65C02_functional_tests
+
+Both the compiled test ROM (.bin) and the assembler source it was built
+from (.a65) are included, so the corresponding source accompanies the
+binary directly rather than depending on an external link remaining
+available. Per GPLv3 Section 5 (the "aggregate" provision), including this
+independent, separately-licensed test fixture alongside ReplicApple2Plus's
+own Apache-2.0 code does not extend GPL terms to the rest of the project --
+this file is used to verify the emulator's CPU core, not incorporated into
+it. This is not a legal conclusion, only a good-faith reading of the
+license text; consult an attorney if you need certainty rather than a
+reasonable interpretation.
+
+------------------------------------------------------------------------
+Public domain
+------------------------------------------------------------------------
+
+The decimal-mode arithmetic in Arithmetic6502.java (ADC/SBC NMOS BCD flag
+behavior) is traced from an algorithm authored by Bruce Clark, explicitly
+released to the public domain by its author:
+
+    "Written by Bruce Clark. This code is public domain."
+    http://www.6502.org/tutorials/decimal_mode.html
+
+No source code or binary from Clark's reference is included in this
+project -- the algorithm it describes was independently reimplemented in
+original Java.
+
+------------------------------------------------------------------------
+Documentation and reference sources (courtesy attribution)
+------------------------------------------------------------------------
+
+The following were consulted as documentation/reference material during
+development. No source code or binaries from these sources are included
+in this project; the underlying facts and algorithms they document were
+independently reimplemented in original Java.
+
+  - John West and Marko Mäkelä, "64doc" -- NMOS decimal-mode and
+    illegal-opcode reference. https://www.nesdev.org/6502_cpu.txt
+  - Graham ("oxyron.de") -- community-standard illegal-opcode reference
+    table. https://www.oxyron.de/html/opcodes02.html
+  - groepaz/hitmen, "NMOS 6510 Unintended Opcodes -- No More Secrets"
+  - The Apple II Documentation Project. https://www.apple2.org.za/
+  - applelogic.org -- Apple II hardware reverse-engineering and preserved
+    ROM/PROM images. http://www.applelogic.org/
+
+------------------------------------------------------------------------
+MIT License
+------------------------------------------------------------------------
+
+src/main/java/com/nordstrom/emulator/disk/DiskBootRom.java
+src/main/java/com/nordstrom/emulator/disk/DiskLogicSequencerRom.java
+
+These files embed PROM data transcribed from reference byte arrays in
+Joao Ricardo Pagotto's Apple-Disk-II-PROM-Verify project (MIT licensed):
+
+    https://github.com/joaopagotto/Apple-Disk-II-PROM-Verify
+
+The transcribed data was independently cross-checked against MAME's
+published checksums for the same PROMs before being trusted; see the
+class-level Javadoc in each file for details.
