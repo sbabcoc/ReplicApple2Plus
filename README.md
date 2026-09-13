@@ -123,8 +123,10 @@ before reading the source:
   that is how the real 6502 detects it internally.
 - **Unverified is treated the same as unimplemented.** Where a documented
   behavior couldn't be confirmed against a trustworthy source, the code
-  throws rather than guesses (see `ARR`'s decimal mode note above, and the
-  unstable illegal opcodes).
+  throws rather than guesses — the genuinely unstable illegal opcodes
+  listed above are the current example. `ARR`'s decimal mode was once in
+  this category too; it's since been resolved and verified (see
+  `ArrDecimalCrossCheckTest` above) and is no longer an open gap.
 
 ## Acknowledgments
 
