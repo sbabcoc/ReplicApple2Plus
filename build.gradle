@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'pl.allegro.tech.build.axion-release' version '1.18.16'
+}
+
+scmVersion {
+    tag {
+        prefix = 'v'
+    }
+}
+
+group = 'com.nordstrom.ui-tools'
+version = scmVersion.version
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+application {
+    // adjust once the CPU/bus/scheduler classes have a real entry point
+    mainClass = 'com.nordstrom.emulator.Apple2Plus'
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// PROM/ROM binary assets (system ROMs, P5/P6 disk controller tables) live
+// under src/main/resources and are loaded at runtime, not compiled in --
+// keeping them out of source control as binaries is a separate decision;
+// see .gitignore.

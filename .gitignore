@@ -1,0 +1,58 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# Gradle wrapper local config (keep the wrapper jar/properties, ignore local overrides)
+gradle.properties.local
+
+# Java
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+hs_err_pid*
+replay_pid*
+
+# IDE - IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# IDE - Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# IDE - VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Logs
+*.log
+
+# ROM and disk-image assets: copyrighted Apple firmware and any real/synthesized
+# disk images (.dsk, .do, .po, .nib, .woz) should not be committed to source
+# control regardless of where they're staged for the build.
+*.dsk
+*.do
+*.po
+*.nib
+*.woz
+*.rom
+*.bin
+!gradle/wrapper/gradle-wrapper.jar
+
+# Exception: Klaus2m5's 6502 functional-test ROM is public-domain test
+# tooling, not Apple firmware -- the blanket *.bin rule above was aimed at
+# copyrighted ROM/disk assets and would otherwise catch this incidentally.
+!src/test/resources/6502_functional_test.bin
