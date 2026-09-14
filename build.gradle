@@ -1,31 +1,103 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.sonatype.plexus:plexus-sec-dispatcher:1.4'
+        classpath 'org.codehaus.plexus:plexus-container-default:2.1.1'
+        classpath 'org.sonatype.plexus:plexus-cipher:1.7'
+    }
+}
+
+import groovy.xml.XmlParser
+import org.sonatype.plexus.components.sec.dispatcher.DefaultSecDispatcher
+import org.sonatype.plexus.components.cipher.DefaultPlexusCipher
+
 plugins {
     id 'java'
     id 'application'
+    id 'maven-publish'
+    id 'signing'
+
+    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
     id 'pl.allegro.tech.build.axion-release' version '1.18.16'
+}
+
+group = 'com.nordstrom.ui-tools'
+description = 'ReplicApple2Plus'
+
+/* Repositories */
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+def getMavenServer(String serverId) {
+    def settingsFile = new File(System.getProperty("user.home"), ".m2/settings.xml")
+    if (!settingsFile.exists()) return null
+
+    def settings = new XmlParser().parse(settingsFile)
+    def server = settings.servers.server.find { it.id.text() == serverId }
+
+    if (server) {
+        def dispatcher = new DefaultSecDispatcher()
+        dispatcher._cipher = new DefaultPlexusCipher()
+
+        def securityFile = new File(System.getProperty("user.home"), ".m2/settings-security.xml")
+        System.setProperty("settings.security", securityFile.absolutePath)
+
+        def decrypt = { String val ->
+            if (val == null) return null
+            return dispatcher._cipher.isEncryptedString(val) ? dispatcher.decrypt(val) : val
+        }
+
+        return [
+            username  : server.username?.text(),
+            password  : decrypt(server.password?.text()),
+            passphrase: decrypt(server.passphrase?.text())
+        ]
+    }
+
+    return null
 }
 
 scmVersion {
     tag {
         prefix = 'v'
     }
+    repository {
+        def githubNode = getMavenServer('github')
+        if (githubNode) {
+            customUsername.set(githubNode.username)
+            customPassword.set(githubNode.password)
+        }
+    }
 }
 
-group = 'com.nordstrom.ui-tools'
-version = scmVersion.version
-
-repositories {
-    mavenCentral()
-}
+def resolvedVersion = project.hasProperty('artifactVersion')
+        ? project.property('artifactVersion').toString()
+        : scmVersion.version
+version = resolvedVersion
 
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(17)
     }
+    withJavadocJar()
+    withSourcesJar()
 }
 
 application {
     // adjust once the CPU/bus/scheduler classes have a real entry point
     mainClass = 'com.nordstrom.emulator.Apple2Plus'
+}
+
+tasks.named('jar', Jar) {
+    manifest {
+        attributes(
+            'Implementation-Version': resolvedVersion
+        )
+    }
 }
 
 /* Run CardCatalog task -- lists available SlotCard peripheral types.
@@ -92,3 +164,95 @@ test {
 // under src/main/resources and are loaded at runtime, not compiled in --
 // keeping them out of source control as binaries is a separate decision;
 // see .gitignore.
+
+/* Publishing */
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom {
+                name = 'ReplicApple2Plus'
+                groupId = project.group
+                artifactId = rootProject.name
+                version = resolvedVersion
+                packaging = 'jar'
+                description = 'A from-scratch Apple II+ emulator, written in Java, prioritizing ' +
+                    'hardware fidelity over performance -- verified against real-world reference ' +
+                    'test suites rather than taken on faith.'
+                url = 'https://github.com/sbabcoc/ReplicApple2Plus'
+
+                scm {
+                    connection = 'scm:git:https://github.com/sbabcoc/ReplicApple2Plus.git'
+                    developerConnection = 'scm:git:https://github.com/sbabcoc/ReplicApple2Plus.git'
+                    url = 'https://github.com/sbabcoc/ReplicApple2Plus/tree/main'
+                    tag = 'HEAD'
+                }
+
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
+
+                developers {
+                    developer {
+                        id = 'scoba'
+                        name = 'Scott Babcock'
+                        email = 'scoba@hotmail.com'
+                        organization = 'Nordstrom'
+                        organizationUrl = 'https://shop.nordstrom.com'
+                    }
+                }
+            }
+            versionMapping {
+                usage('java-api') {
+                    fromResolutionOf('runtimeClasspath')
+                }
+                usage('java-runtime') {
+                    fromResolutionResult()
+                }
+            }
+        }
+    }
+}
+
+/* Signing */
+signing {
+    if (project.hasProperty('signing.keyId')) {
+        def keyId = project.getProperty('signing.keyId')
+        def gpgNode = getMavenServer(keyId)
+        def secret = gpgNode?.passphrase
+
+        if (secret) {
+            useGpgCmd()
+            project.ext.set("signing.gnupg.passphrase", secret)
+            project.ext.set("signing.gnupg.arguments", "--batch,--pinentry-mode,loopback")
+        }
+    }
+    sign publishing.publications.mavenJava
+}
+
+/* Install alias */
+tasks.register('install') {
+    dependsOn tasks.named('publishToMavenLocal')
+    group = tasks.named('publishToMavenLocal').get().group
+    description = "[alias] publish to Maven Local"
+}
+
+/* Nexus publishing */
+nexusPublishing {
+    packageGroup = 'com.nordstrom'
+    repositories {
+        ossrh {
+            def ossrhNode = getMavenServer('ossrh')
+            username = ossrhNode?.username
+            password = ossrhNode?.password
+            nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
+            snapshotRepositoryUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/content/repositories/snapshots/"))
+            if (project.hasProperty('ossrhStagingProfileId')) {
+                stagingProfileId = ossrhStagingProfileId
+            }
+        }
+    }
+}
