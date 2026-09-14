@@ -28,6 +28,56 @@ application {
     mainClass = 'com.nordstrom.emulator.Apple2Plus'
 }
 
+/* Run CardCatalog task -- lists available SlotCard peripheral types.
+ *
+ * Modeled directly on selenium-grid-manager's runGrid task
+ * (github.com/sbabcoc/selenium-grid-manager, grid.gradle): a JavaExec
+ * task whose classpath is assembled dynamically from a Gradle property,
+ * rather than requiring a hand-typed `java -cp` invocation.
+ *
+ * Usage:
+ *   ./gradlew runCardCatalog
+ *   ./gradlew runCardCatalog -PpluginsDir=plugins/
+ */
+tasks.register('runCardCatalog', JavaExec) {
+    group = 'Application'
+    description = 'List available SlotCard peripheral types, including any plugin jars'
+
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.nordstrom.emulator.system.CardCatalog'
+
+    if (project.hasProperty('pluginsDir')) {
+        args '--plugins', project.getProperty('pluginsDir')
+    }
+}
+
+/* Run SlotConfigTemplate task -- generates a one-time starter slot
+ * configuration file. See SlotConfigTemplate's own Javadoc for why this
+ * is a snapshot, not a live or auto-synced catalog.
+ *
+ * Usage:
+ *   ./gradlew runSlotConfigTemplate
+ *   ./gradlew runSlotConfigTemplate -PpluginsDir=plugins/
+ *   ./gradlew runSlotConfigTemplate -PoutputFile=slots.ini
+ *   ./gradlew runSlotConfigTemplate -PpluginsDir=plugins/ -PoutputFile=slots.ini
+ */
+tasks.register('runSlotConfigTemplate', JavaExec) {
+    group = 'Application'
+    description = 'Generate a one-time starter slot configuration file listing available SlotCard peripheral types'
+
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.nordstrom.emulator.system.SlotConfigTemplate'
+
+    def taskArgs = []
+    if (project.hasProperty('pluginsDir')) {
+        taskArgs += ['--plugins', project.getProperty('pluginsDir')]
+    }
+    if (project.hasProperty('outputFile')) {
+        taskArgs += ['--output', project.getProperty('outputFile')]
+    }
+    args taskArgs
+}
+
 dependencies {
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'

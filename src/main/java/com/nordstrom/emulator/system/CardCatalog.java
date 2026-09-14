@@ -19,7 +19,7 @@ import java.util.Set;
  * <p>
  * Runnable directly:
  * <pre>
- *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.CardCatalog [pluginsDirectory]
+ *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.CardCatalog [--plugins DIR]
  * </pre>
  * With no argument, lists only this project's own built-in cards. With a
  * plugins directory argument, also lists every card in any {@code .jar}
@@ -62,9 +62,12 @@ public final class CardCatalog {
 
     /** Prints every available card's config-file type value and recognized parameters to stdout. */
     public static void main(String[] args) throws IOException {
+        CliArgs cli = CliArgs.parse(args);
+
         ClassLoader classLoader = CardCatalog.class.getClassLoader();
-        if (args.length > 0) {
-            classLoader = PluginLoader.load(Path.of(args[0]), classLoader);
+        String pluginsDir = cli.get("plugins");
+        if (pluginsDir != null) {
+            classLoader = PluginLoader.load(Path.of(pluginsDir), classLoader);
         }
 
         List<CardDescription> cards = list(classLoader);
