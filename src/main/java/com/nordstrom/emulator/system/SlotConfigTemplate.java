@@ -40,6 +40,12 @@ import java.util.List;
  */
 public final class SlotConfigTemplate {
 
+    /**
+     * Parses {@code --plugins}/{@code --output} (see class Javadoc), generates the snapshot, and writes it to the given file or stdout.
+     *
+     * @param args {@code [--plugins DIR] [--output FILE]}, see class Javadoc
+     * @throws IOException if {@code --output} is given and can't be written, or {@code --plugins} can't be scanned
+     */
     public static void main(String[] args) throws IOException {
         CliArgs cli = CliArgs.parse(args);
 
@@ -60,6 +66,7 @@ public final class SlotConfigTemplate {
         }
     }
 
+    /** Renders {@code cards} into the commented-out, paste-ready INI text described in this class's Javadoc. */
     static String render(List<CardCatalog.CardDescription> cards) {
         StringBuilder sb = new StringBuilder();
         sb.append("# Starter slot configuration -- SNAPSHOT generated ").append(Instant.now()).append('\n');

@@ -28,16 +28,33 @@ import java.util.Set;
  */
 public final class CardCatalog {
 
-    /** One card's discoverable identity: how to refer to it in a config file, and what it accepts. */
+    /**
+     * One card's discoverable identity: how to refer to it in a config file, and what it accepts.
+     *
+     * @param shortName the card's declared short name, or null if it has none
+     * @param className the card's fully-qualified class name
+     * @param supportedParameters the card's declared recognized parameters, or null if it declares none
+     */
     public record CardDescription(String shortName, String className, Set<String> supportedParameters) {
 
-        /** How this card's config-file {@code type} value should be written -- its short name if it has one, its fully-qualified class name otherwise. */
+        /**
+         * How this card's config-file {@code type} value should be
+         * written -- its short name if it has one, its fully-qualified
+         * class name otherwise.
+         *
+         * @return the value to use for {@code type=} in a slot configuration
+         */
         public String typeValue() {
             return shortName != null ? shortName : className;
         }
     }
 
-    /** Every {@code SlotCard} visible to {@code classLoader} via real {@link ServiceLoader} discovery, described for a human. */
+    /**
+     * Every {@code SlotCard} visible to {@code classLoader} via real {@link ServiceLoader} discovery, described for a human.
+     *
+     * @param classLoader where to discover {@code SlotCard} providers from
+     * @return a description of every card {@code classLoader} can see
+     */
     public static List<CardDescription> list(ClassLoader classLoader) {
         List<CardDescription> descriptions = new ArrayList<>();
         for (SlotCard card : allProviders(classLoader)) {
@@ -60,7 +77,12 @@ public final class CardCatalog {
         return providers;
     }
 
-    /** Prints every available card's config-file type value and recognized parameters to stdout. */
+    /**
+     * Prints every available card's config-file type value and recognized parameters to stdout.
+     *
+     * @param args {@code [--plugins DIR]}, see class Javadoc
+     * @throws IOException if the plugins directory can't be scanned
+     */
     public static void main(String[] args) throws IOException {
         CliArgs cli = CliArgs.parse(args);
 

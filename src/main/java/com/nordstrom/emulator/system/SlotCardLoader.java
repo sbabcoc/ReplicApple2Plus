@@ -44,6 +44,11 @@ public final class SlotCardLoader {
      * {@link PluginLoader} covering both this project's own built-in
      * cards and any externally supplied plugin jars. Unconfigured slots
      * (no section for that number) are left {@code null}.
+     *
+     * @param configFile the INI slot configuration file
+     * @param classLoader where to resolve each slot's {@code type} against
+     * @return the populated slots, length 8, index 0 unused
+     * @throws IOException if {@code configFile} can't be read
      */
     public static SlotCard[] load(Path configFile, ClassLoader classLoader) throws IOException {
         Map<String, Properties> sections = IniFile.parse(configFile);

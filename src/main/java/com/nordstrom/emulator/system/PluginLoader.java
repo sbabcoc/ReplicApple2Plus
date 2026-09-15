@@ -35,6 +35,11 @@ public final class PluginLoader {
      * else (this project's own classes, the JDK, etc.). If the directory
      * doesn't exist, returns {@code parent} unchanged -- an absent
      * plugins directory is not an error, it just means no plugins.
+     *
+     * @param pluginsDirectory directory to scan for {@code .jar} files
+     * @param parent the classloader to fall back to for everything else
+     * @return a classloader covering both {@code parent} and any jars found
+     * @throws IOException if {@code pluginsDirectory} can't be scanned
      */
     public static ClassLoader load(Path pluginsDirectory, ClassLoader parent) throws IOException {
         if (!Files.isDirectory(pluginsDirectory)) {
@@ -49,6 +54,7 @@ public final class PluginLoader {
         return new URLClassLoader(jarUrls.toArray(new URL[0]), parent);
     }
 
+    /** Converts a jar's {@link Path} to the {@link URL} form {@link URLClassLoader} needs. */
     private static URL toUrl(Path jar) {
         try {
             return jar.toUri().toURL();

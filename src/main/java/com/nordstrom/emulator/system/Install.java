@@ -19,6 +19,13 @@ import java.nio.file.StandardCopyOption;
  */
 public final class Install {
 
+    /**
+     * Copies this jar into {@code args[0]} (default {@code plugins}) and prints where it landed.
+     *
+     * @param args {@code [pluginsDirectory]}, see class Javadoc
+     * @throws IOException if the jar can't be copied
+     * @throws URISyntaxException if this jar's own location can't be resolved to a path (should not happen in practice)
+     */
     public static void main(String[] args) throws IOException, URISyntaxException {
         Path pluginsDir = Path.of(args.length > 0 ? args[0] : "plugins");
         Files.createDirectories(pluginsDir);

@@ -32,44 +32,99 @@ import java.util.Set;
  */
 public interface SlotCard {
 
-    /** A short config-file alias for this card type, or null (the default) for none -- a card with no short name is still loadable, just by its fully-qualified class name only. */
+    /**
+     * A short config-file alias for this card type, or null (the
+     * default) for none -- a card with no short name is still loadable,
+     * just by its fully-qualified class name only.
+     *
+     * @return the short name, or null for none
+     */
     default String getShortName() {
         return null;
     }
 
-    /** The configuration keys this card recognizes, or null (the default) to accept anything with no validation. When non-null, both a config file supplying an unrecognized key and this card's own {@link #configure} querying an undeclared one fail loudly rather than silently. */
+    /**
+     * The configuration keys this card recognizes, or null (the default)
+     * to accept anything with no validation. When non-null, both a
+     * config file supplying an unrecognized key and this card's own
+     * {@link #configure} querying an undeclared one fail loudly rather
+     * than silently.
+     *
+     * @return the recognized parameter names, or null for no validation
+     */
     default Set<String> getSupportedParameters() {
         return null;
     }
 
-    /** Called exactly once, immediately after construction and before any other method, with this card's own settings (any slot-number prefix already stripped). */
+    /**
+     * Called exactly once, immediately after construction and before any
+     * other method, with this card's own settings (any slot-number
+     * prefix already stripped).
+     *
+     * @param props this card's own configuration properties
+     */
     void configure(Properties props);
 
-    /** Reads from this card's I/O switch region, offset 0-15 within $C0n0-$C0nF. */
+    /**
+     * Reads from this card's I/O switch region, offset 0-15 within $C0n0-$C0nF.
+     *
+     * @param offset 0-15 within this card's I/O switch region
+     * @return the byte at that offset
+     */
     int readIoSwitch(int offset);
 
-    /** Writes to this card's I/O switch region, offset 0-15 within $C0n0-$C0nF. */
+    /**
+     * Writes to this card's I/O switch region, offset 0-15 within $C0n0-$C0nF.
+     *
+     * @param offset 0-15 within this card's I/O switch region
+     * @param value the byte to write
+     */
     void writeIoSwitch(int offset, int value);
 
-    /** Reads from this card's own ROM, offset 0-255 within $Cn00-$CnFF. */
+    /**
+     * Reads from this card's own ROM, offset 0-255 within $Cn00-$CnFF.
+     *
+     * @param offset 0-255 within this card's ROM
+     * @return the byte at that offset
+     */
     int readRom(int offset);
 
-    /** Writes to this card's own ROM space. Most cards are read-only here. */
+    /**
+     * Writes to this card's own ROM space. Most cards are read-only here.
+     *
+     * @param offset 0-255 within this card's ROM
+     * @param value the byte to write
+     */
     default void writeRom(int offset, int value) {
         // no-op by default
     }
 
-    /** Whether this card ever claims the shared $C800-$CFFF expansion ROM window. Most cards never do. */
+    /**
+     * Whether this card ever claims the shared $C800-$CFFF expansion ROM window. Most cards never do.
+     *
+     * @return true if this card can own the expansion ROM window
+     */
     default boolean wantsExpansionRom() {
         return false;
     }
 
-    /** Reads from the shared expansion ROM window, offset 0-2047 within $C800-$CFFF. Only called while this card owns it. */
+    /**
+     * Reads from the shared expansion ROM window, offset 0-2047 within
+     * $C800-$CFFF. Only called while this card owns it.
+     *
+     * @param offset 0-2047 within the expansion ROM window
+     * @return the byte at that offset
+     */
     default int readExpansionRom(int offset) {
         throw new UnsupportedOperationException(getClass().getName() + " does not claim the expansion ROM window");
     }
 
-    /** Writes to the shared expansion ROM window. Only called while this card owns it. */
+    /**
+     * Writes to the shared expansion ROM window. Only called while this card owns it.
+     *
+     * @param offset 0-2047 within the expansion ROM window
+     * @param value the byte to write
+     */
     default void writeExpansionRom(int offset, int value) {
         // no-op by default
     }
@@ -85,6 +140,8 @@ public interface SlotCard {
      * -- most cards. Lets a host UI enumerate every drive across every
      * installed card generically, without needing to know about
      * DiskIIController (or any other specific card type) by name.
+     *
+     * @return this card's removable drives, or an empty list if it has none
      */
     default List<RemovableMediaDrive> removableDrives() {
         return List.of();

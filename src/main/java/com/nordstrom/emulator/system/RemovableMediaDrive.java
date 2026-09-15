@@ -30,15 +30,20 @@ import java.util.Optional;
  */
 public interface RemovableMediaDrive {
 
-    /** Loads new media into this drive, replacing whatever (if anything) was previously loaded. */
+    /**
+     * Loads new media into this drive, replacing whatever (if anything) was previously loaded.
+     *
+     * @param imagePath path to the disk image to load
+     * @throws IOException if the image can't be read
+     */
     void insert(Path imagePath) throws IOException;
 
     /** Removes whatever media is currently loaded, if any -- the drive becomes empty, matching a real drive with its door open and nothing inside. */
     void eject();
 
-    /** Whether media is currently loaded. */
+    /** @return true if media is currently loaded */
     boolean isPresent();
 
-    /** The path of the currently loaded image, if any -- for a host UI to display, e.g. "Drive 1: disk1.woz". */
+    /** @return the path of the currently loaded image, if any -- for a host UI to display, e.g. "Drive 1: disk1.woz" */
     Optional<Path> currentImagePath();
 }

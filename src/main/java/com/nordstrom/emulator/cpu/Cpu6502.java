@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.cpu;
 
+import com.nordstrom.emulator.MemoryBus;
+
 /**
  * NMOS 6502 registers and the fetch/decode/execute step. Addressing-mode
  * resolution and per-instruction cycle accounting are delegated to
@@ -49,6 +51,11 @@ public final class Cpu6502 {
      */
     private boolean irqDisabledForPolling = true; // matches the forced I=1 at power-on
 
+    /**
+     * Whether a JAM/KIL opcode has permanently halted this CPU -- see {@link #jam} and {@link #reset}.
+     *
+     * @return true if this CPU is halted
+     */
     public boolean isHalted() {
         return halted;
     }
@@ -139,6 +146,9 @@ public final class Cpu6502 {
      * a defensible convention, not an architectural guarantee. SP is set
      * to $FD, a conventional starting value; see {@link #reset} for the
      * mechanism that actually has documented (if partial) guarantees.
+     *
+     * @param bus the memory bus this CPU reads instructions and data from
+     * @param resetVectorAddress where to read the initial PC from (i.e. $FFFC)
      */
     public Cpu6502(MemoryBus bus, int resetVectorAddress) {
         this.bus = bus;
@@ -181,7 +191,12 @@ public final class Cpu6502 {
         halted = false;
     }
 
-    /** Executes exactly one instruction; returns the number of cycles it took. A no-op returning 0 while halted (see {@link #isHalted}) or while RESET is held asserted. */
+    /**
+     * Executes exactly one instruction. A no-op returning 0 while halted
+     * (see {@link #isHalted}) or while RESET is held asserted.
+     *
+     * @return the number of cycles this step took
+     */
     public int step() {
         if (halted || resetRequestCount > 0) {
             return 0;

@@ -7,7 +7,7 @@ import java.util.Set;
 
 /**
  * Resolves a config file's {@code type} value to an actual {@link SlotCard},
- * constructed via real {@link ServiceLoader} against an explicit
+ * constructed via real {@link java.util.ServiceLoader} against an explicit
  * {@link ClassLoader} -- normally one built by {@link PluginLoader}
  * covering both this project's own built-in cards and any externally
  * supplied plugin jars, which is what actually makes adding a new
@@ -44,7 +44,16 @@ public final class CardTypes {
     private static ClassLoader cachedClassLoader;
     private static Map<String, Class<? extends SlotCard>> shortNameCache;
 
-    /** Resolves and constructs the named card type -- a short name or a fully-qualified class name -- against {@code classLoader}, then configures it with {@code cardProps}. */
+    /**
+     * Resolves and constructs the named card type -- a short name or a
+     * fully-qualified class name -- against {@code classLoader}, then
+     * configures it with {@code cardProps}.
+     *
+     * @param typeName a card's declared short name, or a fully-qualified class name
+     * @param cardProps that card's own configuration properties
+     * @param classLoader where to look for the card's class (typically one built by {@link PluginLoader})
+     * @return the constructed and configured card
+     */
     public static SlotCard create(String typeName, Properties cardProps, ClassLoader classLoader) {
         ensureRegistryBuilt(classLoader);
         Class<? extends SlotCard> cardClass = shortNameCache.get(typeName);
