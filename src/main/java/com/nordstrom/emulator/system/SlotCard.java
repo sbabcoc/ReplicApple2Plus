@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.system;
 
+import com.nordstrom.emulator.InterruptLines;
+
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
@@ -64,6 +66,23 @@ public interface SlotCard {
      * @param props this card's own configuration properties
      */
     void configure(Properties props);
+
+    /**
+     * Called once, after {@link #configure}, with this card's narrow
+     * view of the CPU's interrupt lines. Optional -- most cards never
+     * raise an interrupt and simply don't override this. A card that
+     * does keeps the reference (typically in a field) and calls
+     * {@link InterruptLines#raiseIrq}/{@link InterruptLines#raiseNmi}
+     * whenever its own hardware condition would assert one, and the
+     * matching {@code lower*} call once that condition clears -- see
+     * {@link InterruptLines}'s own Javadoc for why this is a real
+     * least-privilege boundary rather than just an API nicety.
+     *
+     * @param lines this card's handle for asserting/releasing IRQ and NMI
+     */
+    default void connectInterruptLines(InterruptLines lines) {
+        // no-op by default -- most cards never raise an interrupt at all
+    }
 
     /**
      * Reads from this card's I/O switch region, offset 0-15 within $C0n0-$C0nF.
