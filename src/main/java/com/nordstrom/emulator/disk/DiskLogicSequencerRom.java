@@ -48,7 +48,12 @@ public final class DiskLogicSequencerRom {
         (byte) 0x08, (byte) 0x4D, (byte) 0xE8, (byte) 0xE0, (byte) 0x0A, (byte) 0x0A, (byte) 0x0A, (byte) 0x0A, (byte) 0xE8, (byte) 0x88, (byte) 0xE8, (byte) 0x08, (byte) 0xE8, (byte) 0x88, (byte) 0xE8, (byte) 0x08,
     };
 
-    /** Reads one byte (0-255) at {@code offset} (0-255) within this table. */
+    /**
+     * Reads one byte (0-255) at {@code offset} (0-255) within this table.
+     *
+     * @param offset 0-255 within this table
+     * @return the byte at that offset
+     */
     public static int read(int offset) {
         return DATA[offset] & 0xFF;
     }
