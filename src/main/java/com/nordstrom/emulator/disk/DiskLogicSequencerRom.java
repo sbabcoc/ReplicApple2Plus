@@ -17,11 +17,10 @@ package com.nordstrom.emulator.disk;
  * </pre>
  * Both 341-0028.BIN and 342-0028-A.BIN in that project's dumps carry
  * these exact checksums, confirming their identity independently rather
- * than merely asserting it. Unlike {@link DiskBootRom}, this project has
- * not independently relocated the exact MAME source line for this
- * specific table in this pass -- worth verifying if that source is ever
- * found again, though nothing here currently depends on that additional
- * confirmation.
+ * than merely asserting it. Unlike {@link DiskBootRom}, this checksum
+ * has not been independently cross-checked against MAME's own source --
+ * worth doing if that source location is found, though nothing here
+ * currently depends on that additional confirmation.
  * <p>
  * Backed by a real {@code byte[]}, not {@code int[]}, for the same
  * reason as {@link DiskBootRom}: pure, fixed, read-only storage, never

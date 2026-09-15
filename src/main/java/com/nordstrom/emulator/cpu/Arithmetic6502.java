@@ -165,9 +165,7 @@ final class Arithmetic6502 {
      * Both traced from the "64doc" reference (John West &amp; Marko
      * M&auml;kel&auml;, 1994; see nesdev.org/6502_cpu.txt), whose
      * decimal-mode derivation is validated against real C64/VIC-20/C128D
-     * hardware via included 6502 test programs, not merely asserted --
-     * this replaced an earlier version of this method that threw rather
-     * than guess at the decimal case without such a source.
+     * hardware via included 6502 test programs, not merely asserted.
      */
     static int arr(int a, int operand, Status6502 status) {
         return status.isSet(DECIMAL) ? arrDecimal(a, operand, status) : arrBinary(a, operand, status);

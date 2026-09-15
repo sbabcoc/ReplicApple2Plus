@@ -11,16 +11,16 @@ import com.nordstrom.emulator.MemoryBus;
  * does the CPU (see {@link MemoryBus}), which only ever calls
  * {@code read}/{@code write} without any idea what's behind either.
  * <p>
- * An earlier version of this class WAS the monolith this design avoids:
- * one class with every region's decode logic branched directly into its
- * own {@code read}/{@code write} methods. That made the CPU's memory
- * access path -- via this class -- carry intimate knowledge of the
- * entire Apple II+ memory map, exactly the coupling page-level memory
- * protection was meant to avoid in this project's original x86 design
- * (map most of the address space as ordinary memory, trap access to
- * specific protected pages via the OS's own page-fault mechanism, and
- * let the CPU's own load/store code stay completely oblivious to what's
- * behind any given address). A portable JVM has no equivalent to real
+ * Real Apple II+ slots are standardized edge connectors with no
+ * motherboard-level knowledge of what's plugged into them beyond fixed
+ * address ranges and signal lines -- no single chip on the board carries
+ * intimate knowledge of the whole memory map. This class mirrors that:
+ * the underlying goal is the same one page-level memory protection was
+ * meant to achieve in this project's original x86 design (map most of
+ * the address space as ordinary memory, trap access to specific
+ * protected pages via the OS's own page-fault mechanism, and let the
+ * CPU's own load/store code stay completely oblivious to what's behind
+ * any given address). A portable JVM has no equivalent to real
  * page-level protection, but the underlying goal -- decoupling address
  * decoding from both the CPU and from every other region's behavior --
  * is fully achievable anyway: {@link AddressSpace} is the generic

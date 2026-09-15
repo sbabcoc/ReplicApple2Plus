@@ -25,12 +25,10 @@ import java.util.Set;
  * parameters ({@link #getSupportedParameters}) are declared as real code
  * on the card itself, not as hand-typed comments in a separate file.
  * That's deliberate: a comment living apart from the class it describes
- * is a second source of truth that can silently drift from the first --
- * exactly the problem this project spent real effort detecting after the
- * fact in an earlier version of this design, before removing the second
- * source of truth entirely instead. Because construction is genuinely
- * no-arg now, discovering this metadata is safe and cheap: construct a
- * throwaway instance, ask it two questions, discard it.
+ * is a second source of truth that can silently drift from the first.
+ * Because construction is genuinely no-arg, discovering this metadata is
+ * safe and cheap: construct a throwaway instance, ask it two questions,
+ * discard it.
  */
 public interface SlotCard {
 

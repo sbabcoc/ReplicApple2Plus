@@ -32,11 +32,9 @@ import java.util.List;
  *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.SlotConfigTemplate [--plugins DIR] [--output FILE]
  * </pre>
  * Both flags are optional and independent of each other -- with no
- * {@code --output}, writes to stdout instead. An earlier version of this
- * class took two positional arguments instead of named flags; that made
- * it impossible to supply an output file without also supplying a
- * plugins directory, since the first positional argument would have been
- * silently misread as the plugins directory regardless of intent.
+ * {@code --output}, writes to stdout instead. Named flags, not
+ * positional arguments: this way, supplying only {@code --output} can
+ * never be misread as supplying a plugins directory instead.
  */
 public final class SlotConfigTemplate {
 

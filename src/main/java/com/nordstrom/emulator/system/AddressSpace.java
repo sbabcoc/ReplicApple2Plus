@@ -108,7 +108,27 @@ public final class AddressSpace implements MemoryBus {
     }
 
     /**
-     * Reads one byte, routed to whichever registered handler owns {@code address}.
+     * Reads one byte, routed to whichever registered handler owns
+     * {@code address}. The return value is unconditionally masked to
+     * 0-255, for the exact same reason {@link #write} masks its incoming
+     * value: the real data bus is physically 8 bits wide, full stop --
+     * there is no such thing as a 9th bit "existing" anywhere for
+     * hardware to detect or reject, so masking isn't leniency here any
+     * more than it is for writes, it's the literal physical truth in
+     * both directions.
+     * <p>
+     * A handler returning something outside 0-255 is not a hardware
+     * condition at all -- no real Apple II+ scenario could ever produce
+     * it, since a real chip's output pins simply can't represent it.
+     * It's a bug in this software's own handler implementation, an
+     * artifact of Java's {@code int} being wider than the 8-bit contract
+     * {@link AddressRangeHandler#read} promises. That's real and worth
+     * catching, but it is NOT part of what's being emulated, so it's
+     * caught with a Java {@code assert} -- active during testing, zero
+     * cost in a normal run, and unmistakably a software-correctness
+     * check rather than a simulated hardware fault (unlike the
+     * multi-latch bus conflict elsewhere in this project, which IS a
+     * genuinely undefined real hardware condition and is thrown as one).
      *
      * @param address the address to read from
      * @return the byte at that address
@@ -117,7 +137,11 @@ public final class AddressSpace implements MemoryBus {
     public int read(int address) {
         address &= 0xFFFF;
         Registration registration = requireRegistration(address);
-        return registration.handler().read(address - registration.start());
+        int value = registration.handler().read(address - registration.start());
+        assert value >= 0 && value <= 0xFF : registration.handler().getClass().getName()
+            + " returned an illegal value " + value + " (must be 0-255) for address $"
+            + Integer.toHexString(address) + " -- this is a bug in that handler, not an emulated condition";
+        return value & 0xFF;
     }
 
     /**

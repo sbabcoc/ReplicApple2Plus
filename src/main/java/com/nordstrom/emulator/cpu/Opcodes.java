@@ -445,10 +445,8 @@ final class Opcodes {
     }
 
     /**
-     * ARR: both binary- and decimal-mode behavior are now implemented and
-     * verified against the West/M&auml;kel&auml;n "64doc" reference -- see
-     * {@link Arithmetic6502#arr}. An earlier version of this method threw
-     * on decimal mode pending that verification.
+     * ARR: both binary- and decimal-mode behavior are verified against
+     * the West/M&auml;kel&auml;n "64doc" reference -- see {@link Arithmetic6502#arr}.
      */
     private static void arr(int opcode) {
         TABLE[opcode] = new OpcodeDef("ARR*", IMMEDIATE, (cpu, operand) -> {

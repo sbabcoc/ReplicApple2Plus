@@ -8,15 +8,6 @@ package com.nordstrom.emulator;
  * CPU-specific behavior, it's a motherboard-level concept the CPU merely
  * consumes, the same way the real chip's address/data pins are a shared
  * bus resource rather than something internal to the CPU's own design.
- * <p>
- * This interface originally lived in {@code com.nordstrom.emulator.cpu}
- * -- a deliberate, explicitly-flagged shortcut at the time, made so that
- * package could compile and be tested standalone before anything else in
- * this project existed. Now that {@code system} exists and genuinely
- * implements this contract, keeping it inside {@code cpu} would have
- * meant {@code system} depending sideways into {@code cpu} for something
- * that isn't CPU logic at all -- this root-package location is where the
- * original javadoc on that first version already said it belonged.
  */
 public interface MemoryBus {
     /**

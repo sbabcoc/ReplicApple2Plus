@@ -21,9 +21,7 @@ import java.util.Set;
  *       registered provider and asking it. There is no comment-based or
  *       file-based short-name mechanism at all: the class is the single
  *       source of truth for its own name, so there is nothing separate
- *       for it to drift from -- an earlier version of this design tried
- *       to detect that drift after the fact instead of removing the
- *       second source of truth that caused it.</li>
+ *       for it to drift from.</li>
  *   <li>Otherwise, treated as a fully-qualified class name and loaded via
  *       reflection against the same {@code ClassLoader} -- open to any
  *       {@code SlotCard} it can see, known to this project in advance or

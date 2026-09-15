@@ -24,13 +24,7 @@ import java.util.List;
  * <p>
  * This class operates entirely in terms of the LOCAL offset within the
  * $C800-$CFFF window (0-$7FF), never an absolute CPU address -- $CFFF is
- * simply {@link #RELEASE_OFFSET}, the last offset in that window. An
- * earlier version took the absolute address instead and hardcoded
- * $C800 (in {@link ExpansionRomHandler}) to reconstruct it, duplicating
- * a fact that already lives in {@link MotherboardBus}'s own registration
- * call -- exactly the kind of two-sources-of-truth risk this project has
- * repeatedly found and removed elsewhere. Nothing here actually needed
- * the absolute address at all.
+ * simply {@link #RELEASE_OFFSET}, the last offset in that window.
  */
 final class ExpansionRomArbiter {
 

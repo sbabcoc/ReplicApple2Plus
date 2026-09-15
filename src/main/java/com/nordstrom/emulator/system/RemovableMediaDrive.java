@@ -16,9 +16,7 @@ import java.util.Optional;
  * disks while the emulator runs. Real Apple II hardware doesn't
  * distinguish these either -- there's no special "initial" way to load a
  * disk versus a "runtime" way; you always just open the drive and put a
- * disk in it. Hardcoding boot-time media as a separate, fixed path would
- * be exactly the kind of unfaithful shortcut this project has avoided
- * everywhere else.
+ * disk in it.
  * <p>
  * Swapping media while the drive is actively spinning is intentionally
  * NOT prevented here, because real hardware doesn't prevent it either --

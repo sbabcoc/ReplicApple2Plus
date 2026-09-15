@@ -9,13 +9,12 @@ import java.util.Set;
 
 /**
  * Answers "what SlotCard types are actually available, and what do they
- * need?" -- the question moving short names and parameter lists onto the
- * card class itself (see {@link SlotCard}'s Javadoc) made harder to
- * answer than the old comment-based service file did: that file could be
- * read directly, by a human, with no code execution at all. This class
- * is the replacement for that lost discoverability -- it runs the same
- * kind of enumeration {@link CardTypes} does internally, but to describe
- * every available card rather than resolve one specific one.
+ * need?" A card's short name and parameters live in code, on the class
+ * itself (see {@link SlotCard}'s Javadoc), not in a human-readable file
+ * -- so there's no plain-text list anyone could just open and read.
+ * This class is that missing discoverability: it runs the same kind of
+ * enumeration {@link CardTypes} does internally, but to describe every
+ * available card rather than resolve one specific one.
  * <p>
  * Runnable directly:
  * <pre>
