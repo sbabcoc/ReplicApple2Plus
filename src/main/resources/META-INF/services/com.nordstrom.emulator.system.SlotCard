@@ -1,1 +1,2 @@
-com.nordstrom.emulator.disk.Disk2Controller
+com.nordstrom.emulator.expansion.Disk2Controller
+com.nordstrom.emulator.expansion.LanguageCard

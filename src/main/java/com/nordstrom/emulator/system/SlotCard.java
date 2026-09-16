@@ -7,10 +7,21 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * A peripheral card occupying one motherboard slot (1-7). Mirrors the real
+ * A peripheral card occupying one motherboard slot (0-7). Mirrors the real
  * Apple II+ slot contract: a fixed $C0n0-$C0nF I/O switch region, a fixed
  * $Cn00-$CnFF ROM region, and optional participation in the shared
  * $C800-$CFFF expansion ROM window that only one slot can own at a time.
+ * <p>
+ * Slot 0 is electrically special and every other slot's card can ignore
+ * this paragraph: real hardware's /IOSEL and /IOSTRB signals -- which
+ * drive the $Cn00-$CnFF ROM window and $C800-$CFFF expansion window
+ * respectively -- are not connected to slot 0 at all. A card occupying
+ * slot 0 still gets its own $C0n0-$C0nF I/O switches (there, {@code n}
+ * is always 0) via the normal {@link #readIoSwitch}/{@link #writeIoSwitch}
+ * methods below, but never has {@link #readRom}/{@link #writeRom} or the
+ * expansion-ROM methods called -- there is no ROM window for slot 0 to
+ * have. What slot 0 gets instead, uniquely, is the ability to bank-switch
+ * $D000-$FFFF -- see {@link #wantsSlotZeroBanking}.
  * <p>
  * Every implementation must have a public NO-ARG constructor, and use
  * {@link #configure} (called exactly once, immediately after
@@ -162,5 +173,39 @@ public interface SlotCard {
      */
     default List<RemovableMediaDrive> removableDrives() {
         return List.of();
+    }
+
+    /**
+     * Whether this card, occupying slot 0, bank-switches $D000-$FFFF.
+     * Meaningless for any other slot -- ignored there. Most cards never
+     * do this; it's a capability unique to slot 0's special wiring, not
+     * something any slot's card could opt into.
+     *
+     * @return true if this card bank-switches $D000-$FFFF from slot 0
+     */
+    default boolean wantsSlotZeroBanking() {
+        return false;
+    }
+
+    /**
+     * Reads within $D000-$FFFF, offset 0-$2FFF. Only called while this
+     * card occupies slot 0 and {@link #wantsSlotZeroBanking} is true.
+     *
+     * @param offset 0-$2FFF within $D000-$FFFF
+     * @return the byte at that offset
+     */
+    default int readSlotZeroBank(int offset) {
+        throw new UnsupportedOperationException(getClass().getName() + " does not provide slot-0 banking");
+    }
+
+    /**
+     * Writes within $D000-$FFFF. Only called while this card occupies
+     * slot 0 and {@link #wantsSlotZeroBanking} is true.
+     *
+     * @param offset 0-$2FFF within $D000-$FFFF
+     * @param value the byte to write
+     */
+    default void writeSlotZeroBank(int offset, int value) {
+        // no-op by default
     }
 }

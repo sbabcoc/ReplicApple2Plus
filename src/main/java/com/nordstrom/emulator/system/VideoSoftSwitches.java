@@ -6,14 +6,14 @@ package com.nordstrom.emulator.system;
  * real hardware, it's built into the machine itself.
  * <p>
  * Every one of these 16 addresses is a pure toggle: ANY access, read or
- * write, sets the corresponding flag, exactly like {@link Disk2Controller}'s
+ * write, sets the corresponding flag, exactly like {@link com.nordstrom.emulator.expansion.Disk2Controller}'s
  * phase-stepper and motor switches. Unlike that class's Q6/Q7 data latch,
  * though, nothing here ever needs to expose data a not-yet-built
  * subsystem would have to compute -- there's no deferred half to this
  * one. Reads return a harmless 0; real software accessing these
  * addresses does so purely for the side effect and never inspects the
  * returned byte, the same reasoning already applied to the equivalent
- * control switches in {@link Disk2Controller}.
+ * control switches in {@link com.nordstrom.emulator.expansion.Disk2Controller}.
  * <pre>
  *   $C050/$C051  TEXT off/on       (graphics/text)
  *   $C052/$C053  MIXED off/on      (full screen/mixed)
@@ -34,7 +34,7 @@ package com.nordstrom.emulator.system;
  * actual pixel output. This class still gets built now because the
  * switches themselves are static, well-documented hardware facts with
  * no timing dependency, the same reasoning that let
- * {@link Disk2Controller}'s control switches be built ahead of the
+ * {@link com.nordstrom.emulator.expansion.Disk2Controller}'s control switches be built ahead of the
  * clock loop that will eventually drive the rest of that card.
  */
 public final class VideoSoftSwitches implements AddressRangeHandler {

@@ -1,4 +1,4 @@
-package com.nordstrom.emulator.disk;
+package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.AddressRangeHandler;
 

@@ -1,4 +1,4 @@
-package com.nordstrom.emulator.system;
+package com.nordstrom.emulator.expansion;
 
 import java.io.IOException;
 import java.io.InputStream;

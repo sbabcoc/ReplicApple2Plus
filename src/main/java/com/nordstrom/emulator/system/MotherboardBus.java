@@ -28,17 +28,26 @@ import com.nordstrom.emulator.MemoryBus;
  * swappable handler, and this class is nothing more than the specific
  * list of registrations that assembles them into an Apple II+.
  * <p>
+ * Slot 0 is real but electrically special (see {@link SlotCard}'s own
+ * Javadoc): whatever occupies it gets its own $C080-$C08F I/O switches
+ * like any other slot, but never a $Cn00-$CnFF ROM window, and uniquely
+ * gets the option to bank-switch $D000-$FFFF instead. Both of those
+ * routes are wired dynamically, against whatever (if anything) is
+ * actually in {@code slots[0]} -- there is deliberately no hardcoded
+ * reference to {@link com.nordstrom.emulator.expansion.LanguageCard} or any other specific card here.
+ * <p>
  * Handles:
  * <ul>
  *   <li>$0000-$BFFF: main RAM ({@link RamHandler})</li>
  *   <li>$C050-$C05F: video mode switches ({@link VideoSoftSwitches})</li>
- *   <li>$C090-$C0FF: per-slot I/O switches ({@link SlotIoHandler})</li>
- *   <li>$C100-$C7FF: per-slot ROM ({@link SlotRomHandler})</li>
- *   <li>$C800-$CFFF: the shared expansion ROM window ({@link ExpansionRomHandler}, via the shared {@link ExpansionRomArbiter})</li>
+ *   <li>$C080-$C08F: slot 0's I/O switches ({@link SlotZeroIoHandler})</li>
+ *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
+ *   <li>$C100-$C7FF: slots 1-7's ROM ({@link SlotRomHandler})</li>
+ *   <li>$C800-$CFFF: the shared expansion ROM window ({@link ExpansionRomHandler}, via the shared {@link ExpansionRomArbiter}) -- slots 1-7 only</li>
+ *   <li>$D000-$FFFF: slot 0's bank-switched RAM if it wants one ({@link SlotZeroBankingHandler}), else the (not yet built) system ROM</li>
  * </ul>
  * Everything else -- $C000-$C04F and $C060-$C07F (general/keyboard
- * switches) and $C080-$C08F and $D000-$FFFF (language card control
- * switches and banking) -- is registered as a {@link NotYetImplementedHandler},
+ * switches) -- is registered as a {@link NotYetImplementedHandler},
  * naming the specific missing subsystem. Building the real one later
  * means changing exactly one registration line here; nothing about
  * {@link AddressSpace}, the CPU, or any other region's handler needs to
@@ -48,19 +57,20 @@ public final class MotherboardBus implements MemoryBus {
 
     private static final String GENERAL_SWITCHES_GAP =
         "General/keyboard soft switches ($C000-$C04F, $C060-$C07F) are not yet implemented";
-    private static final String LANGUAGE_CARD_GAP =
-        "LanguageCard ($C080-$C08F control switches, $D000-$FFFF banking) is not yet implemented";
+    private static final String SYSTEM_ROM_GAP =
+        "The Apple II+ system ROM ($D000-$FFFF with no slot-0 card overriding it) "
+        + "is not yet a loadable resource in this project";
 
     private final AddressSpace addressSpace = new AddressSpace();
 
     /**
-     * Wires up the full Apple II+ memory map against {@code slots} (length 8, index 0 unused) -- typically the array {@link SlotCardLoader#load} just populated.
+     * Wires up the full Apple II+ memory map against {@code slots} (length 8, slot 0 included) -- typically the array {@link SlotCardLoader#load} just populated.
      *
-     * @param slots the machine's populated slots, length 8, index 0 unused
+     * @param slots the machine's populated slots, length 8, indices 0-7
      */
     public MotherboardBus(SlotCard[] slots) {
         if (slots.length != 8) {
-            throw new IllegalArgumentException("slots must have length 8 (index 0 unused, slots are 1-7)");
+            throw new IllegalArgumentException("slots must have length 8 (slots 0-7)");
         }
 
         addressSpace.register(0x0000, 0xBFFF, new RamHandler(0xC000));
@@ -68,14 +78,18 @@ public final class MotherboardBus implements MemoryBus {
         addressSpace.register(0xC000, 0xC04F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
         addressSpace.register(0xC050, 0xC05F, new VideoSoftSwitches());
         addressSpace.register(0xC060, 0xC07F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
-        addressSpace.register(0xC080, 0xC08F, new NotYetImplementedHandler(LANGUAGE_CARD_GAP));
+
+        addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0]));
 
         ExpansionRomArbiter arbiter = new ExpansionRomArbiter(slots);
         addressSpace.register(0xC090, 0xC0FF, new SlotIoHandler(slots));
         addressSpace.register(0xC100, 0xC7FF, new SlotRomHandler(slots, arbiter));
         addressSpace.register(0xC800, 0xCFFF, new ExpansionRomHandler(arbiter));
 
-        addressSpace.register(0xD000, 0xFFFF, new NotYetImplementedHandler(LANGUAGE_CARD_GAP));
+        AddressRangeHandler upperMemory = (slots[0] != null && slots[0].wantsSlotZeroBanking())
+            ? new SlotZeroBankingHandler(slots[0])
+            : new NotYetImplementedHandler(SYSTEM_ROM_GAP);
+        addressSpace.register(0xD000, 0xFFFF, upperMemory);
     }
 
     /**

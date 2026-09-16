@@ -47,12 +47,12 @@ public final class SlotCardLoader {
      *
      * @param configFile the INI slot configuration file
      * @param classLoader where to resolve each slot's {@code type} against
-     * @return the populated slots, length 8, index 0 unused
+     * @return the populated slots, length 8, indices 0-7
      * @throws IOException if {@code configFile} can't be read
      */
     public static SlotCard[] load(Path configFile, ClassLoader classLoader) throws IOException {
         Map<String, Properties> sections = IniFile.parse(configFile);
-        SlotCard[] slots = new SlotCard[8]; // index 0 unused; slots are 1-7
+        SlotCard[] slots = new SlotCard[8]; // slots 0-7, slot 0 real but electrically special -- see SlotCard's Javadoc
 
         for (Map.Entry<String, Properties> entry : sections.entrySet()) {
             int slotNum = parseSlotNumber(entry.getKey());
@@ -76,8 +76,8 @@ public final class SlotCardLoader {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Section \"[" + sectionName + "]\" is not a valid slot number", e);
         }
-        if (slotNum < 1 || slotNum > 7) {
-            throw new IllegalArgumentException("Slot " + slotNum + " doesn't exist -- valid range is 1-7");
+        if (slotNum < 0 || slotNum > 7) {
+            throw new IllegalArgumentException("Slot " + slotNum + " doesn't exist -- valid range is 0-7");
         }
         return slotNum;
     }

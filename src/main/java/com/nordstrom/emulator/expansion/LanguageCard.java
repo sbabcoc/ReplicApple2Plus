@@ -1,0 +1,158 @@
+package com.nordstrom.emulator.expansion;
+
+import com.nordstrom.emulator.system.SlotCard;
+
+import java.util.Properties;
+import java.util.Set;
+
+/**
+ * The Apple II+'s Language Card: 16KB of pure RAM, occupying slot 0,
+ * bank-switched into $D000-$FFFF in place of the system ROM normally
+ * mapped there. Unlike every other slot's card, slot 0 has no
+ * $Cn00-$CnFF ROM window at all (real hardware's /IOSEL isn't wired to
+ * it) -- {@link #readRom}/{@link #writeRom} exist only to satisfy
+ * {@link SlotCard}'s contract and are never actually called. What slot 0
+ * gets instead is {@link #wantsSlotZeroBanking}, which this card uses
+ * for its entire reason to exist.
+ * <p>
+ * Real hardware layout: two independently selectable 4KB RAM banks at
+ * $D000-$DFFF (bank 1 and bank 2 -- only one is mapped at a time), plus
+ * a single, non-banked 8KB RAM region at $E000-$FFFF. This card has no
+ * ROM content of its own -- when its read source selects "ROM," what
+ * shows through is the Apple II+'s own system ROM, unintercepted (a
+ * still-not-yet-built resource, so that path currently throws, naming
+ * the gap rather than fabricating data). Bank selection only affects
+ * the RAM side.
+ * <p>
+ * Every access to this card's $C0n0-$C0nF I/O switches (n=0, since this
+ * is slot 0) immediately updates two independent pieces of state, by a
+ * fixed truth table based on the low bits of the offset (0-15):
+ * <ul>
+ *   <li>READ SOURCE: RAM when bits 0 and 1 are equal (offsets
+ *       0,3,4,7,8,B,C,F), ROM otherwise.</li>
+ *   <li>BANK SELECT (only relevant to $D000-$DFFF, and only for the RAM
+ *       side): bank 1 when bit 3 is set, bank 2 otherwise.</li>
+ * </ul>
+ * WRITE ENABLE is a separate, genuine hardware quirk: writing is only
+ * permitted after TWO CONSECUTIVE qualifying accesses -- a READ, not a
+ * write, of one of the four odd-numbered "write-enable" offsets ($C081,
+ * $C083, $C089, $C08B and their bit-2 duplicates $C085, $C087, $C08D,
+ * $C08F). Any other access -- a write of any kind, or a read of one of
+ * the eight even-numbered offsets -- resets the sequence back to the
+ * start. Writes always target the RAM banks regardless of read source,
+ * and are silently ignored while not enabled -- matching real
+ * write-protected-RAM behavior, and never affecting the ROM side, which
+ * cannot be written under any circumstance.
+ */
+public final class LanguageCard implements SlotCard {
+
+    private enum WriteState { PROTECTED_IDLE, PROTECTED_ARMED, ENABLED }
+
+    private static final String ROM_GAP =
+        "Reading the system ROM through the language card depends on a system-ROM "
+        + "resource this project doesn't have yet.";
+    private static final String NO_SLOT_ZERO_ROM_WINDOW =
+        "Slot 0 has no $Cn00-$CnFF ROM window -- this should never actually be called";
+
+    private boolean readRam;  // false = ROM, true = RAM
+    private boolean bank1;    // false = bank 2, true = bank 1 (only matters for $D000-$DFFF)
+    private WriteState writeState = WriteState.PROTECTED_IDLE;
+
+    private final byte[] bank1Ram = new byte[0x1000]; // $D000-$DFFF, bank 1
+    private final byte[] bank2Ram = new byte[0x1000]; // $D000-$DFFF, bank 2
+    private final byte[] upperRam = new byte[0x2000]; // $E000-$FFFF, single bank
+
+    @Override
+    public String getShortName() {
+        return "languageCard";
+    }
+
+    @Override
+    public Set<String> getSupportedParameters() {
+        return Set.of(); // a real Language Card has no settings at all
+    }
+
+    @Override
+    public void configure(Properties props) {
+        // nothing to configure -- a real Language Card has no settings
+    }
+
+    @Override
+    public int readIoSwitch(int offset) {
+        applyControlAccess(offset, false);
+        return 0; // harmless -- real software never inspects this, same reasoning as VideoSoftSwitches
+    }
+
+    @Override
+    public void writeIoSwitch(int offset, int value) {
+        applyControlAccess(offset, true);
+    }
+
+    @Override
+    public int readRom(int offset) {
+        throw new UnsupportedOperationException(NO_SLOT_ZERO_ROM_WINDOW);
+    }
+
+    @Override
+    public boolean wantsSlotZeroBanking() {
+        return true;
+    }
+
+    @Override
+    public int readSlotZeroBank(int offset) {
+        if (!readRam) {
+            throw new UnsupportedOperationException(ROM_GAP);
+        }
+        return ramAt(offset) & 0xFF;
+    }
+
+    @Override
+    public void writeSlotZeroBank(int offset, int value) {
+        if (writeState != WriteState.ENABLED) {
+            return; // silently ignored -- write-protected, exactly as designed
+        }
+        setRamAt(offset, (byte) value);
+    }
+
+    private void applyControlAccess(int offset, boolean isWrite) {
+        readRam = ((offset ^ (offset >> 1)) & 1) == 0;
+        bank1 = (offset & 0x08) != 0;
+
+        boolean writeEnableEligible = (offset & 0x01) != 0;
+        if (!isWrite && writeEnableEligible) {
+            writeState = switch (writeState) {
+                case PROTECTED_IDLE -> WriteState.PROTECTED_ARMED;
+                case PROTECTED_ARMED, ENABLED -> WriteState.ENABLED;
+            };
+        } else {
+            writeState = WriteState.PROTECTED_IDLE;
+        }
+    }
+
+    private byte ramAt(int offset) {
+        return offset < 0x1000 ? (bank1 ? bank1Ram : bank2Ram)[offset] : upperRam[offset - 0x1000];
+    }
+
+    private void setRamAt(int offset, byte value) {
+        if (offset < 0x1000) {
+            (bank1 ? bank1Ram : bank2Ram)[offset] = value;
+        } else {
+            upperRam[offset - 0x1000] = value;
+        }
+    }
+
+    /** Package-visible for tests and the not-yet-built language-card-aware disassembler/debugger. */
+    boolean isReadingRam() {
+        return readRam;
+    }
+
+    /** Package-visible for tests. */
+    boolean isBank1Selected() {
+        return bank1;
+    }
+
+    /** Package-visible for tests. */
+    boolean isWriteEnabled() {
+        return writeState == WriteState.ENABLED;
+    }
+}

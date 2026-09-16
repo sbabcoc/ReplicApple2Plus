@@ -1,4 +1,4 @@
-package com.nordstrom.emulator.disk;
+package com.nordstrom.emulator.expansion;
 
 /**
  * The Disk II controller's P6/P6A logic state sequencer (LSS) table

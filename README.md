@@ -83,12 +83,18 @@ catalog — regenerate it, don't trust it to stay current).
   annunciators) are a complete implementation; there is no equivalent
   deferred half, since none of these addresses expose data real software
   reads back.
-- **`LanguageCard`** — the `$C080`-`$C08F` control switches and the full
-  `$D000`-`$FFFF` banked RAM path (two independent 4K banks plus a single
-  8K bank, the real two-consecutive-qualifying-reads write-enable state
-  machine) are fully implemented and real RAM read/write works
-  end-to-end. Reading the system ROM through this card is a named,
-  thrown gap pending a loadable system-ROM resource.
+- **`LanguageCard`** — a genuine expansion card occupying slot 0 (real,
+  physical, and electrically special: no `$Cn00`-`$CnFF` ROM window,
+  but the only slot that can bank-switch `$D000`-`$FFFF`, via
+  `SlotCard`'s `wantsSlotZeroBanking` hook). The `$C080`-`$C08F` control
+  switches and the full `$D000`-`$FFFF` banked RAM path (two independent
+  4K banks plus a single 8K bank, the real two-consecutive-qualifying-
+  reads write-enable state machine) are fully implemented and real RAM
+  read/write works end-to-end. Reading the system ROM through this card
+  is a named, thrown gap pending a loadable system-ROM resource. An
+  empty slot 0 fails the same way an empty slot 1-7 does, and
+  `MotherboardBus` dispatches to whatever actually occupies `slots[0]`
+  rather than assuming any specific card is there.
 
 ### Deliberately not implemented
 
@@ -107,6 +113,13 @@ catalog — regenerate it, don't trust it to stay current).
   Autostart Monitor ROMs) doesn't exist as a loadable resource yet —
   sourced and checksum-verified against MAME's own source, but not yet
   turned into Java data the way the disk ROMs were.
+- **`IntegerBasicFirmwareCard`** doesn't exist as a class at all yet,
+  though its ROM data does (`IntegerBasicFirmwareCardRom`, verified
+  against Apple's own 1981 Level II Service Manual and MAME's source) --
+  a genuinely different, simpler card from `LanguageCard`: a fixed,
+  non-bank-switched ROM set selected by a plain two-address toggle, not
+  bank-switched RAM. Also occupies slot 0, mutually exclusive with
+  `LanguageCard`.
 - **General/keyboard soft switches** (`$C000`-`$C04F`, `$C060`-`$C07F`) and
   **floating-bus emulation** (what an empty slot or an ownerless expansion
   window actually returns) are both named, thrown gaps — the latter
@@ -171,14 +184,18 @@ Artifact publishing (Sonatype Central Portal, GPG signing) is configured in
   (deliberately in neither package, so neither depends sideways on the
   other for a cross-cutting hardware concept)
 - `src/main/java/com/nordstrom/emulator/cpu/` — the CPU core
-- `src/main/java/com/nordstrom/emulator/disk/` — the verified disk ROMs
-  and `Disk2Controller`
+- `src/main/java/com/nordstrom/emulator/expansion/` — actual expansion
+  card implementations and their verified ROM data: `Disk2Controller`
+  (plus `DiskBootRom`, `DiskLogicSequencerRom`), `LanguageCard` (plus
+  `IntegerBasicFirmwareCardRom`, sourced and verified but not yet wired
+  to anything -- there is no `IntegerBasicFirmwareCard` class yet)
 - `src/main/java/com/nordstrom/emulator/system/` — the memory bus
-  (`AddressSpace`, `MotherboardBus`, and the individual region handlers),
-  the peripheral architecture (`SlotCard`, `CardTypes`, `PluginLoader`,
-  `Install`, `CardCatalog`, `SlotCardLoader`, `SlotConfigTemplate`,
-  `RemovableMediaDrive`), and the real peripherals that don't belong to a
-  slot (`VideoSoftSwitches`, `LanguageCard`)
+  (`AddressSpace`, `MotherboardBus`, and the individual region and
+  dispatch handlers), the peripheral architecture (`SlotCard`,
+  `CardTypes`, `PluginLoader`, `Install`, `CardCatalog`,
+  `SlotCardLoader`, `SlotConfigTemplate`, `RemovableMediaDrive`), and the
+  one true motherboard-built-in peripheral that isn't a slot card at all
+  (`VideoSoftSwitches`)
 - `src/test/java/` — verification tests, see above
 - `src/test/resources/` — the Klaus2m5 test ROM (binary and source — see
   NOTICE for its license)
