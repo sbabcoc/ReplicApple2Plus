@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.RomChecksum;
+
 /**
  * The Disk II controller's P6/P6A logic state sequencer (LSS) table
  * (Apple part numbers 341-0028 and 342-0028-A -- confirmed byte-for-byte
@@ -46,6 +48,10 @@ public final class DiskLogicSequencerRom {
         (byte) 0xD8, (byte) 0xDD, (byte) 0xE8, (byte) 0xE0, (byte) 0x0A, (byte) 0x0A, (byte) 0x0A, (byte) 0x0A, (byte) 0xE8, (byte) 0x88, (byte) 0xE8, (byte) 0x08, (byte) 0xE8, (byte) 0x88, (byte) 0xE8, (byte) 0x08,
         (byte) 0x08, (byte) 0x4D, (byte) 0xE8, (byte) 0xE0, (byte) 0x0A, (byte) 0x0A, (byte) 0x0A, (byte) 0x0A, (byte) 0xE8, (byte) 0x88, (byte) 0xE8, (byte) 0x08, (byte) 0xE8, (byte) 0x88, (byte) 0xE8, (byte) 0x08,
     };
+
+    static {
+        RomChecksum.verify(DATA, 0, DATA.length, "B72A2C70", "DiskLogicSequencerRom");
+    }
 
     /**
      * Reads one byte (0-255) at {@code offset} (0-255) within this table.

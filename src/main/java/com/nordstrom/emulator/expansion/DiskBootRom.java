@@ -1,6 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.AddressRangeHandler;
+import com.nordstrom.emulator.system.RomChecksum;
 
 /**
  * The Disk II controller's P5 boot ROM (Apple part number 341-0027-A),
@@ -22,6 +23,8 @@ import com.nordstrom.emulator.system.AddressRangeHandler;
  * reasoning already applied to
  * {@link com.nordstrom.emulator.system.RamHandler}. Writes are silently
  * ignored, matching how real ROM has no write circuitry to speak of.
+ * The checksum above is verified at class-load time, not just claimed
+ * in this comment -- see the static initializer below.
  */
 public final class DiskBootRom implements AddressRangeHandler {
 
@@ -43,6 +46,10 @@ public final class DiskBootRom implements AddressRangeHandler {
         (byte) 0x03, (byte) 0x2A, (byte) 0x5E, (byte) 0x00, (byte) 0x03, (byte) 0x2A, (byte) 0x91, (byte) 0x26, (byte) 0xC8, (byte) 0xD0, (byte) 0xEE, (byte) 0xE6, (byte) 0x27, (byte) 0xE6, (byte) 0x3D, (byte) 0xA5,
         (byte) 0x3D, (byte) 0xCD, (byte) 0x00, (byte) 0x08, (byte) 0xA6, (byte) 0x2B, (byte) 0x90, (byte) 0xDB, (byte) 0x4C, (byte) 0x01, (byte) 0x08, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00,
     };
+
+    static {
+        RomChecksum.verify(DATA, 0, DATA.length, "CE7144F6", "DiskBootRom");
+    }
 
     @Override
     public int read(int offset) {

@@ -44,7 +44,12 @@ final class ExpansionRomArbiter {
 
     /** Called whenever slot {@code slotNum}'s own ROM is accessed -- sets its latch if it wants the expansion window. Never clears any other slot's latch. */
     void noteOwnRomAccessed(int slotNum) {
-        if (slots[slotNum].wantsExpansionRom()) {
+        SlotCard card = slots[slotNum];
+        if (card == null) {
+            throw new IllegalStateException("noteOwnRomAccessed(" + slotNum + ") called for an empty slot -- "
+                + "this indicates a bug in the caller, which should have confirmed a card is present first");
+        }
+        if (card.wantsExpansionRom()) {
             latch[slotNum] = true;
         }
     }

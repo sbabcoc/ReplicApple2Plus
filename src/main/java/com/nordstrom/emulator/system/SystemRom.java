@@ -43,10 +43,21 @@ final class SystemRom {
                 throw new IllegalStateException(
                     "system-rom.rom is missing from the classpath -- this is a packaging bug");
             }
-            return in.readAllBytes();
+            byte[] data = in.readAllBytes();
+            verify(data);
+            return data;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to load system-rom.rom", e);
         }
+    }
+
+    private static void verify(byte[] data) {
+        RomChecksum.verify(data, 0x0000, 0x800, "6F05F949", "SystemRom $D000-$D7FF (341-0011)");
+        RomChecksum.verify(data, 0x0800, 0x800, "1F08087C", "SystemRom $D800-$DFFF (341-0012)");
+        RomChecksum.verify(data, 0x1000, 0x800, "2B8D9A89", "SystemRom $E000-$E7FF (341-0013)");
+        RomChecksum.verify(data, 0x1800, 0x800, "5719871A", "SystemRom $E800-$EFFF (341-0014)");
+        RomChecksum.verify(data, 0x2000, 0x800, "9A04EECF", "SystemRom $F000-$F7FF (341-0015)");
+        RomChecksum.verify(data, 0x2800, 0x800, "079589C4", "SystemRom $F800-$FFFF (341-0020-00)");
     }
 
     /** Reads one byte (0-255) at {@code offset} (0-$2FFF) within this 12KB image. */

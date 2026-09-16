@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.RomChecksum;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -45,9 +47,26 @@ final class IntegerBasicFirmwareCardRom {
                 throw new IllegalStateException(
                     "integer-basic-firmware-card.rom is missing from the classpath -- this is a packaging bug");
             }
-            return in.readAllBytes();
+            byte[] data = in.readAllBytes();
+            verify(data);
+            return data;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to load integer-basic-firmware-card.rom", e);
+        }
+    }
+
+    private static void verify(byte[] data) {
+        RomChecksum.verify(data, 0x0000, 0x800, "4234E88A", "IntegerBasicFirmwareCardRom $D000-$D7FF (341-0016)");
+        RomChecksum.verify(data, 0x1000, 0x800, "C0A4AD3B", "IntegerBasicFirmwareCardRom $E000-$E7FF (341-0001)");
+        RomChecksum.verify(data, 0x1800, 0x800, "A99C2CF6", "IntegerBasicFirmwareCardRom $E800-$EFFF (341-0002)");
+        RomChecksum.verify(data, 0x2000, 0x800, "62230D38", "IntegerBasicFirmwareCardRom $F000-$F7FF (341-0003)");
+        RomChecksum.verify(data, 0x2800, 0x800, "020A86D0", "IntegerBasicFirmwareCardRom $F800-$FFFF (341-0004)");
+        for (int i = 0x800; i < 0x1000; i++) {
+            if (data[i] != 0) {
+                throw new IllegalStateException("IntegerBasicFirmwareCardRom $D800-$DFFF should be empty "
+                    + "(matching real base Apple II hardware) but has a non-zero byte at offset $"
+                    + Integer.toHexString(i) + " -- this resource is corrupted or was substituted for the wrong file.");
+            }
         }
     }
 
