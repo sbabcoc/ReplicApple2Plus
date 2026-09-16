@@ -21,6 +21,7 @@ plugins {
 
     id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
     id 'pl.allegro.tech.build.axion-release' version '1.18.16'
+    id 'org.beryx.runtime' version '1.12.7'
 }
 
 group = 'com.nordstrom.ui-tools'
@@ -32,6 +33,13 @@ repositories {
     mavenCentral()
 }
 
+/*
+ * Credential lookup, identical in spirit and mechanism to the pattern
+ * used across Scott's other Java projects (e.g. selenium-grid-manager):
+ * reads ~/.m2/settings.xml, decrypting any encrypted value found there
+ * via ~/.m2/settings-security.xml, so no credentials ever need to live
+ * in this file or in plaintext in a shell history.
+ */
 def getMavenServer(String serverId) {
     def settingsFile = new File(System.getProperty("user.home"), ".m2/settings.xml")
     if (!settingsFile.exists()) return null
@@ -74,6 +82,14 @@ scmVersion {
     }
 }
 
+/*
+ * Version resolution: prefers an explicitly-supplied artifactVersion
+ * property over the git-tag-derived scmVersion. Not currently exercised
+ * by anything in this project (there is no bare, tag-less distribution
+ * to build from yet), but this is the same fallback selenium-grid-manager
+ * relies on for exactly that situation, so it's included now rather than
+ * discovered as a gap later if one is ever built.
+ */
 def resolvedVersion = project.hasProperty('artifactVersion')
         ? project.property('artifactVersion').toString()
         : scmVersion.version
@@ -90,6 +106,49 @@ java {
 application {
     // adjust once the CPU/bus/scheduler classes have a real entry point
     mainClass = 'com.nordstrom.emulator.Apple2Plus'
+}
+
+/*
+ * Packaging: org.beryx.runtime, NOT org.beryx.jlink. This project has no
+ * module-info.java anywhere -- and shouldn't get one, since the dynamic
+ * plugin-loading architecture (PluginLoader, CardTypes) depends on open
+ * class loading that JPMS's strict module boundaries actively work
+ * against. org.beryx.jlink targets fully modularized applications;
+ * org.beryx.runtime is the sibling plugin built specifically for
+ * non-modular ones, and still produces real jlink runtime images and
+ * jpackage installers -- see badass-runtime-plugin.beryx.org.
+ *
+ * jpackage cannot cross-build: running it produces an installer only
+ * for the platform it runs on (.deb/.rpm on Linux, .msi/.exe on
+ * Windows, .dmg/.pkg on macOS) -- there is no way to build all three
+ * from one machine. Run `./gradlew jpackage` separately on each
+ * platform.
+ */
+
+/*
+ * jpackage's --app-version has real, platform-specific format
+ * restrictions -- Windows MSI versioning in particular expects a plain
+ * numeric x.y.z(.w) form and rejects a SemVer suffix like "-SNAPSHOT"
+ * outright. resolvedVersion legitimately carries that suffix before the
+ * first tagged release, so it is NOT safe to pass to jpackage directly
+ * -- this is the actual current state of this project, not a
+ * hypothetical one. Stripping at the first '-' keeps the numeric part
+ * jpackage accepts everywhere; falling back to "0.0.1" (jpackage
+ * rejects an all-zero version) covers the case where resolvedVersion
+ * doesn't start with a digit at all.
+ */
+def jpackageSafeVersion = (resolvedVersion =~ /^\d[\d.]*/).with { it.find() ? it.group() : '0.0.1' }
+
+runtime {
+    modules = ['java.desktop'] // Swing; re-run the suggestModules task if new JDK APIs are added later
+    options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
+
+    jpackage {
+        imageName = 'ReplicApple2Plus'
+        installerName = 'ReplicApple2Plus'
+        appVersion = jpackageSafeVersion
+        installerOptions = ['--vendor', 'Scott Babcock']
+    }
 }
 
 tasks.named('jar', Jar) {

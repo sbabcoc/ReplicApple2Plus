@@ -38,28 +38,26 @@ import com.nordstrom.emulator.MemoryBus;
  * <p>
  * Handles:
  * <ul>
+ *   <li>$C030-$C03F: speaker toggle ({@link SpeakerToggle})</li>
  *   <li>$0000-$BFFF: main RAM ({@link RamHandler})</li>
  *   <li>$C050-$C05F: video mode switches ({@link VideoSoftSwitches})</li>
  *   <li>$C080-$C08F: slot 0's I/O switches ({@link SlotZeroIoHandler})</li>
  *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
  *   <li>$C100-$C7FF: slots 1-7's ROM ({@link SlotRomHandler})</li>
  *   <li>$C800-$CFFF: the shared expansion ROM window ({@link ExpansionRomHandler}, via the shared {@link ExpansionRomArbiter}) -- slots 1-7 only</li>
- *   <li>$D000-$FFFF: slot 0's bank-switched RAM if it wants one ({@link SlotZeroBankingHandler}), else the (not yet built) system ROM</li>
+ *   <li>$D000-$FFFF: slot 0's bank-switched RAM if it wants one ({@link SlotZeroBankingHandler}), else the system ROM directly ({@link SystemRomHandler})</li>
  * </ul>
- * Everything else -- $C000-$C04F and $C060-$C07F (general/keyboard
- * switches) -- is registered as a {@link NotYetImplementedHandler},
- * naming the specific missing subsystem. Building the real one later
- * means changing exactly one registration line here; nothing about
- * {@link AddressSpace}, the CPU, or any other region's handler needs to
- * change at all.
+ * Everything else -- $C000-$C02F, $C040-$C04F, and $C060-$C07F
+ * (general/keyboard switches) -- is registered as a
+ * {@link NotYetImplementedHandler}, naming the specific missing
+ * subsystem. Building the real one later means changing exactly one
+ * registration line here; nothing about {@link AddressSpace}, the CPU,
+ * or any other region's handler needs to change at all.
  */
 public final class MotherboardBus implements MemoryBus {
 
     private static final String GENERAL_SWITCHES_GAP =
-        "General/keyboard soft switches ($C000-$C04F, $C060-$C07F) are not yet implemented";
-    private static final String SYSTEM_ROM_GAP =
-        "The Apple II+ system ROM ($D000-$FFFF with no slot-0 card overriding it) "
-        + "is not yet a loadable resource in this project";
+        "General/keyboard soft switches ($C000-$C02F, $C040-$C04F, $C060-$C07F) are not yet implemented";
 
     private final AddressSpace addressSpace = new AddressSpace();
 
@@ -75,7 +73,9 @@ public final class MotherboardBus implements MemoryBus {
 
         addressSpace.register(0x0000, 0xBFFF, new RamHandler(0xC000));
 
-        addressSpace.register(0xC000, 0xC04F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
+        addressSpace.register(0xC000, 0xC02F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
+        addressSpace.register(0xC030, 0xC03F, new SpeakerToggle());
+        addressSpace.register(0xC040, 0xC04F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
         addressSpace.register(0xC050, 0xC05F, new VideoSoftSwitches());
         addressSpace.register(0xC060, 0xC07F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
 
@@ -88,7 +88,7 @@ public final class MotherboardBus implements MemoryBus {
 
         AddressRangeHandler upperMemory = (slots[0] != null && slots[0].wantsSlotZeroBanking())
             ? new SlotZeroBankingHandler(slots[0])
-            : new NotYetImplementedHandler(SYSTEM_ROM_GAP);
+            : new SystemRomHandler();
         addressSpace.register(0xD000, 0xFFFF, upperMemory);
     }
 

@@ -22,9 +22,10 @@ through the address-space design described below.
 **The NMOS 6502 CPU core is complete and independently verified.** A real,
 working peripheral architecture exists on top of it: a generic memory bus,
 genuine plugin discovery and dynamic loading, and several real, verified
-peripherals wired into a live memory map. What's still missing is the
-top-level object that assembles all of this into something that actually
-boots — there is no `SystemClock` and no `Apple2Plus` yet.
+peripherals wired into a live memory map. `SystemClock` now drives the CPU
+with exact cycle accounting. What's still missing is the top-level object
+that actually assembles a bootable machine — `Apple2Plus` is currently
+just a placeholder window proving out the packaging pipeline (see below).
 
 ### What's implemented
 
@@ -74,15 +75,21 @@ catalog — regenerate it, don't trust it to stay current).
 - **`Disk2Controller`** — the first real `SlotCard` in this project. The
   boot ROM and all 16 soft switches (phase stepper, motor, drive select,
   Q6/Q7 mode latches) are fully implemented; actual bit-level disk data
-  through Q6/Q7 is a named, thrown gap pending a `SystemClock` to drive
-  the LSS sequencer and a WOZ bitstream parser, neither of which exist
-  yet. `RemovableMediaDrive` tracks which image is in which drive today,
-  without yet parsing what's inside it.
+  through Q6/Q7 is a named, thrown gap pending `SystemClock` actually
+  being wired to drive the LSS sequencer and a WOZ bitstream parser,
+  neither of which exist yet. `RemovableMediaDrive` tracks which image
+  is in which drive today, without yet parsing what's inside it.
 - **`VideoSoftSwitches`** — the `$C050`-`$C05F` video mode switches
   (text/graphics, full/mixed, page1/page2, lo/hi-res, and the four
   annunciators) are a complete implementation; there is no equivalent
   deferred half, since none of these addresses expose data real software
   reads back.
+- **`SpeakerToggle`** — the `$C030`-`$C03F` speaker toggle is a complete
+  implementation: a single flip-flop, any access anywhere in the
+  16-byte window flips it (unlike `VideoSoftSwitches`' eight distinct
+  per-offset flags, there's only one flag here, since there's only one
+  speaker). Real audio synthesis -- turning access timing into an
+  actual waveform -- has nothing to consume it yet.
 - **`LanguageCard`** — a genuine expansion card occupying slot 0 (real,
   physical, and electrically special: no `$Cn00`-`$CnFF` ROM window,
   but the only slot that can bank-switch `$D000`-`$FFFF`, via
@@ -103,6 +110,20 @@ catalog — regenerate it, don't trust it to stay current).
   II+'s own ROM contents just to say "not me" (see `SlotCard`'s
   `readSlotZeroBank`) -- that fallback is `SlotZeroBankingHandler`'s
   job, motherboard-level dispatch, not the card's.
+- **`SystemClock`** drives the CPU with exact cycle accounting, and
+  nothing more -- deliberately no peripheral hooks (nothing real exists
+  yet to hook in) and deliberately no real-time throttling (a genuinely
+  separate concern from cycle-accurate execution, left to whatever
+  drives this class). It does not attempt to interleave execution with
+  video at the sub-instruction, alternating-half-cycle level real
+  hardware uses to share RAM -- that would mean rewriting the CPU
+  core's opcode executors into per-cycle micro-steps for no
+  software-visible benefit, since that scheme exists purely so video
+  and CPU never electrically contend for the same RAM cell, which is
+  invisible to software either way. Verified to change nothing about
+  CPU behavior: driving the full Klaus2m5 functional test through
+  `SystemClock` traps at the identical address after the identical
+  step and cycle counts as driving the CPU directly.
 
 ### Deliberately not implemented
 
@@ -124,15 +145,23 @@ catalog — regenerate it, don't trust it to stay current).
   non-bank-switched ROM set selected by a plain two-address toggle, not
   bank-switched RAM. Also occupies slot 0, mutually exclusive with
   `LanguageCard`.
-- **General/keyboard soft switches** (`$C000`-`$C04F`, `$C060`-`$C07F`) and
-  **floating-bus emulation** (what an empty slot or an ownerless expansion
-  window actually returns) are both named, thrown gaps — the latter
-  depends on a video scanner that doesn't exist, the former hasn't been
-  designed yet at all.
-- **`SystemClock` and `Apple2Plus`** — no per-cycle scheduler and no
-  top-level object assembling the CPU, bus, and slots into something that
-  boots. This is the actual remaining gap between "a complete CPU and a
-  working peripheral architecture" and "a running emulator."
+- **General/keyboard soft switches** (`$C000`-`$C02F`, `$C040`-`$C04F`,
+  `$C060`-`$C07F` -- the speaker toggle at `$C030`-`$C03F` is done, see
+  above) and **floating-bus emulation** (what an empty slot or an
+  ownerless expansion window actually returns) are both named, thrown
+  gaps — the latter depends on a video scanner that doesn't exist, the
+  former hasn't been designed yet at all. The keyboard register
+  specifically also needs a real input source, which doesn't exist
+  either -- unlike the speaker toggle, it isn't self-contained even
+  once designed. The paddle inputs need genuine cycle-accurate RC-timer
+  emulation, not just address decoding.
+- **`Apple2Plus`** currently exists only as a placeholder Swing window
+  with no emulator content -- built specifically to validate the
+  `jlink`/`jpackage` packaging pipeline (see [Packaging](#packaging))
+  on real hardware before a complete application rides on top of an
+  unvalidated assumption. It will become the real application window
+  once real video/keyboard/audio wiring exist and something actually
+  drives `SystemClock` continuously.
 
 ## Verification
 
@@ -183,12 +212,47 @@ Artifact publishing (Sonatype Central Portal, GPG signing) is configured in
 - `./gradlew runSlotConfigTemplate [-PpluginsDir=DIR] [-PoutputFile=FILE]` —
   generate a starter slot configuration file.
 
+## Packaging
+
+```
+./gradlew jpackage
+```
+
+Produces a native, self-contained installer -- no Java installation
+required on the target machine -- via the `org.beryx.runtime` plugin,
+which wraps `jlink` (custom minimal JRE) and `jpackage` (platform
+installer). **Not** `org.beryx.jlink`: this project has no
+`module-info.java` and shouldn't get one, since the dynamic plugin-loading
+architecture (`PluginLoader`, `CardTypes`) depends on open class loading
+that JPMS's module boundaries actively restrict. `org.beryx.runtime` is
+built specifically for non-modular applications like this one.
+
+`jpackage` cannot cross-build: it only produces an installer for the
+platform it runs on. Building all three requires running the same command
+on each:
+
+| Platform | Output |
+|---|---|
+| Linux | `.deb` (needs `fakeroot` installed) or `.rpm` |
+| Windows | `.msi` or `.exe` |
+| macOS | `.dmg` or `.pkg` |
+
+The full pipeline -- compiled classes through a `jlink` runtime image,
+`jpackage`, and an actual installed, launched application -- has been
+validated end-to-end for Linux `.deb` output.
+
+Related tasks: `./gradlew runtime` (just the custom JRE image, no
+installer) and `./gradlew jpackageImage` (an installable application
+directory, skipping the installer format).
+
 ## Project layout
 
 - `src/main/java/com/nordstrom/emulator/` — `MemoryBus` and
   `InterruptLines`, the two contracts shared between `cpu` and `system`
   (deliberately in neither package, so neither depends sideways on the
-  other for a cross-cutting hardware concept)
+  other for a cross-cutting hardware concept), and `Apple2Plus`, the
+  application entry point (currently a packaging-pipeline placeholder,
+  see [Packaging](#packaging))
 - `src/main/java/com/nordstrom/emulator/cpu/` — the CPU core
 - `src/main/java/com/nordstrom/emulator/expansion/` — actual expansion
   card implementations and their verified ROM data: `Disk2Controller`
