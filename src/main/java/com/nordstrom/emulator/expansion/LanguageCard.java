@@ -2,6 +2,7 @@ package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.SlotCard;
 
+import java.util.OptionalInt;
 import java.util.Properties;
 import java.util.Set;
 
@@ -18,10 +19,12 @@ import java.util.Set;
  * Real hardware layout: two independently selectable 4KB RAM banks at
  * $D000-$DFFF (bank 1 and bank 2 -- only one is mapped at a time), plus
  * a single, non-banked 8KB RAM region at $E000-$FFFF. This card has no
- * ROM content of its own -- when its read source selects "ROM," what
- * shows through is the Apple II+'s own system ROM, unintercepted (a
- * still-not-yet-built resource, so that path currently throws, naming
- * the gap rather than fabricating data). Bank selection only affects
+ * ROM content of its own -- when its read source selects "ROM," this
+ * card simply isn't intercepting that address, and {@link #readSlotZeroBank}
+ * returns empty accordingly. What actually shows through when that
+ * happens is a question for whatever routes to this card, not for this
+ * card itself -- deliberately: a pure RAM expansion has no business
+ * knowing the Apple II+'s own ROM contents. Bank selection only affects
  * the RAM side.
  * <p>
  * Every access to this card's $C0n0-$C0nF I/O switches (n=0, since this
@@ -48,9 +51,6 @@ public final class LanguageCard implements SlotCard {
 
     private enum WriteState { PROTECTED_IDLE, PROTECTED_ARMED, ENABLED }
 
-    private static final String ROM_GAP =
-        "Reading the system ROM through the language card depends on a system-ROM "
-        + "resource this project doesn't have yet.";
     private static final String NO_SLOT_ZERO_ROM_WINDOW =
         "Slot 0 has no $Cn00-$CnFF ROM window -- this should never actually be called";
 
@@ -99,11 +99,11 @@ public final class LanguageCard implements SlotCard {
     }
 
     @Override
-    public int readSlotZeroBank(int offset) {
+    public OptionalInt readSlotZeroBank(int offset) {
         if (!readRam) {
-            throw new UnsupportedOperationException(ROM_GAP);
+            return OptionalInt.empty(); // not intercepting -- the caller falls through to the system ROM
         }
-        return ramAt(offset) & 0xFF;
+        return OptionalInt.of(ramAt(offset) & 0xFF);
     }
 
     @Override

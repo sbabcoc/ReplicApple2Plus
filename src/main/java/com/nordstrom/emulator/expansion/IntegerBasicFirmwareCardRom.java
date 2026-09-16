@@ -28,10 +28,12 @@ import java.io.UncheckedIOException;
  *   $F000-$F7FF  341-0003  Integer BASIC              CRC32 62230D38  SHA1 f268022da555e4c809ca1ae9e5d2f00b388ff61c
  *   $F800-$FFFF  341-0004  Original (non-autostart) Monitor  CRC32 020A86D0  SHA1 52a18bd578a4694420009cad7a7a5779a8c00226
  * </pre>
- * At 12KB, this is too large for a {@code byte[]} array literal -- see
- * {@link LanguageCardRom}'s former Javadoc, or the sibling reasoning in
- * {@code DiskBootRom} -- so it's loaded from a bundled classpath
- * resource instead.
+ * At 12KB, this is too large for a {@code byte[]} array literal -- that
+ * would compile to well over the JVM's 64KB-per-method bytecode limit
+ * (one store instruction per element), the same constraint that applies
+ * to {@code DiskBootRom}'s much smaller data at a different scale.
+ * Loaded instead from a bundled classpath resource, the standard
+ * approach for embedded binary data this size.
  */
 final class IntegerBasicFirmwareCardRom {
 

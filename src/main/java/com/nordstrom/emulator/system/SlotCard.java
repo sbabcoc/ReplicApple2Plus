@@ -3,6 +3,7 @@ package com.nordstrom.emulator.system;
 import com.nordstrom.emulator.InterruptLines;
 
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.Properties;
 import java.util.Set;
 
@@ -190,11 +191,17 @@ public interface SlotCard {
     /**
      * Reads within $D000-$FFFF, offset 0-$2FFF. Only called while this
      * card occupies slot 0 and {@link #wantsSlotZeroBanking} is true.
+     * An empty result means this card isn't intercepting this address
+     * right now -- real hardware terms, it has simply stopped driving
+     * the bus -- and the caller falls through to the Apple II+'s own
+     * system ROM. A card with no ROM content of its own (like a pure
+     * RAM expansion) has no reason to know or care what that fallback
+     * actually is; that's the caller's concern, not this card's.
      *
      * @param offset 0-$2FFF within $D000-$FFFF
-     * @return the byte at that offset
+     * @return the byte at that offset, or empty to fall through to the system ROM
      */
-    default int readSlotZeroBank(int offset) {
+    default OptionalInt readSlotZeroBank(int offset) {
         throw new UnsupportedOperationException(getClass().getName() + " does not provide slot-0 banking");
     }
 

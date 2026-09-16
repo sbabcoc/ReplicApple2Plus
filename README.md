@@ -90,11 +90,19 @@ catalog — regenerate it, don't trust it to stay current).
   switches and the full `$D000`-`$FFFF` banked RAM path (two independent
   4K banks plus a single 8K bank, the real two-consecutive-qualifying-
   reads write-enable state machine) are fully implemented and real RAM
-  read/write works end-to-end. Reading the system ROM through this card
-  is a named, thrown gap pending a loadable system-ROM resource. An
-  empty slot 0 fails the same way an empty slot 1-7 does, and
-  `MotherboardBus` dispatches to whatever actually occupies `slots[0]`
-  rather than assuming any specific card is there.
+  read/write works end-to-end. An empty slot 0 fails the same way an
+  empty slot 1-7 does, and `MotherboardBus` dispatches to whatever
+  actually occupies `slots[0]` rather than assuming any specific card
+  is there.
+- **`SystemRom`** — the Apple II+'s own motherboard ROM at
+  `$D000`-`$FFFF` (Applesoft BASIC and the Autostart Monitor), verified
+  chip-by-chip against MAME's own source. This is what shows through
+  when nothing overrides it -- an empty slot 0, or any slot-0 card
+  reporting it isn't intercepting a given address. `LanguageCard` itself
+  never references this class: it has no business knowing the Apple
+  II+'s own ROM contents just to say "not me" (see `SlotCard`'s
+  `readSlotZeroBank`) -- that fallback is `SlotZeroBankingHandler`'s
+  job, motherboard-level dispatch, not the card's.
 
 ### Deliberately not implemented
 
@@ -109,10 +117,6 @@ catalog — regenerate it, don't trust it to stay current).
   here at all — only a per-card latch — and more than one latch being set
   is a genuine, historically-documented electrical failure mode, not
   something with a single correct answer.
-- **The system-ROM resource** (the Apple II+'s Applesoft BASIC and
-  Autostart Monitor ROMs) doesn't exist as a loadable resource yet —
-  sourced and checksum-verified against MAME's own source, but not yet
-  turned into Java data the way the disk ROMs were.
 - **`IntegerBasicFirmwareCard`** doesn't exist as a class at all yet,
   though its ROM data does (`IntegerBasicFirmwareCardRom`, verified
   against Apple's own 1981 Level II Service Manual and MAME's source) --
@@ -149,6 +153,8 @@ not a conclusion.
 - **The disk ROMs** (`DiskBootRom`, `DiskLogicSequencerRom`) are verified
   byte-for-byte against two independent sources each time: a hardware PROM
   dumping project and MAME's own source, not just one or the other.
+- **`SystemRom`** is verified the same way, chip-by-chip, against MAME's
+  own source for the `apple2p` driver.
 
 Run all tests with:
 
@@ -193,9 +199,13 @@ Artifact publishing (Sonatype Central Portal, GPG signing) is configured in
   (`AddressSpace`, `MotherboardBus`, and the individual region and
   dispatch handlers), the peripheral architecture (`SlotCard`,
   `CardTypes`, `PluginLoader`, `Install`, `CardCatalog`,
-  `SlotCardLoader`, `SlotConfigTemplate`, `RemovableMediaDrive`), and the
+  `SlotCardLoader`, `SlotConfigTemplate`, `RemovableMediaDrive`), the
   one true motherboard-built-in peripheral that isn't a slot card at all
-  (`VideoSoftSwitches`)
+  (`VideoSoftSwitches`), and the Apple II+'s own system ROM
+  (`SystemRom`, `SystemRomHandler`) -- package-private, like its sibling
+  ROM classes in `expansion`: `LanguageCard` never references it at all,
+  reporting only that it isn't intercepting a given address and leaving
+  the actual fallback to `SlotZeroBankingHandler`
 - `src/test/java/` — verification tests, see above
 - `src/test/resources/` — the Klaus2m5 test ROM (binary and source — see
   NOTICE for its license)
@@ -230,6 +240,13 @@ knowing before reading the source:
   purely read and written at rest (RAM, ROM), it's a real, free memory
   reduction with the sign-conversion localized to exactly the point where
   storage meets the rest of the system.
+- **A card knows only its own bus interface, never a sibling's
+  internals.** Real hardware components don't reach across the bus to
+  consult each other's contents; a card that isn't driving a given
+  address just says so and steps aside. `LanguageCard` reports "not
+  intercepting" (`OptionalInt.empty()` from `readSlotZeroBank`) rather
+  than reaching for `SystemRom` itself — resolving that fallback is
+  motherboard-level dispatch's job, not any individual card's.
 - **Comments carry rationale, not narration.** A comment should explain
   why the current code is shaped the way it is — a hardware quirk, a
   real constraint, a genuine trade-off — not recount how it got there
