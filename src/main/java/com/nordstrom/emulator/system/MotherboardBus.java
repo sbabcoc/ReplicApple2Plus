@@ -38,16 +38,20 @@ import com.nordstrom.emulator.MemoryBus;
  * <p>
  * Handles:
  * <ul>
+ *   <li>$C000-$C00F: keyboard data ({@link KeyboardDataHandler})</li>
+ *   <li>$C010-$C01F: keyboard strobe clear ({@link KeyboardStrobeHandler})</li>
  *   <li>$C030-$C03F: speaker toggle ({@link SpeakerToggle})</li>
  *   <li>$0000-$BFFF: main RAM ({@link RamHandler})</li>
  *   <li>$C050-$C05F: video mode switches ({@link VideoSoftSwitches})</li>
+ *   <li>$C060-$C06F: paddle reads, offsets 4-7 only ({@link PaddleReadHandler})</li>
+ *   <li>$C070-$C07F: paddle trigger strobe ({@link PaddleStrobeHandler})</li>
  *   <li>$C080-$C08F: slot 0's I/O switches ({@link SlotZeroIoHandler})</li>
  *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
  *   <li>$C100-$C7FF: slots 1-7's ROM ({@link SlotRomHandler})</li>
  *   <li>$C800-$CFFF: the shared expansion ROM window ({@link ExpansionRomHandler}, via the shared {@link ExpansionRomArbiter}) -- slots 1-7 only</li>
  *   <li>$D000-$FFFF: slot 0's bank-switched RAM if it wants one ({@link SlotZeroBankingHandler}), else the system ROM directly ({@link SystemRomHandler})</li>
  * </ul>
- * Everything else -- $C000-$C02F, $C040-$C04F, and $C060-$C07F
+ * Everything else -- $C020-$C02F and $C040-$C04F
  * (general/keyboard switches) -- is registered as a
  * {@link NotYetImplementedHandler}, naming the specific missing
  * subsystem. Building the real one later means changing exactly one
@@ -57,9 +61,13 @@ import com.nordstrom.emulator.MemoryBus;
 public final class MotherboardBus implements MemoryBus {
 
     private static final String GENERAL_SWITCHES_GAP =
-        "General/keyboard soft switches ($C000-$C02F, $C040-$C04F, $C060-$C07F) are not yet implemented";
+        "General/keyboard soft switches ($C020-$C02F, $C040-$C04F) are not yet implemented";
 
     private final AddressSpace addressSpace = new AddressSpace();
+    private final KeyboardRegister keyboardRegister = new KeyboardRegister();
+    private final PaddleTimers paddleTimers = new PaddleTimers();
+    private final SpeakerToggle speakerToggle = new SpeakerToggle();
+    private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
 
     /**
      * Wires up the full Apple II+ memory map against {@code slots} (length 8, slot 0 included) -- typically the array {@link SlotCardLoader#load} just populated.
@@ -73,11 +81,14 @@ public final class MotherboardBus implements MemoryBus {
 
         addressSpace.register(0x0000, 0xBFFF, new RamHandler(0xC000));
 
-        addressSpace.register(0xC000, 0xC02F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
-        addressSpace.register(0xC030, 0xC03F, new SpeakerToggle());
+        addressSpace.register(0xC000, 0xC00F, new KeyboardDataHandler(keyboardRegister));
+        addressSpace.register(0xC010, 0xC01F, new KeyboardStrobeHandler(keyboardRegister));
+        addressSpace.register(0xC020, 0xC02F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
+        addressSpace.register(0xC030, 0xC03F, speakerToggle);
         addressSpace.register(0xC040, 0xC04F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
-        addressSpace.register(0xC050, 0xC05F, new VideoSoftSwitches());
-        addressSpace.register(0xC060, 0xC07F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
+        addressSpace.register(0xC050, 0xC05F, videoSoftSwitches);
+        addressSpace.register(0xC060, 0xC06F, new PaddleReadHandler(paddleTimers));
+        addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
         addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0]));
 
@@ -90,6 +101,53 @@ public final class MotherboardBus implements MemoryBus {
             ? new SlotZeroBankingHandler(slots[0])
             : new SystemRomHandler();
         addressSpace.register(0xD000, 0xFFFF, upperMemory);
+    }
+
+    /**
+     * The keyboard register wired into $C000-$C01F -- the only way anything
+     * outside this class can feed a real keypress in via
+     * {@link KeyboardRegister#keyPressed}, since this class has no
+     * dependency on any specific UI toolkit itself.
+     *
+     * @return this machine's keyboard register
+     */
+    public KeyboardRegister keyboardRegister() {
+        return keyboardRegister;
+    }
+
+    /**
+     * The paddle/joystick analog timers wired into $C060-$C07F -- how a
+     * real input source would set dial positions via
+     * {@link PaddleTimers#setPosition}, and how the running countdowns
+     * get ticked via {@link SystemClock#addCycleListener} once assembled
+     * with a real clock.
+     *
+     * @return this machine's paddle timers
+     */
+    public PaddleTimers paddleTimers() {
+        return paddleTimers;
+    }
+
+    /**
+     * The speaker toggle wired into $C030-$C03F -- how anything outside
+     * this class would observe toggle events for real audio synthesis,
+     * once something exists to do that.
+     *
+     * @return this machine's speaker toggle
+     */
+    public SpeakerToggle speakerToggle() {
+        return speakerToggle;
+    }
+
+    /**
+     * The video mode switches wired into $C050-$C05F -- how anything
+     * outside this class would read current video mode state for real
+     * rendering, once a video scanner exists to do that.
+     *
+     * @return this machine's video mode switches
+     */
+    public VideoSoftSwitches videoSoftSwitches() {
+        return videoSoftSwitches;
     }
 
     /**

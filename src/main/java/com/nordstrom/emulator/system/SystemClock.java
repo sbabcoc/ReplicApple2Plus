@@ -2,6 +2,10 @@ package com.nordstrom.emulator.system;
 
 import com.nordstrom.emulator.cpu.Cpu6502;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.IntConsumer;
+
 /**
  * Drives a {@link Cpu6502} forward, one instruction at a time, with
  * exact cycle accounting.
@@ -21,13 +25,13 @@ import com.nordstrom.emulator.cpu.Cpu6502;
  * cycle counts this class accumulates are the real, unmodified values
  * {@link Cpu6502#step} already returns, not an approximation.
  * <p>
- * Deliberately has no notion of peripherals, listeners, or periodic
- * callbacks at all -- there is no real consumer to wire up yet
- * ({@code Disk2Controller}'s LSS ticking and any future video scanner
- * both still need to be built). Whichever of those lands first adds its
- * own specific hook here, sized to what it actually needs, rather than
- * this class guessing at a generic registration mechanism in advance of
- * any concrete requirement.
+ * {@link #addCycleListener} exists because it now has real, concrete
+ * consumers -- {@link PaddleTimers}' RC countdowns, and
+ * {@code Disk2Controller}'s still-not-yet-wired LSS ticking -- not
+ * because peripherals in general might someday want one. It's
+ * deliberately a plain list of callbacks, not a full registration
+ * system with names, priorities, or removal: nothing here needs any of
+ * that yet, and it can grow if something concrete ever does.
  * <p>
  * Deliberately does not throttle to real Apple II+ timing (~1.023 MHz)
  * either -- that is a genuinely separate concern from cycle-accurate
@@ -42,6 +46,7 @@ import com.nordstrom.emulator.cpu.Cpu6502;
 public final class SystemClock {
 
     private final Cpu6502 cpu;
+    private final List<IntConsumer> cycleListeners = new ArrayList<>();
     private long cycleCount;
     private volatile boolean running;
 
@@ -53,13 +58,27 @@ public final class SystemClock {
     }
 
     /**
-     * Executes exactly one CPU instruction and accumulates its exact cycle count.
+     * Registers a listener to be called after every {@link #step}, with
+     * the exact number of cycles that instruction just took.
+     *
+     * @param listener called with the elapsed cycle count after every step
+     */
+    public void addCycleListener(IntConsumer listener) {
+        cycleListeners.add(listener);
+    }
+
+    /**
+     * Executes exactly one CPU instruction, accumulates its exact cycle
+     * count, and notifies every registered cycle listener.
      *
      * @return the number of cycles that instruction took
      */
     public int step() {
         int cycles = cpu.step();
         cycleCount += cycles;
+        for (IntConsumer listener : cycleListeners) {
+            listener.accept(cycles);
+        }
         return cycles;
     }
 

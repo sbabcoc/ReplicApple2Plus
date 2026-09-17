@@ -90,6 +90,39 @@ catalog — regenerate it, don't trust it to stay current).
   per-offset flags, there's only one flag here, since there's only one
   speaker). Real audio synthesis -- turning access timing into an
   actual waveform -- has nothing to consume it yet.
+- **`KeyboardRegister`** — `$C000` (last key pressed) and `$C010`-`$C01F`
+  (clear the strobe) are a complete, verified implementation, including
+  the easy-to-miss detail that the key's ASCII value persists after the
+  strobe clears (only bit 7 changes). Deliberately doesn't model live
+  "any key down" status on `$C010`'s own return value -- that's real
+  IIe-and-later behavior, but multiple sources (including a filed
+  hardware-behavior bug report against a well-known emulator) treat it
+  as inconsistent to nonexistent on the original II/II+ this project
+  targets. Deliberately doesn't model autorepeat either -- a
+  timing-dependent behavior with no honest way to model it without a
+  driving clock behind it. Has no dependency on any UI toolkit at all;
+  `keyPressed(int)` is how a real input source, whatever it ends up
+  being, feeds this class -- reachable via `MotherboardBus.keyboardRegister()`.
+- **`PaddleTimers`** — `$C064`-`$C067` (read) and `$C070`-`$C07F`
+  (trigger) model the real hardware faithfully: four independent RC
+  one-shot countdowns sharing one strobe line, each non-retriggerable
+  while still running. That non-retriggerable detail isn't a minor
+  nuance -- it's *why* real software reading a second paddle right
+  after a first gets a skewed value (both timers started from the same
+  strobe, so time spent polling the first eats into the second's
+  countdown), and this project's implementation reproduces that quirk
+  because the underlying structure is right, not because it's
+  special-cased. Ticked via `SystemClock.addCycleListener`, which
+  exists specifically because this needed it. The 0-255-to-cycles
+  conversion is calibrated to 2816 cycles full-scale -- not a generic
+  RC-formula guess (which would give a noticeably different ~3700 and
+  cause a full-scale read to wrap early), but the real, precisely
+  documented figure tied to the standard ROM `PREAD` routine's own
+  256-iteration, 11-cycle-per-iteration counting loop. Confirmed, not
+  just cited: assembling and running that actual historical ROM
+  routine (real disassembled bytes) against this implementation
+  produces an *exact* match between the position set and the value the
+  real routine computes, across the full 0-255 range.
 - **`LanguageCard`** — a genuine expansion card occupying slot 0 (real,
   physical, and electrically special: no `$Cn00`-`$CnFF` ROM window,
   but the only slot that can bank-switch `$D000`-`$FFFF`, via
@@ -110,11 +143,12 @@ catalog — regenerate it, don't trust it to stay current).
   II+'s own ROM contents just to say "not me" (see `SlotCard`'s
   `readSlotZeroBank`) -- that fallback is `SlotZeroBankingHandler`'s
   job, motherboard-level dispatch, not the card's.
-- **`SystemClock`** drives the CPU with exact cycle accounting, and
-  nothing more -- deliberately no peripheral hooks (nothing real exists
-  yet to hook in) and deliberately no real-time throttling (a genuinely
-  separate concern from cycle-accurate execution, left to whatever
-  drives this class). It does not attempt to interleave execution with
+- **`SystemClock`** drives the CPU with exact cycle accounting.
+  `addCycleListener` exists now because it has a real, concrete
+  consumer (`PaddleTimers`' RC countdowns) -- still deliberately no
+  real-time throttling (a genuinely separate concern from
+  cycle-accurate execution, left to whatever drives this class). It
+  does not attempt to interleave execution with
   video at the sub-instruction, alternating-half-cycle level real
   hardware uses to share RAM -- that would mean rewriting the CPU
   core's opcode executors into per-cycle micro-steps for no
@@ -145,16 +179,16 @@ catalog — regenerate it, don't trust it to stay current).
   non-bank-switched ROM set selected by a plain two-address toggle, not
   bank-switched RAM. Also occupies slot 0, mutually exclusive with
   `LanguageCard`.
-- **General/keyboard soft switches** (`$C000`-`$C02F`, `$C040`-`$C04F`,
-  `$C060`-`$C07F` -- the speaker toggle at `$C030`-`$C03F` is done, see
-  above) and **floating-bus emulation** (what an empty slot or an
-  ownerless expansion window actually returns) are both named, thrown
-  gaps — the latter depends on a video scanner that doesn't exist, the
-  former hasn't been designed yet at all. The keyboard register
-  specifically also needs a real input source, which doesn't exist
-  either -- unlike the speaker toggle, it isn't self-contained even
-  once designed. The paddle inputs need genuine cycle-accurate RC-timer
-  emulation, not just address decoding.
+- **General/keyboard soft switches** (`$C020`-`$C02F`, `$C040`-`$C04F` --
+  the speaker toggle at `$C030`-`$C03F`, the keyboard register at
+  `$C000`-`$C01F`, and the paddle timers at `$C060`-`$C07F` are all
+  done, see above) and **floating-bus emulation** (what an empty slot
+  or an ownerless expansion window actually returns) are both named,
+  thrown gaps — the latter depends on a video scanner that doesn't
+  exist, the former hasn't been designed yet at all. `$C061`-`$C063`
+  (joystick/paddle pushbuttons) is its own separate, still-undesigned
+  gap even though it shares a 16-byte block with the now-working
+  paddle reads.
 - **`Apple2Plus`** currently exists only as a placeholder Swing window
   with no emulator content -- built specifically to validate the
   `jlink`/`jpackage` packaging pipeline (see [Packaging](#packaging))
@@ -184,6 +218,11 @@ not a conclusion.
   dumping project and MAME's own source, not just one or the other.
 - **`SystemRom`** is verified the same way, chip-by-chip, against MAME's
   own source for the `apple2p` driver.
+- **`PaddleTimers`' cycle calibration** is verified by assembling and
+  running the actual historical Monitor ROM `PREAD` routine (real
+  disassembled bytes, not a re-implementation) against the real CPU
+  core, `SystemClock`, and `MotherboardBus` together -- an exact match
+  across the full 0-255 position range, not just a plausible one.
 
 Run all tests with:
 
