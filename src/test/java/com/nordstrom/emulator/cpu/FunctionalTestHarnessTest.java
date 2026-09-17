@@ -1,11 +1,11 @@
 package com.nordstrom.emulator.cpu;
 
+import com.nordstrom.emulator.MemoryBus;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
-
-import com.nordstrom.emulator.MemoryBus;
 
 import static org.junit.jupiter.api.Assertions.fail;
 

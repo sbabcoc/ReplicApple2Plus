@@ -1,9 +1,9 @@
 package com.nordstrom.emulator.cpu;
 
+import com.nordstrom.emulator.MemoryBus;
+
 import java.util.EnumMap;
 import java.util.Map;
-
-import com.nordstrom.emulator.MemoryBus;
 
 /**
  * Resolves each NMOS 6502 addressing mode against the current PC and index

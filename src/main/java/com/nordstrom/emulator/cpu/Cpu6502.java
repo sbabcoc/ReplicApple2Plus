@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.cpu;
 
+import com.nordstrom.emulator.InterruptLines;
 import com.nordstrom.emulator.MemoryBus;
 
 /**
@@ -7,8 +8,14 @@ import com.nordstrom.emulator.MemoryBus;
  * resolution and per-instruction cycle accounting are delegated to
  * {@link AddressingModeResolver} and {@link Opcodes} respectively, per
  * this project's table-driven-dispatch convention.
+ * <p>
+ * Implements {@link InterruptLines} directly -- its {@code raiseIrq}/
+ * {@code lowerIrq}/{@code raiseNmi}/{@code lowerNmi} methods already had
+ * exactly that shape for their own reasons, so a peripheral can be handed
+ * this object through that narrower interface with no adapter needed,
+ * giving it no access to anything else this class exposes.
  */
-public final class Cpu6502 {
+public final class Cpu6502 implements InterruptLines {
 
     /** Accumulator, and the X/Y index registers -- each an 8-bit value stored as plain int 0..255. */
     int a, x, y;
@@ -73,11 +80,13 @@ public final class Cpu6502 {
     private boolean nmiPending;         // set on a falling edge; consumed once serviced
 
     /** A device asserts IRQ. Level-sensitive: stays asserted as long as ANY caller has raised it and not yet lowered it. */
+    @Override
     public void raiseIrq() {
         irqRequestCount++;
     }
 
     /** The same device releases its IRQ assertion. */
+    @Override
     public void lowerIrq() {
         if (irqRequestCount > 0) {
             irqRequestCount--;
@@ -91,6 +100,7 @@ public final class Cpu6502 {
      * NOT a new edge and does not queue a second NMI -- matching real
      * hardware, where holding the line low never refires it.
      */
+    @Override
     public void raiseNmi() {
         nmiRequestCount++;
         if (nmiLineIdle) {
@@ -100,6 +110,7 @@ public final class Cpu6502 {
     }
 
     /** The same device releases its NMI assertion. Only once EVERY caller has released does the line return to idle, ready to detect the next edge. */
+    @Override
     public void lowerNmi() {
         if (nmiRequestCount > 0) {
             nmiRequestCount--;
