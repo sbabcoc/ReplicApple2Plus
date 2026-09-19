@@ -74,11 +74,60 @@ catalog — regenerate it, don't trust it to stay current).
 **Real, wired-in peripherals:**
 - **`Disk2Controller`** — the first real `SlotCard` in this project. The
   boot ROM and all 16 soft switches (phase stepper, motor, drive select,
-  Q6/Q7 mode latches) are fully implemented; actual bit-level disk data
-  through Q6/Q7 is a named, thrown gap pending `SystemClock` actually
-  being wired to drive the LSS sequencer and a WOZ bitstream parser,
-  neither of which exist yet. `RemovableMediaDrive` tracks which image
-  is in which drive today, without yet parsing what's inside it.
+  Q6/Q7 mode latches) are fully implemented. `RemovableMediaDrive.insert`
+  now genuinely parses a real WOZ2 disk image (`WozDiskImage`, see
+  below) rather than just tracking a path -- real, verified bit-level
+  track data is available today. `Disk2LogicSequencer` (see below) is
+  built and thoroughly verified, but not yet wired into this class --
+  Q6/Q7 mode changes don't yet reach it, nothing yet turns phase-stepper
+  state into a track position to read from, and nothing yet ticks it via
+  `SystemClock.addCycleListener` the way `PaddleTimers` and
+  `VideoScanner` already are. Reading the Q6/Q7 data latch (offsets
+  $C-$F) is still a named, thrown gap -- the hard, easy-to-get-wrong
+  piece is done, but real nibble reads don't work yet.
+- **`Disk2LogicSequencer`** — the actual state machine that converts a
+  disk bitstream pulse into shift-register (nibble) data, driven by
+  `DiskLogicSequencerRom`'s 256-byte table. A genuinely important
+  correction surfaced while building this: that ROM class's own,
+  previously-documented address-bit wiring
+  (`{state:4}{Q7,Q6:2}{latchMSB:1}{sense:1}`) had never actually been
+  verified against a working reference, and turned out to be wrong.
+  The real mapping was found by exhaustively searching all 8-bit
+  permutations and single-bit inversions (roughly 10.3 million
+  candidates) for the one that exactly reproduces a2kit's independent,
+  real-world Rust LSS implementation -- a unique match, not a guess:
+  MSB to LSB, `state[3], state[2], state[0], ~pulse, Q7, Q6, latch[7],
+  state[1]`. Confirmed two ways before trusting it: the underlying ROM
+  byte *values* are an exact multiset match against a2kit's decoded
+  table (genuinely the same ROM, differently addressed), and a
+  2000-pulse randomized trajectory comparison plus separate checks of
+  all four Q6/Q7 modes (including write-protect sense correctly
+  yielding `0xFF`) match a parallel Python reference implementing the
+  same corrected formula exactly, tick for tick.
+- **`WozDiskImage`** — parses a real WOZ2 disk image file: header, INFO,
+  TMAP, and TRKS chunks, exposing genuine bit-level per-quarter-track
+  access via `TrackBitStream`. Deliberately scoped to 5.25-inch disks
+  only -- the only kind a real Disk II drive reads -- so 3.5-inch
+  disks' different TMAP layout and the optional FLUX/WRIT chunks aren't
+  implemented at all. Handles two easy-to-miss real details precisely:
+  the bitstream is genuinely bit-level (a track's bit count is almost
+  never a multiple of 8, confirmed by testing against hand-constructed
+  24-bit and 11-bit patterns, not just byte-aligned ones), and bit order
+  within each stored byte is high to low, per the spec's own wording.
+  CRC32 verification reuses `java.util.zip.CRC32` (the same standard
+  algorithm `RomChecksum` already uses elsewhere in this project, not a
+  hand-ported version of the spec's own C table) -- confirmed
+  independently against the official CRC-32 test vector
+  (`CRC32("123456789") = 0xCBF43926`), not just checked for
+  self-consistency against this project's own test file. Unmapped
+  (0xFF) quarter-tracks return the spec's own recommended 51,200-bit
+  length but filled with zeros rather than the spec's randomized
+  "weak bits" -- a real, stated simplification, not a hidden one.
+  Verified against a hand-constructed, spec-compliant synthetic WOZ
+  file (a real WOZ test corpus exists but is hosted outside this
+  environment's network access) covering exact bit round-tripping,
+  wraparound at a track's true bit count, `seekTo`, corruption
+  detection, and bad-header detection.
 - **`VideoSoftSwitches`** — the `$C050`-`$C05F` video mode switches
   (text/graphics, full/mixed, page1/page2, lo/hi-res, and the four
   annunciators) are a complete implementation; there is no equivalent

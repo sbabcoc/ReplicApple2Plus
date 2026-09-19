@@ -17,7 +17,7 @@ import java.util.Set;
  * misread than Arabic ones, the same reasoning behind this project's own
  * name, {@code ReplicApple2Plus}.
  * <p>
- * This is a first slice, not a complete controller. Two things are
+ * This is a first slice, not a complete controller. Three things are
  * genuinely ready now and implemented for real:
  * <ul>
  *   <li>The boot ROM at $Cn00-$CnFF ({@link DiskBootRom}, already
@@ -27,12 +27,17 @@ import java.util.Set;
  *       latches themselves. These are static, well-documented hardware
  *       facts with no timing dependency, so there's nothing provisional
  *       about implementing them now.</li>
+ *   <li>Loading a real WOZ disk image ({@link WozDiskImage}) on
+ *       {@link Drive#insert} -- genuine bit-level track data, parsed and
+ *       verified, sitting ready to be read.</li>
  * </ul>
  * What's deliberately NOT implemented: actual bit-level data returned
  * when reading through Q6/Q7 (the disk read/write data latch). That
- * requires the LSS sequencer ticking once every 4 CPU cycles against a
- * real bitstream read from a WOZ image -- neither a {@code SystemClock}
- * nor a WOZ bitstream parser exist in this project yet, so faking a
+ * requires the LSS sequencer ticking once every 4 CPU cycles against
+ * {@link WozDiskImage}'s bitstream -- the WOZ side of that is done now,
+ * but the LSS sequencer itself, and wiring it to
+ * {@code SystemClock.addCycleListener} the same way {@code PaddleTimers}
+ * and {@code VideoScanner} already do, is not, so faking a
  * plausible-looking data byte here would be exactly the kind of
  * confident wrong guess this project has avoided everywhere else.
  * Reading the data latch (offsets $C-$F) throws, naming the gap.
@@ -139,6 +144,11 @@ public final class Disk2Controller implements SlotCard {
         return List.of(drives[0], drives[1]);
     }
 
+    /** Package-visible for tests -- direct access to drive {@code n} (0 or 1) as a concrete {@link Drive}. */
+    Drive drive(int n) {
+        return drives[n];
+    }
+
     /** Package-visible for tests -- true if the phase-{@code n} stepper magnet is currently energized. */
     boolean isPhaseOn(int n) {
         return phaseOn[n];
@@ -156,31 +166,42 @@ public final class Disk2Controller implements SlotCard {
 
     /**
      * One of this controller's two drives. Tracks which image is
-     * currently loaded, but does not yet parse WOZ bitstream data --
-     * that's a separate, larger, not-yet-built feature. This is
-     * genuinely usable today for "is a disk in the drive, and which
-     * one," just not yet for reading its actual contents.
+     * currently loaded, and now genuinely parses it via
+     * {@link WozDiskImage} on insert -- real, verified bit-level track
+     * data is available today via {@link #wozImage}. What's still
+     * missing is the LSS sequencer that would actually read it in
+     * response to the CPU polling Q6/Q7, a separate, not-yet-built
+     * piece -- this class's own job (tracking which image is loaded and
+     * making its data available) is done.
      */
-    private static final class Drive implements RemovableMediaDrive {
+    static final class Drive implements RemovableMediaDrive {
 
         private Path currentImage;
+        private WozDiskImage wozImage;
 
         @Override
         public void insert(Path imagePath) throws IOException {
             if (!Files.exists(imagePath)) {
                 throw new IOException("Disk image not found: " + imagePath);
             }
+            wozImage = WozDiskImage.load(imagePath);
             currentImage = imagePath;
         }
 
         @Override
         public void eject() {
             currentImage = null;
+            wozImage = null;
         }
 
         @Override
         public boolean isPresent() {
             return currentImage != null;
+        }
+
+        /** Package-visible for tests, and for the not-yet-built LSS to eventually consume. */
+        WozDiskImage wozImage() {
+            return wozImage;
         }
 
         @Override
