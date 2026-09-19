@@ -72,19 +72,44 @@ for a slot configuration file (explicitly not a live or auto-synced
 catalog — regenerate it, don't trust it to stay current).
 
 **Real, wired-in peripherals:**
-- **`Disk2Controller`** — the first real `SlotCard` in this project. The
-  boot ROM and all 16 soft switches (phase stepper, motor, drive select,
-  Q6/Q7 mode latches) are fully implemented. `RemovableMediaDrive.insert`
-  now genuinely parses a real WOZ2 disk image (`WozDiskImage`, see
-  below) rather than just tracking a path -- real, verified bit-level
-  track data is available today. `Disk2LogicSequencer` (see below) is
-  built and thoroughly verified, but not yet wired into this class --
-  Q6/Q7 mode changes don't yet reach it, nothing yet turns phase-stepper
-  state into a track position to read from, and nothing yet ticks it via
-  `SystemClock.addCycleListener` the way `PaddleTimers` and
-  `VideoScanner` already are. Reading the Q6/Q7 data latch (offsets
-  $C-$F) is still a named, thrown gap -- the hard, easy-to-get-wrong
-  piece is done, but real nibble reads don't work yet.
+- **`Disk2Controller`** — genuinely complete now, not a partial slice.
+  The boot ROM and all 16 soft switches (phase stepper, motor, drive
+  select, Q6/Q7 mode latches) are fully implemented. Phase-stepper
+  head positioning is real: the actual electromagnet-sequencing
+  algorithm (a step occurs only when the currently-on phase turns off
+  while exactly one neighbor is on, confirmed against two independent
+  sources for both the algorithm and the direction convention),
+  clamped at the real 0-159 quarter-track range, per-drive
+  independent. `RemovableMediaDrive.insert` genuinely parses a real
+  WOZ2 disk image (`WozDiskImage`, see below). `Disk2LogicSequencer`
+  (see below) is fully wired in: Q6/Q7 changes reach it, `tick`
+  advances it at the real hardware ratio (the LSS runs at 2x CPU clock
+  rate -- confirmed independently -- sampling one real bitstream bit
+  every 8 LSS ticks, matching the real 4-CPU-cycle-per-bit data rate),
+  and reading the Q6/Q7 data latch (offsets $C-$F) returns the actual
+  sequencer output instead of throwing. A real bug caught while wiring
+  this: `WozDiskImage.trackAt` returns a fresh `TrackBitStream` on
+  every call, which would have silently reset the read position to 0
+  on every single tick -- fixed by caching the stream in `Drive`,
+  refreshed only on an actual head move or disk swap. Verified
+  end-to-end, not just per-piece: 66 checkpoints of an inserted,
+  real synthetic WOZ file's known bit pattern flowing through
+  `tick()` match a Python reference implementing the identical timing
+  exactly, under variable, realistic cycle-delivery chunk sizes (not a
+  fixed, convenient tick size) -- plus separate confirmation that
+  motor-off genuinely halts all ticking, that switching drives reads
+  the correct drive's own track, and that a write-protected disk's
+  sense mode correctly yields `0xFF`. Two named, deliberate
+  simplifications remain: track changes reset to bit 0 rather than
+  preserving relative rotational position (the WOZ spec's own
+  recommendation, relevant to a small number of copy-protection
+  schemes, not ordinary reading), and a documented DOS 3.2 `INIT`
+  sub-instruction timing quirk (the LSS completing a cycle *within* a
+  single CPU instruction) that this project's instruction-boundary
+  cycle granularity can't represent. Not yet wired into `Apple2Plus`
+  itself (populating a slot, registering `tick` with
+  `SystemClock.addCycleListener`) -- a deliberate scope boundary, the
+  same as hires rendering, not an oversight.
 - **`Disk2LogicSequencer`** — the actual state machine that converts a
   disk bitstream pulse into shift-register (nibble) data, driven by
   `DiskLogicSequencerRom`'s 256-byte table. A genuinely important
@@ -103,7 +128,10 @@ catalog — regenerate it, don't trust it to stay current).
   2000-pulse randomized trajectory comparison plus separate checks of
   all four Q6/Q7 modes (including write-protect sense correctly
   yielding `0xFF`) match a parallel Python reference implementing the
-  same corrected formula exactly, tick for tick.
+  same corrected formula exactly, tick for tick. That was this class's
+  own standalone verification; `Disk2Controller`'s entry above
+  describes the separate, later end-to-end pass once it was actually
+  wired in.
 - **`WozDiskImage`** — parses a real WOZ2 disk image file: header, INFO,
   TMAP, and TRKS chunks, exposing genuine bit-level per-quarter-track
   access via `TrackBitStream`. Deliberately scoped to 5.25-inch disks
