@@ -8,31 +8,27 @@ package com.nordstrom.emulator.system;
  */
 final class SlotZeroIoHandler implements AddressRangeHandler {
 
-    private static final String FLOATING_BUS_GAP =
-        "No card is present at this address, and floating-bus emulation "
-        + "(returning the video scanner's last byte) depends on the not-yet-built video scanner";
-
     private final SlotCard card; // slot 0's card, or null if empty
+    private final FloatingBus floatingBus;
 
-    SlotZeroIoHandler(SlotCard card) {
+    SlotZeroIoHandler(SlotCard card, FloatingBus floatingBus) {
         this.card = card;
+        this.floatingBus = floatingBus;
     }
 
     @Override
     public int read(int offset) {
-        requireCard();
+        if (card == null) {
+            return floatingBus.read();
+        }
         return card.readIoSwitch(offset);
     }
 
     @Override
     public void write(int offset, int value) {
-        requireCard();
-        card.writeIoSwitch(offset, value);
-    }
-
-    private void requireCard() {
-        if (card == null) {
-            throw new UnsupportedOperationException(FLOATING_BUS_GAP);
+        if (card != null) {
+            card.writeIoSwitch(offset, value);
         }
+        // write with nothing present: no effect, matching real floating-bus hardware
     }
 }

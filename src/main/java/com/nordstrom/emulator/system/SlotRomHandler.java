@@ -9,22 +9,23 @@ package com.nordstrom.emulator.system;
  */
 final class SlotRomHandler implements AddressRangeHandler {
 
-    private static final String FLOATING_BUS_GAP =
-        "No card is present at this address, and floating-bus emulation "
-        + "(returning the video scanner's last byte) depends on the not-yet-built video scanner";
-
     private final SlotCard[] slots;
     private final ExpansionRomArbiter arbiter;
+    private final FloatingBus floatingBus;
 
-    SlotRomHandler(SlotCard[] slots, ExpansionRomArbiter arbiter) {
+    SlotRomHandler(SlotCard[] slots, ExpansionRomArbiter arbiter, FloatingBus floatingBus) {
         this.slots = slots;
         this.arbiter = arbiter;
+        this.floatingBus = floatingBus;
     }
 
     @Override
     public int read(int offset) {
         int slotNum = slotNumFor(offset);
-        SlotCard card = requireCard(slotNum);
+        SlotCard card = slots[slotNum];
+        if (card == null) {
+            return floatingBus.read();
+        }
         arbiter.noteOwnRomAccessed(slotNum);
         return card.readRom(offset % 0x100);
     }
@@ -32,20 +33,15 @@ final class SlotRomHandler implements AddressRangeHandler {
     @Override
     public void write(int offset, int value) {
         int slotNum = slotNumFor(offset);
-        SlotCard card = requireCard(slotNum);
+        SlotCard card = slots[slotNum];
+        if (card == null) {
+            return; // write with nothing present: no effect, matching real floating-bus hardware
+        }
         arbiter.noteOwnRomAccessed(slotNum);
         card.writeRom(offset % 0x100, value);
     }
 
     private int slotNumFor(int offset) {
         return (offset / 0x100) + 1;
-    }
-
-    private SlotCard requireCard(int slotNum) {
-        SlotCard card = slots[slotNum];
-        if (card == null) {
-            throw new UnsupportedOperationException(FLOATING_BUS_GAP);
-        }
-        return card;
     }
 }

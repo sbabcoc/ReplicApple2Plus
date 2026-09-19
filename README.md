@@ -105,19 +105,31 @@ catalog — regenerate it, don't trust it to stay current).
   being, feeds this class -- reachable via `MotherboardBus.keyboardRegister()`.
 - **`VideoScanner`** computes which memory address the video circuitry
   is fetching at any point in the frame -- the specific piece
-  floating-bus emulation needs, not a full pixel renderer. Timing
-  (65 cycles/scanline, 262 scanlines/frame) and both the text/lores and
-  hi-res row-to-address formulas are independently confirmed against a
-  real, detailed row-address reference, checked against specific known
-  points (row 0, 1, 8, 64) rather than trusted on formula alone. Ticked
-  via `SystemClock.addCycleListener`, the same mechanism `PaddleTimers`
-  uses. Three honest, named gaps: horizontal blanking, vertical
-  blanking, and mixed mode (which shows text on the bottom scanlines
-  regardless of the overall lores/hires selection) are all real,
-  well-documented behaviors this class doesn't yet model with the same
-  verification rigor as the two address formulas -- it throws for
-  these rather than guessing. Not yet wired into the actual "empty
-  slot" floating-bus gaps -- see below.
+  floating-bus emulation needs, not a full pixel renderer. A faithful
+  port of AppleWin's own `VideoGetScannerAddress` bit-level counter
+  model (citing Jim Sather's *Understanding the Apple IIe*), not a
+  row/column approximation -- reproducing a mature emulator's verified
+  logic directly proved more trustworthy here than re-deriving it
+  independently, especially the real hardware's genuine vertical
+  counter stutter (8 bits reaching 262 lines by repeating its own last
+  6 states, not counting linearly). This single formula covers
+  horizontal blanking, vertical blanking, and mixed mode correctly with
+  no special-casing at all -- real hardware never stops addressing
+  memory just because nothing is currently visible, and neither does
+  this class; it never throws. Verified against the same text/lores and
+  hi-res reference points as before (row 0, 1, 8, 64), plus confirmed
+  to run exception-free across a complete 17,030-cycle frame in both
+  text and mixed modes. Ticked via `SystemClock.addCycleListener`, the
+  same mechanism `PaddleTimers` uses.
+- **`FloatingBus`** combines `VideoScanner`'s address with a real RAM
+  read at that address -- `VideoScanner` only answers "which address,"
+  this answers "what byte is actually there." Wired into every "empty
+  slot" or "nothing latched" fallback (`SlotIoHandler`,
+  `SlotZeroIoHandler`, `SlotRomHandler`, `ExpansionRomArbiter`), all of
+  which used to throw a named gap and now return a genuine,
+  scanner-driven value instead. A write to any of these same addresses
+  is a silent no-op, matching real hardware -- nothing is listening, so
+  nothing happens.
 - **`PaddleTimers`** — `$C064`-`$C067` (read) and `$C070`-`$C07F`
   (trigger) model the real hardware faithfully: four independent RC
   one-shot countdowns sharing one strobe line, each non-retriggerable
@@ -187,9 +199,47 @@ catalog — regenerate it, don't trust it to stay current).
   CPU behavior: driving the full Klaus2m5 functional test through
   `SystemClock` traps at the identical address after the identical
   step and cycle counts as driving the CPU directly.
+- **`Apple2Plus`, `ScreenPanel`, and `KeyboardInputListener`** together
+  are the real application: no slot cards (so no disk boot support
+  yet), meaning the real, unmodified `$FFFC` Autostart ROM path boots
+  straight to the Applesoft/Monitor prompt. `ScreenPanel` is pure Swing
+  glue around `TextScreenRenderer` -- it owns no rendering logic of its
+  own, just painting the boolean grid that class produces, scaled up
+  3x from the real 280x192 display. Flash state belongs to
+  `Apple2Plus`'s own timer loop, not the panel, for the same
+  real-time-vs-cycle-accurate reason `SystemClock` excludes wall-clock
+  pacing from itself. `KeyboardInputListener` is equally thin around
+  `KeyboardMapper` -- no mapping logic lives in the listener itself.
+  `Apple2Plus` decides pacing (`SystemClock` deliberately has no
+  opinion on that) and catches a runtime exception from emulation
+  cleanly, stopping rather than crashing the Swing event thread. Not
+  independently visually verifiable in this environment (a genuinely
+  headless sandbox) -- verified instead by confirming construction
+  reaches real window creation with no exception first (only
+  `HeadlessException` at `new JFrame(...)`, the expected failure with
+  no real display), and separately, that the full cycle-stepping loop
+  itself runs stably for 10 million cycles (~10 seconds of real Apple
+  II time) with keypresses arriving mid-run, outside of any Swing
+  dependency at all.
 
 ### Deliberately not implemented
 
+- **Swappable ROM images.** `SystemRom` and `CharacterRom` both hardcode
+  one specific classpath resource and a fixed checksum against the
+  stock Apple II+ ROM contents -- appropriate for catching corruption
+  of the real thing, wrong for anyone wanting to load a real,
+  historically common hobbyist modification (an alternate F8 ROM, a
+  custom character set). Needs an external override path (config-file
+  driven, matching `SlotCardLoader`'s existing pattern) that skips the
+  stock checksum in favor of a basic size sanity check when a
+  substitution is actually requested.
+- **Lowercase keyboard input plus a matching display.** `KeyboardRegister`
+  already passes lowercase ASCII through today with no changes needed;
+  the real gap is display -- the stock `CharacterRom` has no lowercase
+  glyphs at all, and real hardware needed either an 80-column card or a
+  software "soft-70" hi-res-based rendering trick to show them. This
+  depends on real video rendering existing at all, not on any small
+  addition to what's already built.
 - **The genuinely chip-unstable illegal opcodes** (`ANE`/`XAA`, `LXA`,
   `SHA`, `SHX`, `SHY`, `TAS`) throw `UnsupportedOperationException` rather
   than encode a guess. Different real NMOS chips disagree with each other on
@@ -215,32 +265,6 @@ catalog — regenerate it, don't trust it to stay current).
   (joystick/paddle pushbuttons) is its own separate, still-undesigned
   gap even though it shares a 16-byte block with the now-working
   paddle reads.
-- **Floating-bus emulation** (what an empty slot or an ownerless
-  expansion window actually returns) is not wired up yet, but the hard
-  part -- `VideoScanner`, see above -- is done and verified. What
-  remains is threading that computed address through the actual
-  "empty slot" gap-throwing code (`SlotIoHandler`, `SlotZeroIoHandler`,
-  and others) so a genuine floating-bus read replaces a thrown
-  exception, plus reading the real byte at that address from RAM once
-  it's threaded through. `VideoScanner` itself still has three of its
-  own named gaps too -- horizontal blanking, vertical blanking, and
-  mixed mode -- so even once wired in, floating-bus reads during those
-  periods would still throw, honestly, rather than guess.
-- **`Apple2Plus`** currently exists only as a placeholder Swing window
-  with no emulator content -- built specifically to validate the
-  `jlink`/`jpackage` packaging pipeline (see [Packaging](#packaging))
-  on real hardware before a complete application rides on top of an
-  unvalidated assumption. The target for the real version: boot to a
-  BASIC/Monitor prompt via `SystemRom`, accept keyboard input via
-  `KeyboardRegister`, and render text-mode output via `CharacterRom` --
-  no disk support yet, since `Disk2Controller`'s LSS ticking and the
-  WOZ parser are separate, still-open gaps regardless of `Apple2Plus`
-  itself. Text rendering specifically doesn't need `VideoScanner`'s
-  cycle-accurate timing at all -- reading the fixed 40x24 text page
-  addresses directly and painting the result is enough; `VideoScanner`
-  matters for floating-bus accuracy and any future scanline-timed
-  rendering, not for this first target.
-
 ## Verification
 
 This project treats "I traced it from a reference" as a claim to be checked,
@@ -273,6 +297,16 @@ not a conclusion.
   counts as the CPU executes, and that multiple independently-registered
   listeners are each notified (the actual reason it's a list, not a
   single callback slot).
+- **The real Autostart boot sequence** -- the actual, unmodified
+  `$FFFC` reset vector, no shortcuts -- has been driven end-to-end
+  through `Cpu6502`, `MotherboardBus`, `SystemClock`, and `VideoScanner`
+  together, and produces the real "APPLE ][" banner and `]` prompt on
+  screen. This exercised a genuine, previously-undiscovered gap: the
+  real Autostart ROM scans slots 1-7 for a bootable device during cold
+  boot, hitting `VideoScanner`'s own vertical-blanking address range in
+  the process -- something no smaller, isolated test had reason to
+  reach. Confirmed with no regression to the CPU functional test suite
+  or any other peripheral.
 
 Run all tests with:
 

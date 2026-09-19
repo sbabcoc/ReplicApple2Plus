@@ -31,15 +31,13 @@ final class ExpansionRomArbiter {
     /** The local offset corresponding to $CFFF -- the last byte of the 2048-byte $C800-$CFFF window, and the release trigger for every currently-set latch. */
     private static final int RELEASE_OFFSET = 0x7FF;
 
-    private static final String FLOATING_BUS_GAP =
-        "No card is present at this address, and floating-bus emulation "
-        + "(returning the video scanner's last byte) depends on the not-yet-built video scanner";
-
     private final SlotCard[] slots;
     private final boolean[] latch = new boolean[8]; // index 0 unused; slots are 1-7
+    private final FloatingBus floatingBus;
 
-    ExpansionRomArbiter(SlotCard[] slots) {
+    ExpansionRomArbiter(SlotCard[] slots, FloatingBus floatingBus) {
         this.slots = slots;
+        this.floatingBus = floatingBus;
     }
 
     /** Called whenever slot {@code slotNum}'s own ROM is accessed -- sets its latch if it wants the expansion window. Never clears any other slot's latch. */
@@ -65,7 +63,10 @@ final class ExpansionRomArbiter {
         int result = 0;
         if (latched.isEmpty()) {
             if (offset != RELEASE_OFFSET) {
-                throw new UnsupportedOperationException(FLOATING_BUS_GAP);
+                if (value < 0) {
+                    result = floatingBus.read();
+                }
+                // write with nothing latched: no effect, matching real floating-bus hardware
             }
             // $CFFF with nothing latched: nothing to release, but the
             // access itself is still valid -- real hardware doesn't fault

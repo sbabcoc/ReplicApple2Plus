@@ -91,11 +91,13 @@ public final class MotherboardBus implements MemoryBus {
         addressSpace.register(0xC060, 0xC06F, new GameIoReadHandler(paddleTimers));
         addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
-        addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0]));
+        FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
 
-        ExpansionRomArbiter arbiter = new ExpansionRomArbiter(slots);
-        addressSpace.register(0xC090, 0xC0FF, new SlotIoHandler(slots));
-        addressSpace.register(0xC100, 0xC7FF, new SlotRomHandler(slots, arbiter));
+        addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0], floatingBus));
+
+        ExpansionRomArbiter arbiter = new ExpansionRomArbiter(slots, floatingBus);
+        addressSpace.register(0xC090, 0xC0FF, new SlotIoHandler(slots, floatingBus));
+        addressSpace.register(0xC100, 0xC7FF, new SlotRomHandler(slots, arbiter, floatingBus));
         addressSpace.register(0xC800, 0xCFFF, new ExpansionRomHandler(arbiter));
 
         AddressRangeHandler upperMemory = (slots[0] != null && slots[0].wantsSlotZeroBanking())
