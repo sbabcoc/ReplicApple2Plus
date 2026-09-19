@@ -103,6 +103,21 @@ catalog — regenerate it, don't trust it to stay current).
   driving clock behind it. Has no dependency on any UI toolkit at all;
   `keyPressed(int)` is how a real input source, whatever it ends up
   being, feeds this class -- reachable via `MotherboardBus.keyboardRegister()`.
+- **`VideoScanner`** computes which memory address the video circuitry
+  is fetching at any point in the frame -- the specific piece
+  floating-bus emulation needs, not a full pixel renderer. Timing
+  (65 cycles/scanline, 262 scanlines/frame) and both the text/lores and
+  hi-res row-to-address formulas are independently confirmed against a
+  real, detailed row-address reference, checked against specific known
+  points (row 0, 1, 8, 64) rather than trusted on formula alone. Ticked
+  via `SystemClock.addCycleListener`, the same mechanism `PaddleTimers`
+  uses. Three honest, named gaps: horizontal blanking, vertical
+  blanking, and mixed mode (which shows text on the bottom scanlines
+  regardless of the overall lores/hires selection) are all real,
+  well-documented behaviors this class doesn't yet model with the same
+  verification rigor as the two address formulas -- it throws for
+  these rather than guessing. Not yet wired into the actual "empty
+  slot" floating-bus gaps -- see below.
 - **`PaddleTimers`** — `$C064`-`$C067` (read) and `$C070`-`$C07F`
   (trigger) model the real hardware faithfully: four independent RC
   one-shot countdowns sharing one strobe line, each non-retriggerable
@@ -143,6 +158,20 @@ catalog — regenerate it, don't trust it to stay current).
   II+'s own ROM contents just to say "not me" (see `SlotCard`'s
   `readSlotZeroBank`) -- that fallback is `SlotZeroBankingHandler`'s
   job, motherboard-level dispatch, not the card's.
+- **`CharacterRom`** — the Apple II+'s character generator ROM (Apple
+  part 341-0036, a repurposed general-purpose Signetics 2513 chargen
+  chip). Addressing (`code * 8 + row`) and the crucial masking detail
+  (the fetched byte's 8th bit is genuine noise from this chip's use in
+  other, unrelated systems, not part of the actual glyph) both
+  confirmed directly against MAME's own working source for the
+  original II/II+ code path specifically -- a different branch from how
+  IIe/IIgs handle the same chip. Deliberately does not apply
+  inverse/flash inversion itself -- that's a real display-mode decision
+  a future renderer makes, not a fact about ROM contents, the same
+  separation `VideoSoftSwitches` already keeps between reporting mode
+  state and deciding how to render it. Verified by literally printing
+  the resulting glyph as ASCII art and confirming it's a recognizable
+  letter, not just passing numeric assertions.
 - **`SystemClock`** drives the CPU with exact cycle accounting.
   `addCycleListener` exists now because it has a real, concrete
   consumer (`PaddleTimers`' RC countdowns) -- still deliberately no
@@ -182,20 +211,35 @@ catalog — regenerate it, don't trust it to stay current).
 - **General/keyboard soft switches** (`$C020`-`$C02F`, `$C040`-`$C04F` --
   the speaker toggle at `$C030`-`$C03F`, the keyboard register at
   `$C000`-`$C01F`, and the paddle timers at `$C060`-`$C07F` are all
-  done, see above) and **floating-bus emulation** (what an empty slot
-  or an ownerless expansion window actually returns) are both named,
-  thrown gaps — the latter depends on a video scanner that doesn't
-  exist, the former hasn't been designed yet at all. `$C061`-`$C063`
+  done, see above) hasn't been designed yet at all. `$C061`-`$C063`
   (joystick/paddle pushbuttons) is its own separate, still-undesigned
   gap even though it shares a 16-byte block with the now-working
   paddle reads.
+- **Floating-bus emulation** (what an empty slot or an ownerless
+  expansion window actually returns) is not wired up yet, but the hard
+  part -- `VideoScanner`, see above -- is done and verified. What
+  remains is threading that computed address through the actual
+  "empty slot" gap-throwing code (`SlotIoHandler`, `SlotZeroIoHandler`,
+  and others) so a genuine floating-bus read replaces a thrown
+  exception, plus reading the real byte at that address from RAM once
+  it's threaded through. `VideoScanner` itself still has three of its
+  own named gaps too -- horizontal blanking, vertical blanking, and
+  mixed mode -- so even once wired in, floating-bus reads during those
+  periods would still throw, honestly, rather than guess.
 - **`Apple2Plus`** currently exists only as a placeholder Swing window
   with no emulator content -- built specifically to validate the
   `jlink`/`jpackage` packaging pipeline (see [Packaging](#packaging))
   on real hardware before a complete application rides on top of an
-  unvalidated assumption. It will become the real application window
-  once real video/keyboard/audio wiring exist and something actually
-  drives `SystemClock` continuously.
+  unvalidated assumption. The target for the real version: boot to a
+  BASIC/Monitor prompt via `SystemRom`, accept keyboard input via
+  `KeyboardRegister`, and render text-mode output via `CharacterRom` --
+  no disk support yet, since `Disk2Controller`'s LSS ticking and the
+  WOZ parser are separate, still-open gaps regardless of `Apple2Plus`
+  itself. Text rendering specifically doesn't need `VideoScanner`'s
+  cycle-accurate timing at all -- reading the fixed 40x24 text page
+  addresses directly and painting the result is enough; `VideoScanner`
+  matters for floating-bus accuracy and any future scanline-timed
+  rendering, not for this first target.
 
 ## Verification
 
@@ -223,6 +267,12 @@ not a conclusion.
   disassembled bytes, not a re-implementation) against the real CPU
   core, `SystemClock`, and `MotherboardBus` together -- an exact match
   across the full 0-255 position range, not just a plausible one.
+- **`SystemClockCycleListenerTest`** locks in `SystemClock.addCycleListener`
+  itself, not just the classes that use it -- confirming it genuinely
+  drives a real listener forward with the actual per-instruction cycle
+  counts as the CPU executes, and that multiple independently-registered
+  listeners are each notified (the actual reason it's a list, not a
+  single callback slot).
 
 Run all tests with:
 

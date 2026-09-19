@@ -43,7 +43,7 @@ import com.nordstrom.emulator.MemoryBus;
  *   <li>$C030-$C03F: speaker toggle ({@link SpeakerToggle})</li>
  *   <li>$0000-$BFFF: main RAM ({@link RamHandler})</li>
  *   <li>$C050-$C05F: video mode switches ({@link VideoSoftSwitches})</li>
- *   <li>$C060-$C06F: paddle reads, offsets 4-7 only ({@link PaddleReadHandler})</li>
+ *   <li>$C060-$C06F: game I/O -- cassette/buttons (gaps), paddle reads at offsets 4-7 ({@link GameIoReadHandler})</li>
  *   <li>$C070-$C07F: paddle trigger strobe ({@link PaddleStrobeHandler})</li>
  *   <li>$C080-$C08F: slot 0's I/O switches ({@link SlotZeroIoHandler})</li>
  *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
@@ -68,6 +68,7 @@ public final class MotherboardBus implements MemoryBus {
     private final PaddleTimers paddleTimers = new PaddleTimers();
     private final SpeakerToggle speakerToggle = new SpeakerToggle();
     private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
+    private final VideoScanner videoScanner = new VideoScanner(videoSoftSwitches);
 
     /**
      * Wires up the full Apple II+ memory map against {@code slots} (length 8, slot 0 included) -- typically the array {@link SlotCardLoader#load} just populated.
@@ -87,7 +88,7 @@ public final class MotherboardBus implements MemoryBus {
         addressSpace.register(0xC030, 0xC03F, speakerToggle);
         addressSpace.register(0xC040, 0xC04F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
         addressSpace.register(0xC050, 0xC05F, videoSoftSwitches);
-        addressSpace.register(0xC060, 0xC06F, new PaddleReadHandler(paddleTimers));
+        addressSpace.register(0xC060, 0xC06F, new GameIoReadHandler(paddleTimers));
         addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
         addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0]));
@@ -142,12 +143,25 @@ public final class MotherboardBus implements MemoryBus {
     /**
      * The video mode switches wired into $C050-$C05F -- how anything
      * outside this class would read current video mode state for real
-     * rendering, once a video scanner exists to do that.
+     * rendering.
      *
      * @return this machine's video mode switches
      */
     public VideoSoftSwitches videoSoftSwitches() {
         return videoSoftSwitches;
+    }
+
+    /**
+     * Computes which memory address the video circuitry is fetching at
+     * any point in the frame -- what floating-bus emulation needs, and
+     * also a real building block for an eventual actual renderer. Ticked
+     * via {@link SystemClock#addCycleListener} once assembled with a
+     * real clock, the same mechanism {@link #paddleTimers} uses.
+     *
+     * @return this machine's video scanner
+     */
+    public VideoScanner videoScanner() {
+        return videoScanner;
     }
 
     /**
