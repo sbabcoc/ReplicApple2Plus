@@ -188,11 +188,63 @@ public final class WozDiskImage implements DiskImage {
      */
     @Override
     public TrackBitStream trackAt(int quarterTrack) {
-        int trksIndex = trackMap[quarterTrack];
-        if (trksIndex == 0xFF || trackData[trksIndex] == null) {
+        int trksIndex = resolveTrksIndex(quarterTrack);
+        if (trksIndex == 0xFF) {
             return new TrackBitStream(new byte[EMPTY_TRACK_BIT_COUNT / 8], EMPTY_TRACK_BIT_COUNT);
         }
         return new TrackBitStream(trackData[trksIndex], trackBitCounts[trksIndex]);
+    }
+
+    /**
+     * Resolves a quarter-track to its actual data, falling back to the
+     * nearest <em>mapped</em> neighbor when the requested quarter-track
+     * itself isn't captured in the TMAP. Real Disk II hardware's read
+     * head is physically wide enough to still pick up an adjacent
+     * track's flux pattern when positioned at an uncaptured
+     * quarter-track sitting between two captured ones -- many real WOZ
+     * captures only capture one quarter-track per whole track, leaving
+     * the other three formally unmapped, and a reader that returns
+     * silence there instead of the neighbor's data diverges from what
+     * real hardware (and other real emulators) actually produce at
+     * that head position. This was confirmed to matter, not just a
+     * theoretical concern: it caused a real Disk II seek-and-verify
+     * step to read genuine silence at an unmapped quarter-track
+     * between two perfectly good mapped tracks, making the seek appear
+     * to fail and retry forever.
+     * <p>
+     * The empty-track sentinel is reserved for quarter-tracks with no
+     * mapped neighbor at all within the search radius below (e.g. past
+     * the outermost or innermost real track, or a genuinely blank
+     * disk) -- not for every gap in a sparse TMAP.
+     *
+     * @param quarterTrack the requested quarter-track, 0-159
+     * @return the TRKS index to use, or {@code 0xFF} if nothing mapped is nearby
+     */
+    private int resolveTrksIndex(int quarterTrack) {
+        if (isMapped(quarterTrack)) {
+            return trackMap[quarterTrack];
+        }
+        // Search outward by increasing distance -- a real head only picks up an
+        // immediately adjacent track, not one several quarter-tracks away, so this
+        // is bounded to a small, physically-plausible radius rather than scanning
+        // the whole disk.
+        int maxSearchDistance = 3;
+        for (int distance = 1; distance <= maxSearchDistance; distance++) {
+            int lower = quarterTrack - distance;
+            if (lower >= 0 && isMapped(lower)) {
+                return trackMap[lower];
+            }
+            int upper = quarterTrack + distance;
+            if (upper < TMAP_ENTRIES && isMapped(upper)) {
+                return trackMap[upper];
+            }
+        }
+        return 0xFF;
+    }
+
+    /** True if quarter-track {@code qt} has a real, populated TRKS entry -- not just a non-0xFF map value. */
+    private boolean isMapped(int qt) {
+        return trackMap[qt] != 0xFF && trackData[trackMap[qt]] != null;
     }
 
     /**

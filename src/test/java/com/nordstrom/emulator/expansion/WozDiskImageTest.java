@@ -76,9 +76,25 @@ class WozDiskImageTest {
     }
 
     @Test
-    void unmappedQuarterTrackReturnsTheSpecsEmptyTrackLength(@TempDir Path tempDir) throws IOException {
+    void unmappedQuarterTrackFallsBackToNearestMappedNeighbor(@TempDir Path tempDir) throws IOException {
         WozDiskImage image = WozDiskImage.load(WozTestFixtures.buildSyntheticWozFile(tempDir, true));
-        TrackBitStream emptyTrack = image.trackAt(1); // 0.25, never mapped in this synthetic file
+
+        // Real Disk II hardware's read head is wide enough to still pick up an adjacent mapped
+        // track's data at an uncaptured quarter-track between two captured ones -- a reader that
+        // returns silence there instead diverges from what real hardware actually produces.
+        TrackBitStream nearTrack0 = image.trackAt(1); // distance 1 from mapped quarter-track 0
+        assertEquals(WozTestFixtures.TRACK_0_BITS.length(), nearTrack0.bitCount());
+
+        TrackBitStream nearTrack1 = image.trackAt(3); // distance 1 from mapped quarter-track 4
+        assertEquals(WozTestFixtures.TRACK_1_BITS.length(), nearTrack1.bitCount());
+    }
+
+    @Test
+    void quarterTrackFarFromAnyMappedNeighborReturnsTheSpecsEmptyTrackLength(@TempDir Path tempDir) throws IOException {
+        WozDiskImage image = WozDiskImage.load(WozTestFixtures.buildSyntheticWozFile(tempDir, true));
+        // Distance 10 from quarter-track 0 and distance 6 from quarter-track 4 -- both beyond the
+        // fallback search radius, so no real hardware would pick up either track from here either.
+        TrackBitStream emptyTrack = image.trackAt(10);
 
         assertEquals(51_200, emptyTrack.bitCount());
         assertEquals(0, emptyTrack.nextBit());
