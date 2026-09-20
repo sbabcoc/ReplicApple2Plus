@@ -6,18 +6,28 @@ import java.util.Map;
 /**
  * A deliberately minimal {@code --name value} flag parser, shared by this
  * package's small command-line tools ({@link CardCatalog},
- * {@link SlotConfigTemplate}). Exists specifically to avoid positional
- * argument ambiguity: a tool with two or more optional arguments and no
- * named flags has no way to let a caller supply the second without the
- * first, short of silently misinterpreting one for the other. Flags have
- * no such problem -- each is independently optional, in any order.
+ * {@link SlotConfigTemplate}) and, since it's an equally good fit for any
+ * command-line entry point in this project rather than something
+ * specific to this package, {@code Apple2Plus} itself. Exists
+ * specifically to avoid positional argument ambiguity: a tool with two
+ * or more optional arguments and no named flags has no way to let a
+ * caller supply the second without the first, short of silently
+ * misinterpreting one for the other. Flags have no such problem -- each
+ * is independently optional, in any order.
  */
-final class CliArgs {
+public final class CliArgs {
 
     private final Map<String, String> values = new HashMap<>();
 
-    /** Parses {@code args} as a sequence of {@code --name value} pairs. An unpaired trailing flag (no value following it) is an error, not a silently-ignored flag. */
-    static CliArgs parse(String[] args) {
+    /**
+     * Parses {@code args} as a sequence of {@code --name value} pairs.
+     * An unpaired trailing flag (no value following it) is an error,
+     * not a silently-ignored flag.
+     *
+     * @param args the raw command-line arguments
+     * @return the parsed flags
+     */
+    public static CliArgs parse(String[] args) {
         CliArgs result = new CliArgs();
         int i = 0;
         while (i < args.length) {
@@ -35,8 +45,11 @@ final class CliArgs {
         return result;
     }
 
-    /** The value given for {@code --name}, or null if it wasn't supplied. */
-    String get(String name) {
+    /**
+     * @param name the flag name, without its leading {@code --}
+     * @return the value given for {@code --name}, or null if it wasn't supplied
+     */
+    public String get(String name) {
         return values.get(name);
     }
 }
