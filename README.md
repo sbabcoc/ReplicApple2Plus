@@ -106,10 +106,8 @@ catalog — regenerate it, don't trust it to stay current).
   schemes, not ordinary reading), and a documented DOS 3.2 `INIT`
   sub-instruction timing quirk (the LSS completing a cycle *within* a
   single CPU instruction) that this project's instruction-boundary
-  cycle granularity can't represent. Not yet wired into `Apple2Plus`
-  itself (populating a slot, registering `tick` with
-  `SystemClock.addCycleListener`) -- a deliberate scope boundary, the
-  same as hires rendering, not an oversight.
+  cycle granularity can't represent. Now wired into `Apple2Plus` --
+  see below for why slot 6 is populated conditionally, not always.
 - **`Disk2LogicSequencer`** — the actual state machine that converts a
   disk bitstream pulse into shift-register (nibble) data, driven by
   `DiskLogicSequencerRom`'s 256-byte table. A genuinely important
@@ -156,6 +154,46 @@ catalog — regenerate it, don't trust it to stay current).
   environment's network access) covering exact bit round-tripping,
   wraparound at a track's true bit count, `seekTo`, corruption
   detection, and bad-header detection.
+- **`TrackBitStream`** — extracted out of `WozDiskImage` into its own
+  top-level class specifically so `DskDiskImage` (below) can produce
+  the identical type -- `Disk2LogicSequencer` reads either through the
+  exact same interface, genuinely unaware of which format the bits
+  came from.
+- **`DiskImage`** — the small interface (`isWriteProtected`,
+  `trackAt`) both `WozDiskImage` and `DskDiskImage` implement, letting
+  `Disk2Controller.Drive` hold either without knowing which.
+- **`DskDiskImage`** — reads a DOS-order sector image (.dsk/.do, 35
+  tracks x 16 sectors x 256 bytes) and synthesizes the real,
+  historical 6-and-2 GCR bitstream each track would actually carry on
+  physical media -- address fields, data fields, checksums, and the
+  64-entry 6-and-2 translate table, ported directly from a2kit's own
+  verified Rust implementation (itself a port of CiderPress's C++),
+  not reimplemented from a written description. Applies the real,
+  documented DOS 3.3 sector skew (`0,7,14,6,13,5,12,4,11,3,10,2,9,1,8,15`
+  -- physical position to logical sector) when placing each sector's
+  data, and writes each physical position's own address field with
+  its own physical sector number, since the skew only ever affects
+  which data lands where, never how the address fields are numbered.
+  `Drive.insert` dispatches to this class instead of `WozDiskImage` by
+  file extension (`.dsk`/`.do` versus everything else). Deliberately
+  scoped to standard 16-sector DOS 3.3 media only -- no 13-sector DOS
+  3.2/3.1 support, no ProDOS-order (`.po`, a different +2 skew), and no
+  copy-protection-specific variations. A .dsk file has no
+  write-protect flag at all, so `isWriteProtected` always returns
+  `false`. Verified two ways: encoding known sector data (random,
+  all-zero, all-ones) and decoding it back with a reference decoder
+  independently ported from a2kit's own `decode_sector_62_256` and
+  `decode_44` confirms an exact round trip -- the strongest check
+  available without a real, legally-sourced DOS 3.3 image, since
+  encoder and decoder are independently-implemented halves of the same
+  real algorithm rather than the same code checking itself; and
+  driving a real `.dsk`-backed `Drive` through `Disk2Controller`'s own
+  `tick()` end to end shows the LSS genuinely finding synced,
+  full-byte latch values from the synthesized stream, not just that
+  the encoder's output looks plausible in isolation. A dedicated test
+  also confirms the full 16-sector skew lands correctly, not just that
+  one sector round-trips: every logical sector's data is independently
+  verified to appear at its real, documented physical position.
 - **`VideoSoftSwitches`** — the `$C050`-`$C05F` video mode switches
   (text/graphics, full/mixed, page1/page2, lo/hi-res, and the four
   annunciators) are a complete implementation; there is no equivalent
@@ -276,28 +314,83 @@ catalog — regenerate it, don't trust it to stay current).
   CPU behavior: driving the full Klaus2m5 functional test through
   `SystemClock` traps at the identical address after the identical
   step and cycle counts as driving the CPU directly.
-- **`Apple2Plus`, `ScreenPanel`, and `KeyboardInputListener`** together
-  are the real application: no slot cards (so no disk boot support
-  yet), meaning the real, unmodified `$FFFC` Autostart ROM path boots
-  straight to the Applesoft/Monitor prompt. `ScreenPanel` is pure Swing
-  glue around `TextScreenRenderer` -- it owns no rendering logic of its
-  own, just painting the boolean grid that class produces, scaled up
-  3x from the real 280x192 display. Flash state belongs to
-  `Apple2Plus`'s own timer loop, not the panel, for the same
-  real-time-vs-cycle-accurate reason `SystemClock` excludes wall-clock
-  pacing from itself. `KeyboardInputListener` is equally thin around
-  `KeyboardMapper` -- no mapping logic lives in the listener itself.
-  `Apple2Plus` decides pacing (`SystemClock` deliberately has no
-  opinion on that) and catches a runtime exception from emulation
-  cleanly, stopping rather than crashing the Swing event thread. Not
-  independently visually verifiable in this environment (a genuinely
-  headless sandbox) -- verified instead by confirming construction
-  reaches real window creation with no exception first (only
-  `HeadlessException` at `new JFrame(...)`, the expected failure with
-  no real display), and separately, that the full cycle-stepping loop
-  itself runs stably for 10 million cycles (~10 seconds of real Apple
-  II time) with keypresses arriving mid-run, outside of any Swing
-  dependency at all.
+- **`Apple2Plus`, `ScreenPanel`, `KeyboardInputListener`, and `DiskMenu`**
+  together are the real application. `Apple2Plus` populates slots
+  through this project's own existing `SlotCardLoader`/INI mechanism
+  (`--config slots.ini`, plus an optional `--plugins DIR`) rather than
+  a parallel, application-specific one -- an earlier version of this
+  class accepted disk paths as direct command-line arguments, bypassing
+  a config system that already existed and already handled this
+  correctly; that version was replaced with this one rather than kept
+  alongside it. With no `--config` given, slots stay entirely empty and
+  boot behaves exactly as it did before disk support existed. A
+  `Disk2Controller`, wherever the config file places it (not assumed to
+  be slot 6, though that's the real, conventional choice), is found by
+  scanning the populated slots after loading, so its `tick` can be
+  registered with `SystemClock.addCycleListener`. Never populating a
+  disk slot with no disk actually configured is necessary, not a
+  simplification: confirmed directly by driving the real boot sequence,
+  a `Disk2Controller` present with no disk inserted causes the real,
+  unmodified `$FFFC` Autostart ROM to recognize the real Disk II boot
+  ROM signature and hang forever waiting for sync bytes an all-zero
+  pulse stream will never produce -- the "APPLE ][" banner prints, but
+  the `]` prompt never appears, confirmed by comparing against the
+  working no-card case side by side. `SlotCardLoader`'s own existing
+  behavior (an unconfigured slot stays `null`) already provides this
+  safety property without `Apple2Plus` needing anything special of its
+  own. A bad config file, unknown card type, or disk-load failure is
+  caught and reported clearly (exit code 1, no stack trace) rather than
+  crashing during Swing construction. When a `Disk2Controller` is
+  found, `DiskMenu` adds a "Disk" menu for swapping either drive's
+  media while the emulator runs -- calling the exact same
+  `RemovableMediaDrive.insert`/`eject` methods `configure` itself uses
+  at startup, matching `SlotCardLoader`'s own documented point that
+  boot-time loading and live swapping are the same operation, not two.
+  With no disk card present, the menu is simply not added, since
+  there's nothing it could operate on. When a `Disk2Controller` is
+  present with drive 1 (the boot drive) empty -- exactly the
+  configuration that would otherwise hang silently -- a dialog explains
+  why and prompts for a disk before emulation starts, reusing
+  `DiskMenu`'s own insert logic rather than a second copy of it.
+  Dismissing the prompt without choosing a file still starts emulation;
+  this is a courtesy, not an enforced requirement, and the same hang
+  remains possible -- but the user was actually given the chance to
+  avoid it. Confirmed directly, not just assumed: during the hang, the
+  CPU is genuinely still executing (a real software polling loop
+  waiting for sync bytes, not an actual freeze), and cycles continue
+  advancing normally after a disk is inserted mid-hang -- so the
+  prompt's own claim that a disk can still be inserted later from the
+  Disk menu, even after emulation has already started without one, is
+  verified, not just asserted. A full successful boot from that
+  mid-hang insert remains unconfirmed, though, since no real bootable
+  disk image was available to test with -- only a hand-constructed
+  synthetic one. `ScreenPanel` is pure Swing glue
+  around `TextScreenRenderer` -- it owns no rendering logic of its own,
+  just painting the boolean grid that class produces, scaled up 3x from
+  the real 280x192 display. Flash state belongs to `Apple2Plus`'s own
+  timer loop, not the panel, for the same real-time-vs-cycle-accurate
+  reason `SystemClock` excludes wall-clock pacing from itself.
+  `KeyboardInputListener` is equally thin around `KeyboardMapper` -- no
+  mapping logic lives in the listener itself. `Apple2Plus` decides
+  pacing (`SystemClock` deliberately has no opinion on that) and
+  catches a runtime exception from emulation cleanly, stopping rather
+  than crashing the Swing event thread. Not independently visually
+  verifiable in this environment (a genuinely headless sandbox) --
+  verified instead by confirming construction reaches real window
+  creation with no exception across six startup scenarios (no config,
+  a working disk config with the card in its conventional slot, the
+  same config with the card in a different slot entirely, a bad card
+  type, a missing config file, and an unrecognized flag), that the full
+  real `--config` pipeline (not a hand-built substitute) runs stably
+  for 10 million cycles (~10 seconds of real Apple II time) with a disk
+  actually ticking alongside the CPU, and that `DiskMenu`'s own
+  structure and its eject action are correct when exercised directly
+  (a real file-chooser or message dialog can't be automated in this
+  headless environment, so the insert path's own dialog interaction,
+  and the boot-disk prompt's execution specifically, remain genuinely
+  untested here -- both `JFrame` construction and any dialog shown
+  after it fail identically in this sandbox, since neither can reach a
+  real display).
 
 ### Deliberately not implemented
 
@@ -342,6 +435,25 @@ catalog — regenerate it, don't trust it to stay current).
   (joystick/paddle pushbuttons) is its own separate, still-undesigned
   gap even though it shares a 16-byte block with the now-working
   paddle reads.
+- **Writing to disk, at any level.** `Disk2LogicSequencer` correctly
+  simulates write-mode nibble shifting into its in-memory latch (the
+  real `SL0`/`SL1`/`LD` actions), but nothing persists that data
+  anywhere -- `TrackBitStream` has no write method, and neither
+  `WozDiskImage` nor `DskDiskImage` can write a file. A WOZ file also
+  has no way to be write-protected *by this project*: the flag is only
+  ever read from a file some other tool already set, since there's no
+  writer here to set it. Building this for real means a `TrackBitStream`
+  write path, a WOZ file writer (chunks, recomputed CRC32), and either
+  a DSK sector-level writer (simpler, but loses any bit-level
+  fidelity the disk originally had) or the much harder inverse of
+  `DskDiskImage`'s own encoder -- decoding a real GCR bitstream back
+  into sectors, checksums and all.
+- **Blank, freshly-formatted disk creation.** Depends on the same
+  writer infrastructure as the item above, plus a real DOS 3.3/ProDOS
+  volume table of contents -- an empty WOZ or DSK shell with no
+  filesystem structure at all isn't a blank disk DOS or ProDOS could
+  actually use.
+
 ## Verification
 
 This project treats "I traced it from a reference" as a claim to be checked,
@@ -391,6 +503,36 @@ Run all tests with:
 ./gradlew test
 ```
 
+## Required ROM files
+
+Three real Apple II+ ROM dumps are deliberately excluded from this
+repository (`.gitignore`'s `*.rom` rule) rather than committed as
+binary source-controlled assets, since they're copyrighted Apple
+firmware, not this project's own work. This means **a fresh clone
+cannot build or run until these are provisioned manually** -- the
+failure mode is exactly the `IllegalStateException: ... is missing from
+the classpath` each ROM class's own loader throws by design, not a bug
+to chase further if you see it.
+
+Each file must be placed at the exact path below and match the listed
+CRC32 exactly (verified automatically at class-load time -- a wrong or
+corrupted file fails loudly with a specific error naming the mismatch,
+rather than silently serving bad data):
+
+| File | Path | CRC32 |
+| --- | --- | --- |
+| System ROM (Applesoft BASIC + Autostart Monitor) | `src/main/resources/com/nordstrom/emulator/system/system-rom.rom` | chip-by-chip, see `SystemRom`'s own Javadoc |
+| Character generator ROM (341-0036) | `src/main/resources/com/nordstrom/emulator/system/character-rom.rom` | `64F415C6` |
+| Integer BASIC Firmware Card ROM | `src/main/resources/com/nordstrom/emulator/expansion/integer-basic-firmware-card.rom` | chip-by-chip, see `IntegerBasicFirmwareCardRom`'s own Javadoc |
+
+The System ROM and Integer BASIC Firmware Card ROM are each assembled
+from five separate 2KB/4KB chip dumps concatenated in address order --
+see each class's own Javadoc for the exact per-chip CRC32/SHA1 pairs
+and MAME source cross-reference used to verify them originally. The
+simplest way to provision a fresh checkout is copying these three files
+directly from a machine where the project already builds successfully,
+at the exact paths above.
+
 ## Building
 
 ```
@@ -404,6 +546,34 @@ install needed beyond generating the wrapper once, if it's ever missing:
 Artifact publishing (Sonatype Central Portal, GPG signing) is configured in
 `build.gradle`, following the same pattern as this project's siblings
 (`selenium-bom`, `selenium-grid-manager`).
+
+## Running
+
+```
+java -cp build/classes/java/main:build/resources/main com.nordstrom.emulator.Apple2Plus [--config slots.ini] [--plugins DIR]
+```
+
+Both flags are optional and independent, matching this project's other
+command-line tools (`SlotConfigTemplate`, `CardCatalog`). With no
+`--config`, every slot stays empty and the machine boots straight to
+Applesoft/the Monitor -- this is required, not just the default, since
+a `Disk2Controller` present with no disk inserted causes the real
+Autostart boot sequence to hang waiting for disk data that will never
+arrive (see `Apple2Plus`'s own Javadoc). To boot from a real disk,
+configure a `Disk2Controller` with at least one drive in the INI file:
+
+```
+[6]
+type=disk2
+drive1=path/to/disk1.woz
+drive2=path/to/disk2.woz
+```
+
+`drive1`/`drive2` are both optional; `type`/`drive1`/`drive2` are the
+same keys `SlotCardLoader` and `Disk2Controller` already document.
+Once running, either drive's disk can be swapped at any time via the
+window's Disk menu -- the same underlying operation as the config
+file's own initial load, not a separate mechanism.
 
 ### Useful Gradle tasks
 

@@ -149,8 +149,8 @@ public final class Disk2Controller implements SlotCard {
             return;
         }
         Drive drive = drives[selectedDrive];
-        WozDiskImage.TrackBitStream stream = drive.currentTrackStream();
-        WozDiskImage image = drive.wozImage();
+        TrackBitStream stream = drive.currentTrackStream();
+        DiskImage image = drive.diskImage();
         logicSequencer.setWriteProtected(image != null && image.isWriteProtected());
 
         int totalTicks = cycles * LSS_TICKS_PER_CPU_CYCLE;
@@ -247,13 +247,11 @@ public final class Disk2Controller implements SlotCard {
 
     /**
      * One of this controller's two drives. Tracks which image is
-     * currently loaded, and now genuinely parses it via
-     * {@link WozDiskImage} on insert -- real, verified bit-level track
-     * data is available today via {@link #wozImage}. What's still
-     * missing is the LSS sequencer that would actually read it in
-     * response to the CPU polling Q6/Q7, a separate, not-yet-built
-     * piece -- this class's own job (tracking which image is loaded and
-     * making its data available) is done.
+     * currently loaded and makes its track data available to the LSS
+     * via {@link #diskImage}. {@code insert} picks {@link WozDiskImage}
+     * or {@link DskDiskImage} by file extension ({@code .dsk}/{@code
+     * .do} versus everything else) -- callers never need to know or
+     * care which one actually ends up loaded.
      */
     static final class Drive implements RemovableMediaDrive {
 
@@ -261,9 +259,9 @@ public final class Disk2Controller implements SlotCard {
         private static final int MAX_QUARTER_TRACK = 159;
 
         private Path currentImage;
-        private WozDiskImage wozImage;
+        private DiskImage diskImage;
         private int quarterTrack;
-        private WozDiskImage.TrackBitStream currentTrackStream;
+        private TrackBitStream currentTrackStream;
         private int streamedQuarterTrack = -1; // sentinel: no stream cached yet
 
         /**
@@ -289,7 +287,7 @@ public final class Disk2Controller implements SlotCard {
          * moved to a different quarter-track since the last call --
          * calling {@link WozDiskImage#trackAt} fresh every tick would
          * silently reset the read position to 0 constantly, since each
-         * call returns a brand new {@link WozDiskImage.TrackBitStream}.
+         * call returns a brand new {@link TrackBitStream}.
          * <p>
          * Deliberately simplified relative to the WOZ spec's own
          * recommendation: real hardware (and a fully faithful emulator)
@@ -303,12 +301,12 @@ public final class Disk2Controller implements SlotCard {
          *
          * @return the current track's bit stream, or {@code null} if no disk is loaded
          */
-        WozDiskImage.TrackBitStream currentTrackStream() {
-            if (wozImage == null) {
+        TrackBitStream currentTrackStream() {
+            if (diskImage == null) {
                 return null;
             }
             if (currentTrackStream == null || streamedQuarterTrack != quarterTrack) {
-                currentTrackStream = wozImage.trackAt(quarterTrack);
+                currentTrackStream = diskImage.trackAt(quarterTrack);
                 streamedQuarterTrack = quarterTrack;
             }
             return currentTrackStream;
@@ -320,7 +318,12 @@ public final class Disk2Controller implements SlotCard {
             if (!Files.exists(imagePath)) {
                 throw new IOException("Disk image not found: " + imagePath);
             }
-            wozImage = WozDiskImage.load(imagePath);
+            String name = imagePath.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+            if (name.endsWith(".dsk") || name.endsWith(".do")) {
+                diskImage = DskDiskImage.load(imagePath);
+            } else {
+                diskImage = WozDiskImage.load(imagePath);
+            }
             currentImage = imagePath;
             currentTrackStream = null;
             streamedQuarterTrack = -1; // force a fresh stream even if the head hasn't moved
@@ -329,7 +332,7 @@ public final class Disk2Controller implements SlotCard {
         @Override
         public void eject() {
             currentImage = null;
-            wozImage = null;
+            diskImage = null;
         }
 
         @Override
@@ -337,9 +340,9 @@ public final class Disk2Controller implements SlotCard {
             return currentImage != null;
         }
 
-        /** Package-visible for tests, and for the not-yet-built LSS to eventually consume. */
-        WozDiskImage wozImage() {
-            return wozImage;
+        /** Package-visible for tests, and for the LSS to consume. */
+        DiskImage diskImage() {
+            return diskImage;
         }
 
         @Override
