@@ -198,6 +198,19 @@ public final class Disk2Controller implements SlotCard {
      * 0). Both neighbors on, or neither, means no step -- the head
      * doesn't move on every switch access, only on a real, unambiguous
      * transition.
+     * <p>
+     * Each such clean transition moves the head by 2 quarter-tracks, not
+     * 1: real Apple documentation ("Beneath Apple DOS") describes the
+     * disk arm as positionable over 70 "phases" across 35 tracks -- 2
+     * phases per track -- with "two phases of the stepper motor... must
+     * be cycled" to move one full track. A real Apple "phase" is
+     * therefore 2 quarter-tracks (this project's own indexing unit,
+     * matching the WOZ format's 0-159 range for representing disk data
+     * positions), and standard DOS's own phase-stepping code only ever
+     * issues one clean transition per "phase" of desired movement --
+     * confirmed directly against a real Virtual ][ trace of this exact
+     * disk's boot sequence, where a fixed seek target produced exactly
+     * double this project's own resulting head travel before this fix.
      *
      * @param n the phase (0-3) being turned off
      */
@@ -207,9 +220,9 @@ public final class Disk2Controller implements SlotCard {
             boolean prevOn = phaseOn[(n + 3) % 4];
             phaseOn[n] = false;
             if (nextOn && !prevOn) {
-                drives[selectedDrive].step(1);
+                drives[selectedDrive].step(2);
             } else if (prevOn && !nextOn) {
-                drives[selectedDrive].step(-1);
+                drives[selectedDrive].step(-2);
             }
         }
     }

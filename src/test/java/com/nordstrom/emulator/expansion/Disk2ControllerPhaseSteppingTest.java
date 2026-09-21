@@ -14,6 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * correctly produce no movement, not just the two "normal" stepping
  * cases), not something a passing glance at the code would catch a
  * regression in.
+ * <p>
+ * Each such clean transition moves the head by 2 quarter-tracks, not
+ * 1 -- confirmed against real Apple documentation ("Beneath Apple
+ * DOS": the disk arm is positionable over 70 "phases" across 35
+ * tracks, 2 per track) and directly against a real Virtual ][ trace
+ * of an actual disk's boot sequence, where a fixed seek target
+ * produced exactly double this project's own resulting head travel
+ * before this magnitude was corrected.
  */
 class Disk2ControllerPhaseSteppingTest {
 
@@ -47,7 +55,7 @@ class Disk2ControllerPhaseSteppingTest {
         disk.writeIoSwitch(0x3, 0); // phase 1 on
         disk.writeIoSwitch(0x0, 0); // phase 0 off, next-neighbor (1) on -> step inward
 
-        assertEquals(start + 1, disk.drive(0).quarterTrack());
+        assertEquals(start + 2, disk.drive(0).quarterTrack());
     }
 
     @Test
@@ -57,26 +65,26 @@ class Disk2ControllerPhaseSteppingTest {
 
         disk.writeIoSwitch(0x1, 0);
         disk.writeIoSwitch(0x3, 0);
-        disk.writeIoSwitch(0x0, 0); // -> start + 1
+        disk.writeIoSwitch(0x0, 0); // -> start + 2
         disk.writeIoSwitch(0x5, 0); // phase 2 on
         disk.writeIoSwitch(0x2, 0); // phase 1 off, next-neighbor (2) on -> step inward again
 
-        assertEquals(start + 2, disk.drive(0).quarterTrack());
+        assertEquals(start + 4, disk.drive(0).quarterTrack());
     }
 
     @Test
     void turningOffWithPreviousNeighborOnStepsOutward() {
         Disk2Controller disk = new Disk2Controller();
         // Move inward 3 times first so there's room to step back outward
-        disk.writeIoSwitch(0x1, 0); disk.writeIoSwitch(0x3, 0); disk.writeIoSwitch(0x0, 0); // -> +1
-        disk.writeIoSwitch(0x5, 0); disk.writeIoSwitch(0x2, 0); // -> +2
-        disk.writeIoSwitch(0x7, 0); disk.writeIoSwitch(0x4, 0); // -> +3
+        disk.writeIoSwitch(0x1, 0); disk.writeIoSwitch(0x3, 0); disk.writeIoSwitch(0x0, 0); // -> +2
+        disk.writeIoSwitch(0x5, 0); disk.writeIoSwitch(0x2, 0); // -> +4
+        disk.writeIoSwitch(0x7, 0); disk.writeIoSwitch(0x4, 0); // -> +6
         int beforeOutwardStep = disk.drive(0).quarterTrack();
 
         disk.writeIoSwitch(0x5, 0); // phase 2 on (previous/counter-clockwise neighbor of 3)
         disk.writeIoSwitch(0x6, 0); // phase 3 off, previous-neighbor (2) on -> step outward
 
-        assertEquals(beforeOutwardStep - 1, disk.drive(0).quarterTrack());
+        assertEquals(beforeOutwardStep - 2, disk.drive(0).quarterTrack());
     }
 
     @Test
@@ -135,7 +143,7 @@ class Disk2ControllerPhaseSteppingTest {
         disk.writeIoSwitch(0x3, 0);
         disk.writeIoSwitch(0x0, 0); // step drive 2 inward
 
-        assertEquals(1, disk.drive(1).quarterTrack());
+        assertEquals(2, disk.drive(1).quarterTrack());
         assertEquals(0, disk.drive(0).quarterTrack());
     }
 }

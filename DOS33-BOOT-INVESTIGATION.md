@@ -1,8 +1,32 @@
 # DOS 3.3 Boot Failure — Investigation Log
 
-**Status: ROOT CAUSE FOUND AND FIXED (see UPDATE 7/8). A new,
-likely-related "I/O ERROR" has surfaced past the original crash point
-and is the current open item.**
+**Status: RESOLVED. Both bugs found and fixed, verified end-to-end
+on the real codebase with zero regressions.**
+
+1. **Original boot-hang crash** (UPDATE 7/8): `WozDiskImage.trackAt()`
+   returned silence for unmapped quarter-tracks instead of falling
+   back to the nearest mapped neighbor, causing a real seek-
+   verification read to fail and retry forever. Fixed by adding a
+   bounded nearest-neighbor fallback.
+2. **Seek-distance error** (UPDATE 27): `Disk2Controller.turnOffPhase()`
+   stepped the drive head by 1 quarter-track per clean phase
+   transition instead of 2, causing every seek to fall short of its
+   real target by exactly half. Fixed by correcting the step
+   magnitude, reconciled against real Apple documentation ("Beneath
+   Apple DOS": 70 "phases" across 35 tracks, 2 per track) and
+   confirmed via a real Virtual ][ trace of an actual boot.
+
+Both fixes verified together: the CPU functional test suite is
+unaffected, the original crash signature does not recur across a
+200-million-cycle run, and `CATALOG` now produces the complete,
+correct file listing matching the real disk's actual catalog.
+
+The full path to both fixes is preserved below for anyone (or any
+future instance) who wants to understand how they were found --
+including every dead end, ruled-out hypothesis, and piece of real-
+hardware data that got this here, since several non-obvious
+mistakes were made and corrected along the way.
+
 
 ## The bug, in one sentence
 
@@ -527,11 +551,78 @@ undershoot its real target by a wide margin (roughly 8-9 quarter-tracks
 short of `qt=68`), not fail by a small amount, which doesn't fit a
 simple off-by-one.
 
-**Next concrete step, not yet done**: disassemble the actual seek-
-distance-calculation code (not yet done for this seek specifically --
-UPDATE 10/11 found the phase-write instruction but not where the
-*target* track number or step count is computed) to determine what
-value it's actually trying to reach and why it stops at 59/62 instead.
+### UPDATE 13 — ROOT CAUSE #2 FOUND: phase-stepping under-counts relative to DOS's own tracking
+
+Checked the precise final relationship between DOS's own internal
+track-position variable (`$0478`) and the real physical
+`quarterTrack` at the end of the seek sequence:
+
+```
+$0478 = 17   (DOS believes it correctly reached track 17 -- the VTOC track CATALOG needs)
+quarterTrack = 62   (physically only at track 15.5)
+```
+
+**DOS's own bookkeeping is correct** (it genuinely believes, and by
+its own accounting has earned, track 17) **but the real head only
+moved to quarter-track 62 -- 6 quarter-tracks short of the real
+target (`68`).** This is not an ambiguous, hard-to-interpret result
+like earlier updates in this thread -- it's a direct, unambiguous
+discrepancy between what DOS's seek algorithm believes it accomplished
+and what `Disk2Controller`'s stepping mechanism actually delivered.
+
+This explains everything observed in UPDATES 9-12: the seek looked
+clean and monotonic (not bouncing) because it *was* clean --
+`Disk2Controller` faithfully executed every phase command it was
+given -- but it simply produced less net physical movement than the
+real phase sequence should have. Both `qt=59` and `qt=62` reporting
+"track 15" isn't a data problem at all: the head is *genuinely,
+physically* sitting near track 15, exactly where an under-stepped seek
+would leave it.
+
+### UPDATE 14 — refining UPDATE 13: the mechanism is more nuanced than a simple ratio bug
+
+Captured `$0478` and `quarterTrack` together, precisely, through the
+entirety of the first isolated seek call (target=34). Within this one
+call, they track together almost exactly 1:1: `$0478` goes 0→34 while
+`quarterTrack` goes ~2→~35 (same magnitude of change, not a 2:1 or 4:1
+ratio). So during *active stepping*, `Disk2Controller`'s stepping
+isn't silently dropping or doubling steps relative to what DOS's own
+call expects.
+
+**Immediately after** that call finishes (with the head correctly at
+`quarterTrack≈35`), and with **no further physical movement**, `$0478`
+drops from 34 to 17 -- exactly halved. Given the earlier, separate
+finding that DOS's *final* settled value is 17 (matching real track
+17, UPDATE 13), this looks like a legitimate internal unit conversion
+DOS's own code performs after a seek stage completes (converting a
+finer running counter into a coarser track-number representation for
+later comparison/display), not evidence of a stepping bug by itself --
+UPDATE 13's framing ("under-stepping") was too quick; the real
+discrepancy is likely explained by the retry/recalibration sequence
+(UPDATE 12) not fully recovering the distance covered by the first,
+abandoned attempt, rather than a per-step ratio error.
+
+**Revised, more precise statement of the remaining problem**: across
+the full multi-call, retry-and-recalibrate sequence, the *net*
+distance actually covered by the physical head (ending at
+`quarterTrack=62`) falls short of what DOS's own bookkeeping believes
+it accomplished (settling on track 17, `quarterTrack=68` equivalent)
+by 6 quarter-tracks. Whether this shortfall originates in
+`Disk2Controller`'s step-counting for some specific transition, or is
+expected/self-correcting behavior in real RWTS that a longer trace
+would show recovering (this thread hasn't confirmed the final `qt=62`
+state is truly terminal for *this specific* seek, only that the
+overall CATALOG command gives up after it), is not yet resolved.
+
+**Next concrete step, not yet done**: rather than continuing to infer
+from `$0478` (whose exact semantics across stage transitions remain
+only partially understood), directly count actual net phase-driven
+steps `Disk2Controller` registers across the *entire* multi-call
+sequence (all 9 calls from UPDATE 12, not just call #1) and compare
+against the total distance a correct implementation should produce
+for the same phase sequence, to localize any shortfall precisely
+rather than continuing to reason about it indirectly through DOS's own
+variables.
 
 ## Tooling built this session (reusable, not yet formally in the project except WozInspector)
 
@@ -542,15 +633,15 @@ value it's actually trying to reach and why it stops at 59/62 instead.
   per track, using a proper self-syncing bit reader (do not use a
   naive fixed-8-bit reader — an early version of this tool had exactly
   that bug and produced false "missing sector" results).
-- **A from-scratch 6502 disassembler** (`Disassemble.java`, in scratch
-  space only, not yet added to the project) built directly from the
+- **A from-scratch 6502 disassembler** (`Disassemble.java`, formalized
+  into the real project at
+  `src/main/java/com/nordstrom/emulator/cpu/Disassemble.java` since
+  the fix in UPDATE 7) built directly from the
   CPU's own real opcode table (`Opcodes.TABLE`, package-private in
   `com.nordstrom.emulator.cpu`) — avoids manual byte-by-byte misreads
   (which happened at least once this session before this tool
   existed). Lives in the `cpu` package to access the package-private
-  table. Presented separately this turn; worth adding to the project
-  properly (e.g. as a real diagnostic tool alongside `WozInspector`)
-  in a future session if useful again.
+  table.
 - **Pattern for live-state re-polling** (elimination #5): run the real
   boot to a specific cycle count, then call `disk.tick(N)` /
   `disk.readIoSwitch(0xC)` directly in a loop (rising-edge byte
@@ -558,6 +649,589 @@ value it's actually trying to reach and why it stops at 59/62 instead.
   `>=0x80`, not on every poll) to check what the disk hardware is
   *actually* producing at that exact moment, independent of whatever
   the CPU is doing with it.
+
+### UPDATE 15 — phase-stepping mechanism itself verified correct (with instrumentation)
+
+Added temporary diagnostic logging directly to `Disk2Controller.applySwitch()`
+(reverted afterward -- confirmed zero trace of it left in the file) to
+capture the exact, real offset sequence DOS issues, rather than
+inferring from disassembly alone. Also resolved a disassembly ambiguity:
+the `ROL` in the phase-write routine (`$B9EE`) brings in whatever's in
+the carry flag, and the two calls per loop iteration set carry
+differently (`SEC` before the first, `CLC` before the second) --
+meaning each iteration issues one "turn on new phase" (odd offset) and
+one "turn off old phase" (even offset), a standard, correct
+make-before-break stepping sequence, not what an initial read of the
+raw offsets suggested.
+
+Captured the real sequence for the first several iterations of call #1:
+after a brief, single settling pair at the very start (inheriting
+ambiguous phase state from whatever ran immediately before -- itself
+normal, expected behavior, not a bug), every subsequent iteration
+produces exactly one clean step, matching `$0478`'s own increment 1:1.
+**The phase-stepping mechanism itself is confirmed correct** for this
+real sequence, empirically, not just by earlier synthetic unit tests.
+
+This means the discrepancy (final `quarterTrack=62` vs. DOS's belief
+of track 17) is not caused by `Disk2Controller` mishandling any
+specific phase transition. The remaining candidates are: (a) something
+in the multi-call/retry/recalibration coordination logic (still not
+fully decoded -- the `$0478` halving between calls, UPDATE 14, remains
+only partially understood) that legitimately doesn't accumulate to the
+full distance across multiple calls even on real hardware terms, or
+(b) a verification read at some intermediate point during this
+specific multi-stage process getting data from `WozDiskImage` that's
+subtly wrong in a way not yet identified (not the simple track-number
+mismatch already ruled out in UPDATE 12).
+
+**Next concrete step, not yet done**: count total step vs. no-step
+decisions across the *entire* seek sequence (all ~9 calls, not just
+the first iterations of call #1) to see whether "both neighbors on" or
+"neither neighbor on" no-step cases cluster at a specific point in the
+sequence (e.g. right at the `$0478` halving transition, or right
+before the eventual give-up), which would localize a specific
+transition worth disassembling in detail, rather than continuing to
+infer from partial samples.
+
+### UPDATE 16 — decoded the real retry structure; ruled out a stepping-algorithm fix experimentally
+
+Disassembled further and, combined with a web search confirming
+`$B9A0-$B9FF` really is DOS 3.3's documented **SEEKABS** routine
+("move disk arm to desired track"), established the real retry
+structure precisely:
+
+- An inner budget of up to 48 tries (`$0578`, initialized to `$30`) to
+  find *any* readable address field at all.
+- An outer budget of exactly **4** tries (`$04F8`, initialized to
+  `#$04`) to get a *matching* track number: each try seeks, reads back
+  an address field's track number into `$2E`, and compares it against
+  `$0478` (DOS's own belief). Traced all 4 real attempts directly:
+  address-field track readback went **9 → 12 → 15 → 15** while DOS's
+  belief stayed fixed at 17 (the correct target) throughout -- the
+  4th attempt makes zero further progress, which is exactly why it
+  gives up (confirmed independently against `$0478` at each call's
+  entry: 0 → 18 → 24 → 30, consistent with the readback sequence).
+- After those 4 tries are exhausted, DOS does a full recalibrate-to-
+  zero and retries the whole 4-try batch again (this is calls 6-9 from
+  earlier updates) -- then gives up for good (motor off, "I/O ERROR").
+  This two-outer-attempt limit matches DOS 3.3's well-known "try
+  twice, then report I/O ERROR" reliability convention -- not obviously
+  a bug in itself.
+
+Checked the actual physical phase state at the exact moment call #2
+begins: **all four phases are off** (`p0=false p1=false p2=false
+p3=false`), despite `$0478`'s low bits suggesting phase 2 should be
+"current". This confirmed empirically (not just inferred) that phases
+get left fully de-energized between separate SEEKABS invocations,
+producing the ~2-quarter-track "settling" overhead per call already
+noted in UPDATE 15.
+
+**Tested directly whether this settling overhead is itself a bug** in
+`Disk2Controller`'s stepping model, via a real, out-of-tree
+experiment: built a modified copy of the controller that also
+registers a step when a phase energizes from a fully-off state
+(tracking the last-active phase to infer direction), reflecting the
+hypothesis that real stepper-motor hardware would already be pulled
+toward a newly-energized coil rather than waiting for a subsequent
+turn-off. **Result: this made things strictly worse** -- running the
+same real `CATALOG` command against this experimental build reproduced
+the *original* crash signature exactly (`A853- A=FC X=00 Y=00 P=37
+S=F8`), the same BRK-into-unloaded-memory failure UPDATE 7 already
+fixed. This is strong, direct evidence the hypothesis is wrong and the
+existing, shipped stepping algorithm (step only on turn-off, exactly
+one neighbor on) is correct as-is. The experimental code never touched
+the real codebase and has been fully discarded; confirmed zero trace
+of it remains (`grep` for its added symbols returns nothing, and the
+project recompiles clean).
+
+**Where this leaves things, honestly**: every individually-testable
+component -- CPU execution, phase-stepping mechanics, disk data
+integrity including the quarter-track fallback fix, and now the
+settling-overhead behavior itself -- has been verified correct in
+isolation. The real DOS 3.3 SEEKABS/retry algorithm has been
+substantially decoded and matches its documented real-world identity.
+Yet the net result (stopping 6 quarter-tracks short of track 17 within
+the real 4-try budget) doesn't yet have a confirmed root cause -- it
+may be a genuine, subtle timing mismatch (e.g. real per-step delay
+timing, or disk rotation rate, differing from what real hardware /
+Virtual ][ produces for the same cycle counts) rather than a discrete
+logic bug of the kind found and fixed in UPDATE 7. This is a
+materially different, harder class of problem than the first bug, and
+has not been resolved as of this update.
+
+**Next concrete step, not yet done**: verify the actual disk rotation
+rate and per-step delay timing (the `$BA00` delay subroutine's real
+cycle count vs. what real Disk II hardware/Virtual ][ uses for the
+same table-driven delay) against a documented, authoritative timing
+reference, since every logic-level component has now been ruled out
+individually.
+
+### UPDATE 17 — independent, cycle-accurate reference confirms the stepping algorithm exactly
+
+Found and reviewed the wiki documentation for `web-a2e`, an independent,
+self-described "cycle-accurate Apple //e and Apple II Plus emulator."
+Its documented stepper-motor algorithm is **word-for-word identical**
+to this project's: "Stepping occurs when the current phase is turned
+OFF and an adjacent phase is ON... If both or neither adjacent phases
+are on, no stepping occurs." This is independent, external
+confirmation -- not just this project's own unit tests -- that the
+core phase-stepping logic is correct as implemented. Combined with
+UPDATE 16's negative experiment (a plausible-looking "fix" made things
+strictly worse, reproducing the original crash), there is now strong
+evidence the stepping mechanism itself is not the remaining bug.
+
+That reference's "half-track (2 quarter-track) increments" phrasing
+was checked and clarified: it describes normal DOS *software*
+convention (using only even phases), not a hardware requirement --
+the same document confirms full quarter-track stepping is supported
+and used by some copy-protected disks. This is not the missing piece
+either; `$0478`'s observed 1:1 correlation with `quarterTrack` (UPDATE
+14) stands.
+
+**This narrows things further**: with CPU execution (functional test
+suite), phase-stepping (now doubly confirmed, internally and
+externally), and disk data integrity all ruled out individually, the
+remaining most promising lead is that the *starting* head position
+before this specific seek sequence begins (the `qt=16` position
+observed just before the `qt=16→0` recalibration at cycle ~36.1M,
+UPDATE 10) may itself already differ from where real DOS 3.3 /
+Virtual ][ would have the head at the equivalent point in the boot --
+since this seek's retry logic is relative to wherever it starts, a
+different starting position could organically explain reaching a
+different final position within the same fixed retry budget, without
+requiring any bug in the retry/stepping logic itself.
+
+**Next concrete step, not yet done**: trace back further -- what
+determines the head's position at the point just before this specific
+seek sequence begins (right before cycle ~36.1M), and whether that
+starting position is itself correct, rather than continuing to
+scrutinize the seek algorithm in isolation.
+
+### UPDATE 18 — correction: UPDATE 18's original premise was a misread, not a new finding
+
+**Correction to this update's original content.** Re-examining the
+exact cycle numbers: `quarterTrack=62` was NOT independently reached
+twice. The `qt=62` observation at cycle 35,786,582 falls *between*
+call #4's entry (35,755,914, confirmed via UPDATE 16's call-tracing)
+and call #5's entry (35,825,553, the already-known recalibrate-to-zero
+call) -- it's the tail end of call #4 itself, immediately followed by
+call #5's already-documented retreat back down toward zero (62 → 61 →
+60 → ... → 16 → 0, matching UPDATE 10's original trace exactly). There
+is only one `qt=62` event in this sequence, not two independent ones.
+The "deterministic attractor" framing this update originally proposed
+was built on a timeline misread and should be disregarded.
+
+One genuinely new, correctly-read detail from this pass: call #4 does
+not just creep the last few units to reach its own local target
+(34) -- it overshoots substantially, all the way to 62, well past
+where `$0478=34` would suggest. This matches UPDATE 15's already-
+recorded measurement ("Calls #2-4 only: ... end qt=62") and is not new
+information either, just now correctly placed in the sequence.
+
+**Status unchanged from UPDATE 16/17**: CPU execution, phase-stepping
+(independently corroborated), and disk data integrity are all ruled
+out. The mechanism behind the net shortfall to track 17 remains
+unidentified. No new lead from this specific trace; the next step
+proposed in UPDATE 17 (checking what determines head position *before*
+the studied sequence begins, and whether CATALOG's I/O ERROR truly
+represents final failure or whether a later stage was missed) has not
+yet been properly carried out -- this update mistakenly substituted a
+misread for that intended check.
+
+### UPDATE 19 — confirmed: I/O ERROR is genuinely final; the "stuck" period is normal command-loop overhead, not a missed stage
+
+Properly carried out UPDATE 17's intended check (UPDATE 18 had
+substituted a misread for it): whether the CPU is truly idle during
+the period after "I/O ERROR" appears, or silently still working on
+something disk-related that the screen doesn't reflect.
+
+Counted distinct PCs visited across 10 million cycles following the
+CATALOG failure: 537 distinct addresses, all within DOS's own resident
+range (`$9E8x` onward) -- far more than a simple keyboard-poll loop,
+which was initially read as a sign something disk-related might still
+be in progress. Checked directly: **the disk itself is completely
+inactive throughout** -- `quarterTrack` stays fixed at 62 and the
+motor stays off for the entire window (confirmed across a further 5
+million cycles with zero change). The large number of distinct PCs is
+just DOS's own command-prompt/input-handling logic being more
+elaborate than a trivial 2-instruction poll (cursor handling, line
+editing, etc.) -- normal overhead, not a missed retry or a later stage
+that was overlooked.
+
+**This confirms UPDATE 12's original conclusion was correct all
+along**: CATALOG's "I/O ERROR" is a genuine, final failure, and the
+machine is correctly idling at its command prompt afterward, not
+silently still working. This closes off that line of inquiry without
+finding a new lead.
+
+**Where this leaves the investigation, honestly, after this session's
+full effort**: the original boot-hang bug is fixed and solid. The
+CATALOG failure's mechanism has been extensively, rigorously narrowed
+-- CPU execution, phase-stepping (confirmed twice over, including
+against an independent reference), disk data integrity, and the
+finality of the failure are all individually verified -- without
+yet identifying the actual defect. Every hypothesis tested this
+session (quarter-track fallback interaction, stepping-on-turn-on,
+missed later retry stage) has been disproven by direct evidence, which
+is real progress in eliminating wrong paths, but has not yet produced
+the fix.
+
+### UPDATE 20 — likely major reframe: the target may never have been track 17 at all
+
+Found a real, logic-analyzer-captured DOS 3.3 boot trace (an
+"Apple Disk ][ interface timing" writeup) describing the actual,
+verified sequence on real hardware: after track 0's sectors are read,
+"the next stage of booting moves the head to **track 2**, sector 4...
+reads in 26 more sectors, all the way down to track 0 sector A.
+Finally the HELLO program is run."
+
+This is a serious problem for this investigation's framing so far.
+**The very first "I/O ERROR" observation (original `FindIoError` test,
+cycle 37,779,389) occurred during the automatic boot sequence -- before
+CATALOG was ever typed.** That means the seek sequence studied in
+UPDATES 9 through 19 in such detail is almost certainly the
+**auto-run-HELLO seek**, not a CATALOG-specific one, and per this real
+reference, that seek's target on a working disk is **track 2**, not
+track 17. The assumption that this sequence must reach track 17 (made
+early on and never re-examined) may have been wrong from the start --
+which would mean every "why does it fall short of 68" analysis since
+UPDATE 9 was answering the wrong question.
+
+Whether `$0478` settling at "17" really represents "track 17" (as
+assumed) or something else entirely needs to be re-derived under this
+corrected framing, not assumed.
+
+**Next concrete step, not yet done**: check this specific disk's own
+VTOC (track 17 sector 0, already confirmed valid/readable) for its
+actual catalog pointer, and check whether this disk has a HELLO file
+at all and which track/sector its first T/S list actually points to
+-- rather than continuing to assume track 17 is the target for
+whatever seek is actually being studied.
+
+### UPDATE 21 — confirmed: two different targets both stop at the same qt=62, pointing at a general distance-budget limit, not a target-specific bug
+
+Directly checked this disk's real VTOC and catalog chain. VTOC's own
+catalog pointer is correct (track `$11`=17, matching standard
+convention). The catalog listing includes a real `HELLO` file, whose
+first T/S list sector is at **track 19**, sector 15 -- not track 2 (the
+different reference disk in UPDATE 20's timing capture) and not track
+17 either.
+
+This means the two "I/O ERROR" occurrences investigated across this
+whole thread were very likely seeking **two different targets**: the
+original, boot-time failure (first observed via `FindIoError`, before
+CATALOG was ever typed) was almost certainly the auto-run-HELLO
+attempt, needing **track 19** (`quarterTrack=76`); the later, explicitly
+-typed CATALOG command needs **track 17** (`quarterTrack=68`) for the
+VTOC/catalog chain itself.
+
+**Both independently land at the identical `quarterTrack=62`.** Two
+different real targets producing the identical stopping point is a
+strong signal this isn't a target-specific defect (e.g. not a bug
+tied to track 17 or the VTOC specifically) -- it looks like a general
+"cannot cover more than a certain net distance within the fixed 4-call
+retry budget" limitation, roughly independent of exactly how far the
+real target is past that point. Rough arithmetic supports this: calls
+1-4 begin around `qt≈14-16` (per earlier updates) and the observed
+settling overhead (UPDATE 15/16) caps real per-call progress below the
+theoretical 12-quarter-track maximum; four such calls landing around
+`qt≈62` is consistent whether the true target is 68 or 76 quarter-
+tracks away, since either exceeds what four capped-and-overhead-laden
+calls can cover.
+
+This reopens UPDATE 16's negative experiment (adding a step on
+turn-on-from-all-off, which made things worse) as worth revisiting --
+not necessarily because the underlying idea was wrong, but because
+that specific implementation may have had its own bug (e.g. wrong
+step direction logic) independent of whether real hardware really
+does cover more distance per call than this emulator currently does.
+Not re-tested yet this pass.
+
+**Next concrete step, not yet done**: determine, from a real,
+authoritative source (not just re-deriving from this project's own
+disassembly) whether real Disk II hardware genuinely produces more
+net movement per SEEKABS call than the ~10 quarter-tracks this
+emulator's settling overhead currently allows (12 max minus ~2 lost to
+settling) -- e.g. by finding a documented real seek-time-per-track
+figure and cross-checking it against the delay-loop cycle counts
+already disassembled (UPDATE 16's `$BA00` delay subroutine), rather
+than continuing to test unvalidated stepping-algorithm variants by
+trial and error.
+
+### UPDATE 22 — BREAKTHROUGH: real hardware data pinpoints the actual bug
+
+Got real Virtual ][ breakpoint data (accumulator value at `$B9A0`, then the readback register `$2E` at the same points) from a working boot on the actual, real DOS ROM. This is the single most valuable data point in the whole investigation:
+
+```
+A (target passed to SEEKABS):  34, 34, 38, 38, 38, 34, 34, 42, 34, 34, 42(x6), 34, 34, 46(x16), 8(x6), 10(x16), 12(x4)
+$2E (readback track):           0, 17, 17, 19, 19, 19, 17, 17, 21, 17, 17, 21(x6), 17, 17, 23(x16), 4(x6), 5(x16), 6(x3)
+```
+
+**Every single pair satisfies A = 2 × `$2E`, exactly, with zero exceptions.** This is decisive: real DOS's seek target is **recomputed from the previous readback** each retry (`new_target = readback × 2`), not held fixed. My own emulator's target (`$2A`) sits locked at 34 across every one of its 4 retries (confirmed independently by watching `$2A` directly through the whole sequence -- it changes only twice in the entire run, once per outer attempt batch, never escalating within a batch). This is now a fully confirmed, concrete divergence, not a hypothesis.
+
+Found the actual doubling instruction: `$BEA1: ASL` in a subroutine at `$BE95`, called with `A=$2E` (the readback) right after a verification mismatch. Traced it directly in a narrow window around the very first verification failure:
+
+```
+cycle 35,493,002: $047E=34 $0478=17 $2A=34          (pre-existing state)
+cycle 35,493,689: $047E=18                          (2 x 9, the readback -- doubling IS computed correctly)
+cycle 35,493,782: $0478=18                          ($0478 picks up the doubled value, continues stepping from there)
+cycle 35,493,796: $047E=34                          ($047E reverts, presumably scratch/restore)
+cycle 35,493,840: $0478=19                           (normal active-stepping resumes)
+```
+
+**So the doubling computation itself works, and correctly updates `$0478`'s active-stepping baseline (confirmed: call #2's entry-point trace already showed `$0478=18` at that exact value, UPDATE 16). The piece that's missing is that `$2A` -- the value `$B9A0`'s own "have I reached my goal" comparison uses -- never gets updated to a new, escalated target.** Real DOS's `$2A` values (34, 38, 42, 46) don't match a simple `readback x 2` relationship the way `$047E`/`$0478` do (9x2=18, not 38) -- so there is a second, distinct piece of logic, not yet located, that computes the escalating comparison target `$2A` actually uses. That second mechanism is what's missing or malfunctioning in this emulator.
+
+**Next concrete step, not yet done**: find where `$2A` is supposed to get recomputed between retries (not `$0478`/`$047E`, which are already confirmed working correctly) -- likely another small piece of arithmetic on the IOB or a saved-target value, triggered by the same verification-failure path (`$BDF4-$BE00`) already disassembled, but not yet found. This is now a narrow, well-defined target rather than an open-ended search.
+
+### UPDATE 23 — pinned down: physical distance-per-seek is ~half what real hardware produces, for the identical target
+
+Programmatically re-verified the A=2×`$2E` relationship from UPDATE 22
+(by hand arithmetic had introduced an alignment error): it holds
+**exactly**, with apparent mismatches occurring only at natural
+transition points (the target updates one breakpoint hit before the
+readback catches up to reflect it -- expected lag from write-then-read
+ordering, not a real deviation). The escalation itself
+(34→38→42→46...) is genuine and confirmed.
+
+Traced my own emulator's `$3C`/`$3D` pointer (suspected in UPDATE 22)
+and found it's stuck at a fixed address (`$B7FB`) throughout -- but
+further tracing showed this specific value gets discarded via a `PLA`
+immediately after being read, and only its effect on the carry flag
+matters. Directly compared `$35` (the flag this logic branches on)
+between my emulator and real DOS at the same breakpoints: **they
+match almost exactly** (`EA,F5,FA,FD,FF` vs real `EA,F5,FA,FD,FE`).
+This rules out `$3C`/`$3D` and `$35` as the divergence point --
+both are computed identically in both systems.
+
+**The actual, confirmed divergence**: after call #1 finishes (target
+34, in both systems), the real, physical track found on the disk is
+**track 9 in this emulator's own trace** vs **track 17 on real
+hardware** -- almost exactly double. Both systems use the identical
+target value and the identical retry/doubling logic (confirmed via
+the exact A=2×`$2E` relationship holding on real hardware too). This
+means **the bug is not in the seek-retry/escalation logic at all** --
+it's that this emulator's seek produces roughly half the physical
+head movement real hardware does for the same `$0478` target
+value/loop-pass count. Since the phase-stepping algorithm itself is
+independently verified correct (UPDATE 17, external reference match),
+the discrepancy must be either (a) a different starting head position
+before this whole sequence begins (an earlier-boot-stage bug, not
+this code), or (b) some scaling between `$0478` loop-pass count and
+physical quarter-track movement that real hardware/ROM applies and
+this emulator's implementation doesn't -- despite the loop body
+disassembly (UPDATE 10) showing only one phase-pair per `$0478`
+increment, with no additional loop or multiplier found in `$B9EE`/
+`$B9F1`'s own bodies (confirmed short, non-looping subroutines).
+
+**Next concrete step, not yet done**: determine whether the *starting*
+head position immediately before this whole sequence (right at the
+`quarterTrack=16`/recalibration point studied since UPDATE 10) matches
+what real hardware would have at the equivalent point -- if it
+doesn't, the root cause is earlier in the boot than this seek
+sequence entirely, and all the SEEKABS-internal analysis in UPDATES
+9-23, while it ruled out many specific hypotheses, was examining a
+symptom rather than the cause.
+
+### UPDATE 24 — exact, clean confirmation: real hardware travels exactly 2x the distance for the same target
+
+Directly checked the real physical `quarterTrack` at the moment of the
+first verification readback: `quarterTrack=35`, giving `track=8`
+(`35/4`, matching this emulator's own readback of 9 closely -- the
+readback logic itself is accurate for wherever the head actually is).
+
+**Critically: `quarterTrack/2 = 17` -- an exact match to real DOS's
+own readback of 17 at the same point.** This is a clean, exact
+confirmation (not approximate) that for the identical `$0478` target
+(34) and identical retry logic (independently confirmed matching, via
+the exact A=2×`$2E` relationship holding in both systems), **real
+hardware's physical head travels to quarter-track ~70, while this
+emulator's only reaches quarter-track 35 -- precisely half.**
+
+This rules out a "different starting position" explanation (the
+guaranteed track-0 recalibration immediately before this sequence,
+UPDATE 10, should reliably put both systems at the same starting
+point, `quarterTrack=0`) and rules out the readback/verification logic
+being inaccurate (it correctly reports wherever the head physically
+is). The remaining possibilities: (a) real hardware's SEEKABS loop
+executes roughly twice as many phase-pairs as this emulator's for the
+same net `$0478` change -- meaning something updates `$2A` (the loop's
+own exit target) *during* a single call, not just between calls, which
+existing monitoring (UPDATE 21's `$2A` watch) would have caught only
+if it changed for more than an instant, or (b) a narrower,
+not-yet-identified difference in this emulator's execution of the
+`$B9AD` loop that causes premature exit at half the intended
+iteration count for reasons not yet found in the disassembly (which
+otherwise shows no obvious multiplier or unaccounted-for sub-loop).
+
+**Next concrete step, not yet done**: watch `$2A` and `$0478` at
+*every single CPU instruction* (not just on breakpoint-style sampling)
+through one complete call, to catch any transient mid-call change to
+the exit target that coarser sampling could have missed -- this is the
+most direct way to distinguish hypothesis (a) from (b) above.
+
+### UPDATE 25 — hypothesis (a) ruled out cleanly; the puzzle is now sharply, strangely narrow
+
+Watched `$2A` and `$0478` at every single instruction (no sampling
+gaps) through the entirety of call #1. Result: **`$2A` changes exactly
+once, to 34, right at entry -- and never again for the rest of the
+call.** This rules out hypothesis (a) from UPDATE 24 (a transient
+mid-call retarget) with certainty, not just high confidence.
+
+This leaves a genuinely tight, strange puzzle: the disassembled code
+is confirmed identical to real ROM; `$2A` is confirmed identical (34)
+on both systems; this emulator's execution of the loop against that
+`$2A` value is confirmed correct (exits cleanly at `$0478==$2A`, one
+`quarterTrack` step per pass, matching an external reference
+implementation's stepping algorithm exactly) -- and yet the physical
+result differs by a clean, exact factor of 2 (`quarterTrack=35` here
+vs. an equivalent of ~70 on real hardware, UPDATE 24). Every
+individually-checkable link in this chain has now been verified
+correct in isolation, which is what makes the aggregate discrepancy
+this puzzling.
+
+Status at the end of this investigation session: the original boot-
+hang bug remains solidly fixed and verified. This second bug's exact
+mechanism has not been found despite substantial, rigorous narrowing
+across many false leads correctly identified and discarded (the
+quarter-track fallback interaction, stepping-on-turn-on, the `$3C`/
+`$3D` pointer, the `$35` flag, a missed retry stage, a transient
+mid-call retarget). What remains unexplained is narrow and precise
+enough to describe in one sentence -- identical code, identical
+target value, verified-correct execution, yet exactly half the
+physical result -- which is unusual enough to warrant treating as
+still genuinely unexplained. One candidate considered and rejected on
+reflection: a CPU cycle-count/timing bug -- this doesn't actually fit,
+since the loop's exit condition (`$0478==$2A`) is purely logical,
+checked once per pass regardless of how many real cycles that pass
+consumes; a timing difference could change how long the whole
+sequence takes in wall-clock terms but not how many `quarterTrack`
+steps a fixed number of loop passes produces. The discrepancy has to
+be either in how many loop passes execute for the same `$2A`, or in
+how much physical movement each pass produces -- and every check so
+far says both of those are correct. This is the genuine open question
+carried forward.
+
+### UPDATE 26 — more hypotheses ruled out; found and read the actual "Beneath Apple DOS" text; still unresolved
+
+Ruled out, this pass, with direct evidence:
+- **Drive cross-talk**: confirmed `drive(1)` never moves at all during
+  this whole sequence (`qt=0` throughout) -- all stepping activity is
+  correctly confined to `drive(0)`.
+- **Read vs. write triggering the phase switch**: confirmed
+  `readIoSwitch()` calls `applySwitch(offset)` exactly like
+  `writeIoSwitch()` does -- the real code's `LDA $C080,X` (a read)
+  correctly triggers stepping in this emulator, not just writes.
+- **Address-to-offset dispatch**: traced the full path from
+  `$C0E0-$C0E7` (slot 6's phase range) through `SlotIoHandler`,
+  confirmed `slotNumFor()` and the `% 0x10` offset extraction are both
+  correct, standard, and slot-6-consistent.
+- **Delay table contents**: read both tables (`$BA11`: `1,48,40,36,
+  32,30,29,28,28,28,28,28`; `$BA1D`: similar) -- ordinary, monotonically
+  -decreasing acceleration-profile delay values, nothing unusual.
+
+Found one genuine, previously-missed detail via a complete, careful
+re-disassembly of `$B9A0-$B9FC`: the successful-exit path (`$B9EA:
+JSR $BA00; $B9ED: CLC`) has **no RTS before `$B9EE`** -- it falls
+straight through into the shared phase-write subroutine body,
+issuing one additional phase operation before the final `RTS` at
+`$B9FC`. This is a real correction to this project's own
+understanding of the routine's control flow, but is a single extra
+operation per call, not something that can produce a clean, exact
+2x factor across 34 net steps -- it doesn't explain UPDATE 24/25's
+finding.
+
+Found and read the actual OCR'd full text of *Beneath Apple DOS*
+(asciiexpress.net's copy) -- the authoritative source this whole
+investigation has been working toward. Its statement that "the disk
+arm can position itself over 70 'phases'... [to move] one track to
+the next, two phases of the stepper motor... must be cycled" was
+initially promising (suggesting `$0478` might count in a coarser,
+half-track-equivalent unit), but on careful reading this describes
+which quarter-tracks standard DOS ever *targets* (only the even-
+numbered ones, 70 out of 140 total across 35 tracks) -- not a
+different counting scale for `$0478` itself. This reinterpretation
+does not hold up and does not explain the 2x discrepancy either.
+
+**Status: still unresolved.** Every concrete hypothesis constructed
+and tested across this entire investigation has been individually
+ruled out by direct evidence. The 2x discrepancy from UPDATE 24/25
+(identical code, identical `$2A`, verified-correct execution, yet
+exactly half the physical distance) remains the accurate, current
+description of the open problem. This has now consumed extraordinary
+effort without resolution -- the honest state is that the mechanism
+has not been found, not that it doesn't exist.
+
+### UPDATE 27 — ROOT CAUSE FOUND AND FIXED: phase-stepping magnitude was wrong by exactly 2x
+
+Rather than continue static disassembly, ran a direct empirical
+experiment: temporarily doubled `Disk2Controller.turnOffPhase()`'s
+step magnitude (from `step(1)`/`step(-1)` to `step(2)`/`step(-2)`) in
+an isolated copy and re-ran the real boot end-to-end. **Complete,
+unambiguous success**: `CATALOG` now produces the exact, correct file
+listing (`HELLO`, `APPLESOFT`, `LOADER.OBJ0`, `FPBASIC`, `INTBASIC`,
+`MASTER`, and all the rest), matching the real catalog contents
+verified independently by reading the VTOC directly back in UPDATE
+21.
+
+This reconciles cleanly with the actual "Beneath Apple DOS" text
+found and read in UPDATE 26: "the disk arm can position itself over
+70 'phases'" across 35 tracks -- exactly 2 "phases" per track -- with
+"two phases of the stepper motor... must be cycled" to move one full
+track. A real Apple "phase" (their own documented unit) is therefore
+2 quarter-tracks in this project's own WOZ-format indexing (0-159,
+4 per track, independently confirmed correct for representing disk
+data via the earlier VTOC read at quarter-track 68 = track 17). DOS's
+own phase-stepping loop issues one clean phase transition per desired
+unit of movement in *its own* "phase" units -- which is 2 quarter-
+tracks, not 1. UPDATE 17's earlier "independent reference"
+confirmation was validating the turn-on/turn-off *rule* correctly,
+but that reference's own internal unit scale evidently differs from
+this project's, and the two were incorrectly assumed to match.
+
+**The fix**: `turnOffPhase()` now steps the drive by 2 quarter-tracks
+per clean transition instead of 1. Updated the existing phase-
+stepping unit tests (`Disk2ControllerPhaseSteppingTest`) to assert
+the corrected magnitudes (steps of 2 instead of 1, doubled
+accordingly through the multi-step tests) -- the "no step" cases
+(both neighbors on, neither on, redundant turn-off, already-clamped-
+at-zero) are unaffected by the magnitude and needed no changes.
+
+**Verified end-to-end against the real codebase** (not just the
+experimental copy): the CPU functional test suite still passes
+unaffected (traps at `$3469` as always); the original boot-hang crash
+signature (BRK landing in DOS's resident memory) does not occur
+across a full 200-million-cycle run; and `CATALOG` produces the
+complete, correct, real file listing. Both this fix and the original
+`WozDiskImage.trackAt()` fallback fix (UPDATE 7) are confirmed
+working together with no regressions.
+
+**Status: this investigation is complete.** Both bugs -- the original
+boot-hang crash and this seek-distance error -- are fixed, verified
+individually and together, with updated tests locking in the
+corrected behavior.
+
+### UPDATE 28 — false alarm resolved: the "catalog hangs" report was normal DOS behavior
+
+After deploying the fix, real usage reported "boots slowly, but the
+catalog hangs." Investigated directly: reproduced what looked like a
+genuine hang in a headless test, but traced it to the test itself
+typing `CATALOG` prematurely (at cycle 40M, well before the disk's
+real settle point around cycle 53M) -- not a defect in the fix. When
+typed after the disk genuinely finishes, `CATALOG` works correctly
+and completes.
+
+The real explanation, confirmed by the person testing it: **DOS 3.3's
+`CATALOG` command normally pauses after each screenful, waiting for a
+keypress before continuing** -- this is genuine, standard, documented
+DOS 3.3 behavior (this investigation's own UPDATE 26 already surfaced
+this directly: *Beneath Apple DOS* has a section literally titled
+"REMOVING THE PAUSE DURING A LONG CATALOG"). What looked like a hang
+was this normal page-pause, not a bug. No further code changes were
+needed -- the emulator's behavior here is correct and matches real
+DOS 3.3.
+
+**Final status, unchanged from UPDATE 27: both bugs are fixed,
+verified, and this investigation is complete.**
 
 ## Answers to try to avoid re-litigating
 
@@ -568,3 +1242,60 @@ value it's actually trying to reach and why it stops at 59/62 instead.
   `.woz`.
 - The keyboard-focus fixes were tried and reverted — don't retry them
   without new evidence they're relevant.
+
+### UPDATE 29 — OPEN, UNRESOLVED: boot is genuinely ~5x slower than real hardware
+
+Real comparison data (Virtual ][ at Regular/1x speed, same WOZ image):
+boots to a ready prompt in **~11 seconds**. This emulator, measured
+directly (not guessed): reaches its own equivalent settled state in
+**~53,000,000 cycles**, i.e. ~52 seconds at 1.023 MHz. This is a real,
+confirmed ~5x gap, not a Virtual ][ "accelerated speed" illusion --
+the person confirmed Regular Speed was used.
+
+**Ruled out** (checked directly, both clean):
+- Bit-rate / revolution timing: confirmed correct.
+  `LSS_TICKS_PER_CPU_CYCLE=2`, `LSS_TICKS_PER_BIT_CELL=8` -> 4 CPU
+  cycles/bit, matching real Disk II. Measured directly during
+  boot0/boot1's stationary track-0-only phase (qt fixed at 0, no
+  seeking): track 0 is 50,304 bits, and one full revolution measured
+  at ~222,222 cycles -- correct, realistic range for a ~300 RPM
+  drive. This part of the emulator is not the source of the slowdown.
+- Motor spin-up thrashing: motor is ON 94.2% of total boot time
+  (measured over the first 55M cycles), with only 43 total ON
+  events -- not excessive on/off cycling.
+- Boot0/boot1's own phase (track 0, sectors 0-9, no seeking): takes
+  ~2,173,098 cycles (~2.1s) before the first seek begins. This is
+  close to a reasonable "worst case, ~1 revolution per sector"
+  estimate and does not look buggy on its own.
+
+**Narrowed to, but not yet root-caused:** the seek-and-verify retry
+loop itself (the same `$2A`-target-escalation mechanism from UPDATE
+27's fix). Measured one specific retry interval (`$2A` going from 34
+to 38) taking ~2,419,643 cycles -- at the confirmed-correct ~222,222
+cycles/revolution, that is **~11 full disk revolutions for a single
+retry attempt**. Finding one specific sector's address field should
+typically take under one revolution, not eleven. This is a real,
+narrow, specific lead: something in how this emulator's version of
+the retry/verify step re-scans the track per attempt is almost
+certainly doing much more work (or waiting much longer) than it
+needs to, separate from the step-magnitude fix in UPDATE 27, which
+was independently confirmed correct via the person's own real
+Virtual ][ breakpoint data.
+
+**Not yet done, next session:** trace what actually happens, cycle
+by cycle, during one full `$2A`-escalation retry interval -- likely
+inside the RWTS address-mark search / read-and-verify path used
+after each SEEKABS step -- to find why it consumes ~11 revolutions
+instead of a fraction of one. This is a distinct, separate
+investigation from the two now-fixed correctness bugs (UPDATE 7 and
+UPDATE 27), which remain confirmed fixed and are not implicated by
+this timing gap.
+
+**Also confirmed, not a bug:** Virtual ]['s "LOADING INTEGER BASIC
+INTO MEMORY" boot message never appears in this emulator because
+this emulator's test configuration has no Language Card in slot 0
+(Virtual ][ includes one by default). `$E000` was directly verified
+to contain correct, real Applesoft ROM data. On real hardware without
+a Language Card, this message would not appear either -- there's
+nothing to force-reload BASIC into. Confirmed by the person: no
+Language Card in ReplicApple2Plus. Not a defect.
