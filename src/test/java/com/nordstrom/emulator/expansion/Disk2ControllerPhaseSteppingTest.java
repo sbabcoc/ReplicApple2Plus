@@ -22,6 +22,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * of an actual disk's boot sequence, where a fixed seek target
  * produced exactly double this project's own resulting head travel
  * before this magnitude was corrected.
+ * <p>
+ * A second, later-added set of cases (the {@code recalibrationPattern*}
+ * tests) locks in a different, equally real access pattern: BOOT0's own
+ * track-0 recalibration loop, which turns each phase fully off before
+ * turning the next (cyclically decreasing) one on, with no overlap at
+ * any point -- unlike normal SEEKABS usage above, which always has the
+ * new phase on while the old one is still on. Confirmed directly: this
+ * pattern, run against a real PR#6 warm-reboot scenario, previously left
+ * the head stuck wherever it happened to be (since neither phase ever
+ * had a genuinely-on neighbor at the moment of its own off touch), and
+ * a subsequent {@code CATALOG} after the recalibration-driven reboot
+ * confirmed DOS was fully, correctly functional once this was fixed --
+ * not just that some movement occurred.
  */
 class Disk2ControllerPhaseSteppingTest {
 
@@ -144,6 +157,51 @@ class Disk2ControllerPhaseSteppingTest {
         disk.writeIoSwitch(0x0, 0); // step drive 2 inward
 
         assertEquals(2, disk.drive(1).quarterTrack());
+        assertEquals(0, disk.drive(0).quarterTrack());
+    }
+
+    @Test
+    void recalibrationPatternStepsOutwardEveryIterationAfterTheFirst() {
+        // BOOT0's own track-0 recalibration loop: turn each phase fully off,
+        // then turn the next one (cyclically decreasing) on, with no overlap
+        // at any point -- unlike normal SEEKABS usage above, which always
+        // has the new phase on while the old one is still on. Confirmed
+        // against the real, verified boot ROM's exact access pattern.
+        Disk2Controller disk = new Disk2Controller();
+        // Move inward first so there's room to recalibrate back down.
+        disk.writeIoSwitch(0x1, 0); disk.writeIoSwitch(0x3, 0); disk.writeIoSwitch(0x0, 0); // +2
+        disk.writeIoSwitch(0x5, 0); disk.writeIoSwitch(0x2, 0); // +4
+        disk.writeIoSwitch(0x7, 0); disk.writeIoSwitch(0x4, 0); // +6
+        int start = disk.drive(0).quarterTrack();
+
+        // Recalibration: off(3) [was on], on(2); off(2), on(1); off(1), on(0) --
+        // each off-then-on pair with no overlap should step outward by 2.
+        disk.writeIoSwitch(0x6, 0); // phase 3 off (was on, neither neighbor on -> no step, settles at 3)
+        disk.writeIoSwitch(0x5, 0); // phase 2 on, resuming from all-off, neighbor of 3 -> step outward
+        disk.writeIoSwitch(0x4, 0); // phase 2 off (neither neighbor on -> no step, settles at 2)
+        disk.writeIoSwitch(0x3, 0); // phase 1 on, neighbor of 2 -> step outward again
+
+        assertEquals(start - 4, disk.drive(0).quarterTrack());
+    }
+
+    @Test
+    void recalibrationPatternClampsAtTrackZeroRegardlessOfStartingPosition() {
+        Disk2Controller disk = new Disk2Controller();
+        // Move inward several times to simulate starting far from track 0.
+        disk.writeIoSwitch(0x1, 0); disk.writeIoSwitch(0x3, 0); disk.writeIoSwitch(0x0, 0);
+        disk.writeIoSwitch(0x5, 0); disk.writeIoSwitch(0x2, 0);
+        disk.writeIoSwitch(0x7, 0); disk.writeIoSwitch(0x4, 0);
+        disk.writeIoSwitch(0x1, 0); disk.writeIoSwitch(0x6, 0);
+
+        // Repeatedly cycle off-then-on through decreasing phases, well past
+        // enough iterations to reach track 0 from any real starting position.
+        int[] sequence = {0x0, 0x7, 0x6, 0x5, 0x4, 0x3, 0x2, 0x1};
+        for (int rep = 0; rep < 20; rep++) {
+            for (int offset : sequence) {
+                disk.writeIoSwitch(offset, 0);
+            }
+        }
+
         assertEquals(0, disk.drive(0).quarterTrack());
     }
 }

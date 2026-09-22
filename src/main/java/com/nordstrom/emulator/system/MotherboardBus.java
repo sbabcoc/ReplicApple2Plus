@@ -69,6 +69,7 @@ public final class MotherboardBus implements MemoryBus {
     private final SpeakerToggle speakerToggle = new SpeakerToggle();
     private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
     private final VideoScanner videoScanner = new VideoScanner(videoSoftSwitches);
+    private final SlotCard[] slots;
 
     /**
      * Wires up the full Apple II+ memory map against {@code slots} (length 8, slot 0 included) -- typically the array {@link SlotCardLoader#load} just populated.
@@ -79,6 +80,7 @@ public final class MotherboardBus implements MemoryBus {
         if (slots.length != 8) {
             throw new IllegalArgumentException("slots must have length 8 (slots 0-7)");
         }
+        this.slots = slots;
 
         addressSpace.register(0x0000, 0xBFFF, new RamHandler(0xC000));
 
@@ -92,6 +94,12 @@ public final class MotherboardBus implements MemoryBus {
         addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
         FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
+
+        for (SlotCard card : slots) {
+            if (card instanceof com.nordstrom.emulator.expansion.Disk2Controller disk) {
+                disk.setFloatingBusSupplier(floatingBus::read);
+            }
+        }
 
         addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0], floatingBus));
 
@@ -164,6 +172,27 @@ public final class MotherboardBus implements MemoryBus {
      */
     public VideoScanner videoScanner() {
         return videoScanner;
+    }
+
+    /**
+     * The card occupying slot {@code slotNum}, or {@code null} if that
+     * slot is empty. Exists for the same reason as this class's other
+     * peripheral accessors -- so whatever assembles the real machine
+     * can reach a specific card (a {@code Disk2Controller}, say) to
+     * wire its own cycle-driven ticking into
+     * {@link SystemClock#addCycleListener}, the same way it wires this
+     * class's own {@link #videoScanner} and {@link #paddleTimers}.
+     * Deliberately not a generic hook on {@link SlotCard} itself --
+     * only one kind of card currently needs cycle ticking at all, so a
+     * type-specific check by whoever assembles the machine is simpler
+     * than a no-op default method every other card would have to
+     * ignore.
+     *
+     * @param slotNum 0-7
+     * @return that slot's card, or {@code null} if empty
+     */
+    public SlotCard slotCard(int slotNum) {
+        return slots[slotNum];
     }
 
     /**

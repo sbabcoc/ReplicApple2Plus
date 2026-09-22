@@ -41,13 +41,18 @@ import java.util.Set;
  * Real hardware detail worth being explicit about: EVERY access to
  * $C0n0-$C0nF, read or write, is significant purely as an address-decode
  * event -- software commonly does {@code LDA $C0n8} or {@code BIT $C0n9}
- * to flip a switch, discarding whatever byte comes back. For offsets
- * 0x0-0xB (phase/motor/drive-select), real software never inspects the
- * returned value, so this returns a harmless 0 on read after applying
- * the state change -- that's a deliberate, narrow exception to
- * "don't return unverified data," justified specifically because no
- * real program ever looks at it. Offsets 0xC-0xF are different: their
- * return value is the actual data latch, via {@link Disk2LogicSequencer#latch}.
+ * to flip a switch, discarding whatever byte comes back. For most offsets
+ * 0x0-0xB (phase/motor/drive-select), software indeed discards the
+ * returned value -- but not universally: real, verified DOS 3.3 RWTS code
+ * has at least one path ({@code LDA $C08A,X} / {@code LDA $C08B,X}) that
+ * genuinely reads the result and uses it (as an {@code $BA00} delay-loop
+ * count). On real hardware these offsets don't drive the data bus, so a
+ * read shows the floating bus -- whatever the video circuitry last
+ * fetched, not a fixed value. This is wired in via
+ * {@link #setFloatingBusSupplier}; without it (e.g. in isolated unit
+ * tests), offsets 0x0-0xB read back as a harmless 0. Offsets 0xC-0xF are
+ * different: their return value is the actual data latch, via
+ * {@link Disk2LogicSequencer#latch}.
  * <p>
  * Two named, deliberate simplifications remain, both documented at
  * their actual source rather than here: {@link Drive#currentTrackStream}
@@ -66,12 +71,45 @@ public final class Disk2Controller implements SlotCard {
     private static final int LSS_TICKS_PER_CPU_CYCLE = 2;
 
     private final boolean[] phaseOn = new boolean[4];
+    private int currentPhase = -1; // -1 = not yet established; set on first phase touch
     private boolean motorOn;
     private int selectedDrive; // 0 or 1
     private boolean q6;
     private boolean q7;
     private final Disk2LogicSequencer logicSequencer = new Disk2LogicSequencer();
     private int lssPhaseCounter; // 0 to LSS_TICKS_PER_BIT_CELL-1, cycling
+
+    /**
+     * Supplies the real hardware's floating-bus byte -- whatever the video
+     * circuitry last fetched -- for soft-switch offsets (0x0-0xB) that don't
+     * drive the data bus themselves. Real DOS 3.3 RWTS code genuinely reads
+     * these (e.g. {@code LDA $C08A,X} / {@code LDA $C08B,X} touching the
+     * drive-select switches) and uses the result directly, so returning a
+     * fixed value here is observably wrong, not just academically impure:
+     * one specific, verified RWTS code path uses this read's result as an
+     * {@code $BA00} delay-loop count, and a fixed 0 makes that count wrap
+     * to its 8-bit maximum (256 iterations) on every single call instead of
+     * real hardware's small, varying value -- confirmed to cost roughly a
+     * million extra CPU cycles per occurrence, recurring on nearly every
+     * sector read during a multi-sector file load. Wired in by whatever
+     * constructs this card (see {@code MotherboardBus}), since a
+     * floating-bus read depends on the video circuitry and address space,
+     * neither of which this class otherwise has any reason to reference.
+     * Left {@code null} (e.g. in isolated unit tests), offsets 0x0-0xB
+     * simply read back as 0, same as before this existed.
+     */
+    private java.util.function.IntSupplier floatingBusSupplier;
+
+    /**
+     * Wires in the real floating-bus read this card needs for soft-switch
+     * offsets that don't drive the data bus themselves -- see
+     * {@link #floatingBusSupplier}'s Javadoc for why this exists.
+     *
+     * @param floatingBusSupplier supplies the current floating-bus byte
+     */
+    public void setFloatingBusSupplier(java.util.function.IntSupplier floatingBusSupplier) {
+        this.floatingBusSupplier = floatingBusSupplier;
+    }
 
     private final DiskBootRom bootRom = new DiskBootRom();
     private final Drive[] drives = { new Drive(), new Drive() };
@@ -109,7 +147,15 @@ public final class Disk2Controller implements SlotCard {
         if (offset >= 0xC) {
             return logicSequencer.latch();
         }
-        return 0; // harmless -- real software never inspects this for offsets 0x0-0xB, see class Javadoc
+        // Real hardware: these offsets don't drive the data bus, so a read
+        // shows whatever the video circuitry last fetched (the floating
+        // bus). Real DOS 3.3 code does read some of these and use the
+        // result -- see setFloatingBusSupplier's Javadoc. Falls back to 0
+        // (the prior, hardcoded behavior) if never wired, e.g. in isolated
+        // unit tests that construct this card directly. Confirmed
+        // non-regressive against normal boot, CATALOG, and PR#6 -- see
+        // DOS33-BOOT-INVESTIGATION.md UPDATE 43/44.
+        return floatingBusSupplier != null ? floatingBusSupplier.getAsInt() : 0;
     }
 
     @Override
@@ -167,13 +213,13 @@ public final class Disk2Controller implements SlotCard {
     private void applySwitch(int offset) {
         switch (offset) {
             case 0x0 -> turnOffPhase(0);
-            case 0x1 -> phaseOn[0] = true;
+            case 0x1 -> turnOnPhase(0);
             case 0x2 -> turnOffPhase(1);
-            case 0x3 -> phaseOn[1] = true;
+            case 0x3 -> turnOnPhase(1);
             case 0x4 -> turnOffPhase(2);
-            case 0x5 -> phaseOn[2] = true;
+            case 0x5 -> turnOnPhase(2);
             case 0x6 -> turnOffPhase(3);
-            case 0x7 -> phaseOn[3] = true;
+            case 0x7 -> turnOnPhase(3);
             case 0x8 -> motorOn = false;
             case 0x9 -> motorOn = true;
             case 0xA -> selectedDrive = 0;
@@ -214,6 +260,27 @@ public final class Disk2Controller implements SlotCard {
      *
      * @param n the phase (0-3) being turned off
      */
+    /**
+     * Turns off phase {@code n} and steps the currently-selected drive if
+     * this is a clean, unambiguous transition -- confirmed against two
+     * independent sources: a step occurs only when a phase that was
+     * genuinely on is turned off while exactly one neighbor is on, with
+     * direction determined by which neighbor. Both-neighbors-on,
+     * neither-on, and redundant-off all correctly produce no movement.
+     * Each such clean transition moves the head by 2 quarter-tracks, not 1
+     * (see this method's own history for the real-hardware justification).
+     * <p>
+     * Also updates {@link #currentPhase} -- the motor's last-known settled
+     * phase -- on every genuine (guard-passing) off transition, including
+     * the no-step cases: with neither neighbor on, the rotor has no reason
+     * to have moved from {@code n}'s own position, so {@code n} remains the
+     * reference; with both neighbors on, {@code n} is still the best
+     * available reference (better than losing it entirely). This tracking
+     * exists to support {@link #turnOnPhase}'s different, later-added
+     * responsibility -- see its Javadoc.
+     *
+     * @param n the phase (0-3) being turned off
+     */
     private void turnOffPhase(int n) {
         if (phaseOn[n]) {
             boolean nextOn = phaseOn[(n + 1) % 4];
@@ -221,9 +288,61 @@ public final class Disk2Controller implements SlotCard {
             phaseOn[n] = false;
             if (nextOn && !prevOn) {
                 drives[selectedDrive].step(2);
+                currentPhase = (n + 1) % 4;
             } else if (prevOn && !nextOn) {
                 drives[selectedDrive].step(-2);
+                currentPhase = (n + 3) % 4;
+            } else {
+                currentPhase = n;
             }
+        }
+    }
+
+    /**
+     * Turns on phase {@code n}. Normal SEEKABS usage turns the new phase on
+     * while the old one is still on (a genuine overlap), and the resulting
+     * step is correctly produced later, at the old phase's OFF touch, by
+     * {@link #turnOffPhase} -- this method must NOT also step in that case,
+     * or the same transition would be double-counted. This method only
+     * steps when NO other phase is currently on at all: a different,
+     * legitimate real access pattern -- BOOT0's own track-0 recalibration
+     * loop -- turns each phase fully off before turning the next one on,
+     * with no overlap at any point. Left unhandled, such a pattern never
+     * satisfies {@link #turnOffPhase}'s own neighbor-on condition (since no
+     * neighbor is ever on when each off touch happens) and never steps at
+     * all. When resuming cleanly from all-off, real hardware's rotor
+     * retains its last aligned position (tracked here as
+     * {@link #currentPhase}, maintained across both methods) and moves
+     * toward whichever adjacent phase is newly energized -- confirmed by
+     * hand-tracing BOOT0's exact access pattern, which steps outward
+     * cleanly on every iteration from the second one on under this rule.
+     *
+     * @param n the phase (0-3) being turned on
+     */
+    private void turnOnPhase(int n) {
+        boolean anyOtherOn = false;
+        for (int i = 0; i < 4; i++) {
+            if (i != n && phaseOn[i]) {
+                anyOtherOn = true;
+                break;
+            }
+        }
+        phaseOn[n] = true;
+        if (anyOtherOn) {
+            return; // overlap case -- defer entirely to turnOffPhase, as before
+        }
+        if (currentPhase < 0) {
+            currentPhase = n; // very first phase touch of the session
+            return;
+        }
+        if (n == (currentPhase + 1) % 4) {
+            drives[selectedDrive].step(2);
+            currentPhase = n;
+        } else if (n == (currentPhase + 3) % 4) {
+            drives[selectedDrive].step(-2);
+            currentPhase = n;
+        } else if (n != currentPhase) {
+            currentPhase = n; // two apart (opposite) -- ambiguous; adopt as new reference
         }
     }
 

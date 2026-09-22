@@ -1299,3 +1299,815 @@ to contain correct, real Applesoft ROM data. On real hardware without
 a Language Card, this message would not appear either -- there's
 nothing to force-reload BASIC into. Confirmed by the person: no
 Language Card in ReplicApple2Plus. Not a defect.
+
+### UPDATE 30 — NEW, CONFIRMED BUG: PR#6 (warm reboot) hangs
+
+The person reported the ~5x boot slowdown is NOT a lucky/unlucky
+timing coincidence -- Virtual ][ is consistently fast, this emulator
+consistently slow -- and separately, discovered that issuing `PR#6`
+after a successful boot causes this emulator to hang instead of
+rebooting. Investigated PR#6 directly; this is real and reproducible.
+
+**Confirmed, step by step:**
+- After PR#6 is typed, execution reaches `$C65E` (slot 6 boot ROM's
+  own D5-AA-96 address-prologue sync search -- the boot-ROM
+  equivalent of DOS's `$B944`) and never leaves: 1.17 million visits
+  to `$C65E`/`$C661` observed with no progress.
+- Ruled out: motor state (turns on correctly, confirmed `motorOn=
+  true`), drive selection (`selectedDrive()` stays 0/drive 1
+  throughout, matches the disk that's actually loaded), the X
+  register at the poll loop (correctly `$60`, reading the right slot
+  6 I/O address `$C0EC`), and the underlying bitstream itself (`
+  TrackBitStream.position()` genuinely advances over time -- real
+  bits are flowing, this is not a frozen/stale stream object).
+- Isolated to: every byte the CPU actually reads from the disk data
+  latch (`$C0EC`) while stuck is **exactly `$96`**, with no variation
+  across 40 consecutive byte-boundary reads. Q6/Q7 are confirmed
+  correct for normal read mode (both false, not stuck in
+  write/sense mode). The `Disk2LogicSequencer`'s own internal `state`
+  field does change over time (observed cycling 6->2->0), so it is
+  not fully frozen either -- yet whatever the CPU actually samples at
+  each byte boundary keeps landing on the same value.
+
+**Not yet done:** trace `Disk2LogicSequencer.tick()`'s actual
+per-tick action decisions (CLR/NOP/SL0/SL1/SR/LD) cycle-by-cycle
+during this specific hang to find why the shift-register's
+byte-boundary output is constant despite `state` changing and real
+input bits flowing. Likely something specific to a second,
+warm-started read session (post motor-off/motor-on, with prior
+session state still in place) rather than a fresh cold boot -- since
+the original cold boot's own use of this exact mechanism works
+correctly. This is a new, separate, and more clearly diagnosable bug
+than the ~5x timing gap in UPDATE 29 (which may in part share a root
+cause with this, or may not -- not yet established either way).
+
+**Also worth reconsidering in light of this:** UPDATE 29's framing of
+the ~5x slowdown as possibly being "coin-flip" free-running-counter
+luck is likely wrong per the person's own observation (Virtual ][
+consistently fast, this emulator consistently slow across repeated
+runs) -- the real explanation is more likely a systematic difference
+in this emulator's behavior, quite possibly connected to whatever is
+producing this PR#6 bug, rather than genuine run-to-run hardware
+variance. Both should be treated as open until the actual
+`Disk2LogicSequencer` mechanism is traced properly.
+
+### UPDATE 31 — PR#6 hang: root cause fully isolated (not a sequencer bug)
+
+Traced `Disk2LogicSequencer` directly at the bit level during the
+hang. Confirmed, definitively:
+- `TrackBitStream.position()` genuinely, correctly advances one bit
+  per real disk-bit consumed (verified sequential: 46003, 46004,
+  46005, ...) -- the stream is not frozen or resetting.
+- The actual bit VALUES returned at that genuinely-advancing position
+  repeat with period 8, forming the exact pattern `10010110` ($96)
+  indefinitely. This is real WOZ track data at this specific location
+  on track 21 (qt=84, where HELLO's earlier read left the head) --
+  not a decode or timing bug. `Disk2LogicSequencer`'s own state
+  machine is working correctly: it builds this byte via repeated
+  SL0/SL1 shifts (0->1->2->4->9->18->37->75->150, matching the bit
+  pattern exactly), reaches a valid, complete byte with the high bit
+  set (which happens to equal $96, the *third* byte of a real
+  address-prologue), correctly fires CLR (action 0x0) per the ROM
+  table, and restarts -- producing the identical byte over and over
+  because the underlying track data at this exact stretch is itself
+  a repeating filler/gap-like pattern with no `D5 AA 96` sequence
+  actually present.
+- So `$C65E`'s search loop (the slot ROM's own D5-AA-96 hunt) is
+  correctly, infinitely searching real data that genuinely contains
+  no match at this position. This is NOT a bug in the sequencer,
+  the bitstream, or the seek/motor state.
+
+**Ruled out as the cause:** the disk boot ROM image itself.
+`DiskBootRom.java`'s 256-byte `$C600` image is checksum-verified
+(CRC32 `CE7144F6`) against two independent real sources (a hardware
+PROM dumper project and MAME's own `a2diskiing.cpp`) -- it is
+byte-for-byte genuine, unmodified Apple Disk II boot ROM (341-0027-A).
+Disassembly confirms it has no seek/recalibrate-to-track-0 logic of
+its own -- it assumes the head is already positioned correctly and
+just searches for a sync byte wherever the head happens to be.
+
+**Real, open question for next session:** multiple independent
+sources (found via web search) describe BOOT0 as "recalibrat[ing]
+the disk arm" and note "the drive should recalibrate" when `C600G`
+is entered manually at the monitor. Since the verified-genuine
+`$C600` ROM itself contains no such logic, this recalibration -- if
+it's real and not a misreading on my part -- must happen in the
+**Monitor ROM's own `PR#` command handler** (somewhere in
+`$F800-$FFFF`), which runs before jumping to `$Cn00`, not in the
+disk controller's own ROM. Not yet checked: whether this emulator's
+Monitor ROM handler for `PR#` performs a seek-to-track-0 (or a
+phase-0 touch, which mechanically homes to track 0 on real hardware
+regardless of starting position) before jumping to the slot's boot
+ROM, and if not, whether that's the actual missing piece. This is a
+concrete, well-scoped next step -- check the `PR#` handler
+disassembly/implementation specifically, not the disk boot ROM or
+LSS, both of which are now confirmed clean.
+
+**Connection to UPDATE 29/30's ~5x slowdown:** the person correctly
+pushed back on framing that gap as run-to-run "coin flip" luck --
+Virtual ][ is consistently fast, this emulator consistently slow.
+Given this session's PR#6 finding, it's plausible (not yet
+confirmed) that the slowdown and the PR#6 hang share a root cause
+family -- e.g., something about how disk head/seek state persists
+across operations in ways that differ from real hardware. Worth
+investigating together next time rather than as fully separate
+threads.
+
+### UPDATE 32 — CRITICAL CORRECTION: the head never settles cleanly; PR#6 finding revised
+
+The person correctly pointed out that Virtual ][ and this emulator
+use the *same* ROM/disk images -- ruling out "the boot ROM lacks a
+recalibration step" or "track 21 just genuinely has no sync there
+and that's normal" as innocent explanations, since Virtual ][
+succeeds with identical data.
+
+Traced DOS's own PR# handling path (typed "PR#6", Enter, followed the
+full PC trace to `$C600`): confirmed it goes through `$A851` (sets up
+a vector at `$0036`) then `$9FC5: JMP ($0036)` straight into `$C600`
+-- no seek/recalibrate code anywhere in this path either, matching
+the boot ROM itself. This is consistent with real DOS 3.3 (PR# does
+not itself recalibrate), so the real question shifted to: why is the
+head at track 21 in the first place when PR#6 is issued?
+
+**Re-checked head movement over the FULL 200,000,000 cycle window**
+(previous checks only went to 60M, assumed "settled" once qt stopped
+changing there). The real picture is materially different from what
+UPDATE 27-31 assumed:
+- The head does NOT do a single clean seek to track 19 (where HELLO
+  lives) and park. It reaches track 19 (qt=76) once around cycle
+  37.4M, then immediately backs off to 17.5 (qt=70), goes back out to
+  21 (qt=84), backs off to 17.5 again, goes back out to 21 again --
+  an extended, repeated oscillation between the VTOC/catalog area
+  (~track 17.5) and track 21, consistent with a read that keeps
+  failing and retrying with something like a recalibration pattern.
+- This oscillation runs from ~cycle 34.2M to ~46.2M (about 12 million
+  cycles of apparently-failing retries) before finally, permanently
+  parking at qt=84 (track 21) -- and confirmed via the full 200M-cycle
+  trace, it NEVER moves again afterward. This is not "successfully
+  finished and parked" -- it looks like DOS gave up.
+- Track 21 was previously assumed (UPDATE 31) to be wherever "HELLO's
+  read left the head," but HELLO's own data was established much
+  earlier in this investigation to live at track 19, not 21. Track 21
+  being the final, stuck position -- reached only after this failing
+  retry oscillation -- suggests something is trying (and failing) to
+  read specifically at track 21, not simply idling after a normal
+  HELLO load.
+
+**This reframes UPDATE 29 through 31 rather than just adding to
+them.** The ~5x boot slowdown and the PR#6 hang are very likely the
+*same underlying bug*, not two separate issues: something is causing
+an extended, ultimately-failing read/retry sequence involving track
+21 late in the boot process, which (a) burns roughly 12+ million
+cycles of retries contributing directly to the slowdown, and (b)
+leaves the head parked somewhere with no valid sync data, which is
+exactly why PR#6's later, completely separate sync-search at whatever
+position the head is left at goes on forever.
+
+**Not yet done, next session -- this is now the priority thread:**
+identify what DOS is actually trying to do around cycle 34-46M that
+involves repeated attempts reaching toward track 21 and backing off
+to ~17.5. Given track 19 is HELLO's real location and was reached
+once early in this window (cycle 37.4M) then abandoned, worth
+checking directly: does HELLO's file actually span into track 21
+(e.g. a multi-track file), or is DOS attempting something else
+entirely at track 21 (a different file, a directory-related
+operation, or a bug causing it to target the wrong track)? Since the
+same ROMs are confirmed used by Virtual ][ (which does not exhibit
+this), the divergence has to be in this emulator's own RWTS-adjacent
+behavior somewhere in this window, not in the ROM/disk data itself.
+
+### UPDATE 33 — PR#6/track-21 bug narrowed further: confirmed NOT the bitstream
+
+Traced the actual RWTS IOB (`$48/$49` pointer, offsets 4/5/8/9 for
+desired track/sector/buffer) through the failing window from UPDATE
+32. This resolved what's actually happening:
+- DOS reads VTOC (track 17, sector 0), then the file's track/sector
+  list (track 17, sector 15), and correctly begins reading track 19
+  (HELLO's real location) sectors 15, 14, 13 in sequence -- this part
+  works.
+- It then legitimately needs to continue onto **track 21** for the
+  next part of the same file (not a bug -- files can span
+  non-adjacent tracks) -- and this is exactly where it gets stuck,
+  repeatedly re-reading the VTOC/track-sector-list and retrying
+  track 21, never succeeding, for the ~12M-cycle window identified in
+  UPDATE 32.
+
+Directly scanned track 21's (qt=84) WOZ bitstream from a fresh
+`TrackBitStream` instance (bypassing the live drive/controller
+entirely): confirmed it has **16 valid `D5 AA 96` address-prologue
+sequences per revolution** (32 across 2 revolutions scanned), the
+first at bit position 184 -- a completely normal, healthy track.
+This rules out "track 21 has no usable sync data" as an explanation
+for either the slowdown or the PR#6 hang.
+
+Then checked the LIVE stream during the actual PR#6 hang (same
+scenario as UPDATE 31): confirmed via direct instrumentation that its
+position genuinely cycles through the FULL range `[0, 50303]`,
+repeatedly, and specifically **does pass through the known-good sync
+region (bit 150-220, containing the bit-184 match)** -- multiple
+times over the watched window. Despite this, `$C65E`'s search loop
+still never succeeds (matches UPDATE 30's original 1.17-million-visit
+finding).
+
+**This is the key new fact:** the underlying bits are correct and do
+carry the stream through valid sync data, yet the sequencer/search
+mechanism still never detects a match. This rules out `TrackBitStream`
+itself (reviewed in full -- simple, correct modulo wraparound, no
+suspect state) and rules out the track's actual WOZ data. The bug
+must be in how `Disk2LogicSequencer`'s state machine or ROM-table
+address computation processes these bits during this specific
+warm-restart scenario (motor was off, now back on, via PR#6's own
+`$C089,X` touch) -- something is preventing the shift register from
+ever correctly building up to a genuine `$D5` byte-boundary match,
+even though the correct bit sequence for one does pass through.
+
+**Next step, very specifically scoped:** trace `Disk2LogicSequencer`'s
+state/action sequence continuously across the point where the stream
+position crosses the known-good bit-184 sync region during an actual
+live hang (not a fresh, isolated scan), and compare state-by-state
+against what a *working* read (e.g., the earlier, successful track-19
+read in the same session) does at the equivalent point. The
+UPDATE 31 trace showed the state cycling through {6,13,0,1,2,3,4,5}
+repeatedly with latch stuck rebuilding to $96 -- worth checking
+directly whether this specific state cycle is capable, by the ROM
+table's own logic, of ever reaching a state that correctly detects a
+`$D5`-valued latch, or whether it's a genuine dead-end loop in the
+state graph under some specific (state, Q6, Q7, highBit) combination
+that this warm-restart path reaches but a fresh cold boot does not.
+
+### UPDATE 34 — PR#6 bug: ruled out phase-counter staleness AND general motor/sequencer theory
+
+**Tested and REJECTED:** hypothesized that `lssPhaseCounter` (which
+gates when a real vs. filler bit gets consumed) goes stale while the
+motor is off (since `tick()` returns early and never increments it)
+and resumes from a non-zero offset when PR#6 turns the motor back on.
+Applied a direct fix (reset `lssPhaseCounter = 0` in the `case 0x9`
+motor-on switch handler) and empirically retested: **no change
+whatsoever** -- identical hang, identical 1,168,505 visits to
+`$C65E`/`$C661`. This hypothesis is definitively ruled out.
+
+**Major finding that reframes everything in UPDATE 30-33:** at the
+exact same point in the exact same session where PR#6 hangs forever,
+issuing `CATALOG` instead (which also requires seeking from track 21
+back to track 17 for the VTOC, then reading via DOS's own RWTS and
+its own `$B944` sync-search) **works perfectly** -- full, correct
+catalog listing, no hang. This is the same underlying mechanism
+(motor on, same drive, same disk, same general "search for D5 AA 96"
+logic) succeeding just fine under conditions where `$C600`'s own
+version of that identical search fails permanently.
+
+**This rules out, definitively:** a general motor-on/off state bug,
+a general LSS/sequencer state-machine bug, a general bitstream/
+position bug, and "track 21 lacks usable data" (already ruled out in
+UPDATE 33, now doubly confirmed since DOS's own RWTS has no trouble
+operating in this same session).
+
+**This narrows the bug specifically to `$C600`'s own code path** --
+something about how the boot ROM specifically sets up for its read
+(vs. how DOS's own RWTS sets up for its reads) causes the identical
+sync-search logic to fail. Concretely still unexplained and worth
+checking directly next: whether `$C600`'s own switch-touch sequence
+($C08E,X / $C08C,X / $C08A,X / $C089,X, in that order) leaves Q6/Q7
+or the drive-select state different from how DOS's own RWTS sets up
+the equivalent state before its own reads succeed -- e.g., compare
+the live Q6/Q7/selectedDrive/motorOn state immediately before
+`$C65E`'s loop starts against the equivalent state immediately before
+`$B944` runs during a successful CATALOG read in the same session,
+looking for whatever's actually different between the two setups.
+
+### UPDATE 35 — MAJOR CORRECTION: not a $C600-vs-RWTS bug; specific to HELLO's track-21 continuation
+
+Directly compared live CPU/controller state (X, Y, A, motorOn,
+selectedDrive, Q6, Q7) immediately before `$C65E` (PR#6, failing) and
+immediately before `$B944` (CATALOG, succeeding), from the same
+60M-cycle checkpoint. **Motor, drive selection, and Q6/Q7 are
+identical in both cases** -- ruling out UPDATE 34's working theory
+that `$C600`'s own setup sequence differs from DOS's RWTS setup. The
+only difference was the quarter-track itself (84 vs 70), which is
+expected since CATALOG seeks to the VTOC and PR#6 doesn't seek at
+all.
+
+Also directly compared the LIVE track-84 bitstream (as the running
+system currently sees it, mid-hang) against a freshly-obtained one
+for the same quarter-track: **zero bit mismatches across all 50,304
+bits.** This conclusively rules out any staleness or caching bug in
+`currentTrackStream()` -- the data is exactly, provably correct and
+consistent.
+
+**The decisive test:** issued `RUN HELLO` (DOS's own command, using
+its own RWTS -- not `$C600`) after boot had already settled. This
+forces DOS to re-read HELLO's data again, which UPDATE 32 established
+spans track 19 into track 21. Result: **identical failure** -- ends
+up stuck at qt=84 (track 21), same as the original boot and same as
+PR#6. Screen shows no successful HELLO re-run, just the stray boot
+banner and an unresolved prompt, exactly matching the original
+boot's own failure pattern.
+
+**This is the real finding, correcting UPDATE 34's framing:** the bug
+was never about `$C600` versus DOS's RWTS. `CATALOG` succeeds simply
+because it never touches HELLO's track-21 continuation at all (it
+only needs the VTOC on track 17). Both `$C600` (at initial boot) and
+DOS's own RWTS (via `RUN HELLO`) fail identically and specifically
+whenever asked to read HELLO's data once it continues past track 19
+onto track 21 -- regardless of which code path initiates the read.
+
+**This re-focuses the investigation correctly, for next time:**
+the bug is specific to HELLO's file data / track-sector-list
+continuation from track 19 to track 21 on this specific WOZ image,
+reproducible via any caller. Concretely worth checking next:
+- The actual track/sector-list entry that points DOS at track 21 for
+  HELLO's continuation (read from track 17 sector 15 per UPDATE 32's
+  IOB trace) -- verify byte-for-byte what track/sector value it
+  actually encodes, and whether this emulator's GCR/6-and-2 decode of
+  that specific list entry is correct.
+- Whether the *specific* sector DOS wants on track 21 (not just "any"
+  `D5 AA 96`, but one whose address-field track/sector/volume/
+  checksum matches what DOS expects) actually exists with a
+  consistent, valid address field and correctly-checksummed data
+  field in this WOZ image, since UPDATE 33 only confirmed generic
+  sync-mark presence, not a specific, matching, checksum-valid sector.
+- Whether this is a genuine flaw in the WOZ file's own captured data
+  for this specific sector-on-track-21 (which would mean Virtual ][
+  and this emulator should both fail identically, contradicting the
+  person's report that Virtual ][ succeeds -- so this needs to be
+  checked carefully against that expectation) versus a real, still
+  -unfound bug in this emulator's address-field/data-field
+  verification logic for this specific case.
+
+### UPDATE 36 — Track 21's data conclusively proven fully healthy; data corruption ruled out entirely
+
+Directly decoded track 21's (qt=84) WOZ bitstream offline (bypassing
+the live drive/controller/sequencer entirely -- pure bit-level GCR
+decode against the raw track data):
+
+- **All 16 address fields are valid**, consistently, across multiple
+  full revolutions: volume=254 (matching this disk's known volume
+  number), track=21, sectors 0 through 15 all present, every single
+  checksum (volume XOR track XOR sector) correctly matches the
+  encoded checksum byte. This includes sector 15 specifically --
+  exactly what DOS is looking for -- present and fully valid.
+- **All 16 data fields are also present and well-formed**: for every
+  sector, the `D5 AA AD` data-field prologue is found within the
+  expected gap after its address field, and the encoded checksum byte
+  has a plausible, valid GCR shape. Confirmed consistently across
+  many repeated revolutions of the direct scan.
+
+**This fully, conclusively rules out any WOZ data corruption or bad
+capture as the explanation** -- for either the original UPDATE 31
+hypothesis or anything since. The disk image itself is completely
+healthy at track 21. This also resolves the concern raised at the end
+of UPDATE 35 about reconciling with Virtual ][ succeeding: there is no
+data-level reason Virtual ][ and this emulator should differ, because
+the data both would be reading is fully correct.
+
+**Where this leaves the investigation:** every layer has now been
+individually verified correct in isolation --
+- the disk image data itself (this update),
+- `TrackBitStream`'s wraparound/position logic (UPDATE 35, byte-for-
+  byte identical live vs. fresh),
+- the seek mechanism (UPDATE 32, lands exactly on qt=84, not
+  off-by-a-half-track),
+- motor/drive-select/Q6/Q7 state (UPDATE 35, identical between the
+  failing and a succeeding case),
+- the general LSS/sequencer mechanism (UPDATE 34/35, since DOS's own
+  RWTS succeeds elsewhere in the very same session).
+
+Yet the live read at track 21 specifically still never succeeds, via
+either `$C600` or DOS's own RWTS (UPDATE 35's `RUN HELLO` test). The
+bug is therefore not in any of these components individually -- it
+must be in the *live interaction* between them specifically when
+track 21 is the target, which isolated, offline testing of each piece
+cannot surface.
+
+**Concretely scoped next step:** trace the actual LIVE `$B944`
+execution, cycle by cycle, during a real attempt to read track 21
+(e.g. via `RUN HELLO`), logging every byte actually returned from
+`$C0EC` alongside the confirmed-correct expected byte sequence from
+this update's offline decode, aligned by stream bit position. The
+goal is to find the exact point where the live byte stream first
+diverges from the known-correct data -- since every underlying piece
+tests correct alone, the divergence is likely something timing- or
+order-dependent that only manifests during sustained, real-time
+LSS ticking over the many CPU cycles a real seek-and-search sequence
+takes, not something a short, isolated unit-style check can catch.
+
+### UPDATE 37 — MAJOR CORRECTION: track 21 reads actually SUCCEED; not a hang at all
+
+Traced the live readback comparison precisely, including the sector
+translate/skew table lookup at `$BE2B` (`LDA $BFB8,Y`) that UPDATE 32
+through 36 had not accounted for -- DOS translates the desired
+*logical* sector through this table to get the expected *physical*
+sector before comparing against the address field's readback sector,
+rather than comparing the logical sector directly.
+
+Confirmed the skew table itself is byte-for-byte the standard, known
+DOS 3.3 table: `0 13 11 9 7 5 3 1 14 12 10 8 6 4 2 15`. Correct.
+
+Traced live: DOS does eventually hit several address-field mismatches
+against wrong physical sectors while searching (normal, expected --
+matches real DOS's own documented retry behavior), but then **finds
+and correctly matches track=21, physical sector=15** (translated
+from logical sector 15) at cycle 86380245. Immediately following
+this, traced entry into `$B8DC` (the actual data-field read and
+checksum verification) and confirmed it **falls through to the
+success path (`$BE3B`)**, not the retry path. **This specific read --
+address field AND data field, for track 21 sector 15 -- completes
+successfully.**
+
+**This corrects the framing from UPDATE 32 onward.** The extended
+oscillation between track ~17.5 and ~21 observed there is not a
+perpetual, unresolvable failure -- it's DOS's own normal,
+by-design retry behavior while it searches for the right physical
+sector among mismatches, which *does* eventually succeed, sector by
+sector. UPDATE 32's conclusion that DOS "gives up" at track 21 was
+premature; individual sector reads there are confirmed working.
+
+**Revised understanding, tentative:** the ~5x slowdown documented in
+UPDATE 29 is very plausibly just this -- normal DOS 3.3 retry/skew
+behavior, genuinely taking many attempts per sector as it always
+does, consuming real cycles that add up across however many sectors
+HELLO's file actually spans. This may not be a bug distinct from
+UPDATE 29's original timing question at all, just confirmation that
+the mechanism is working, if slowly.
+
+**Separately, the PR#6 hang (UPDATE 30, 33-36) remains genuinely
+unresolved and is now understood to be a DIFFERENT question than
+"can track 21 be read at all"** -- since it clearly can, by DOS's own
+RWTS. The open question for PR#6 specifically is narrower than
+previously framed: why does `$C600`'s specific, simple, timeout-free
+`$C65E` search -- with no retry/recalibration/skew logic at all, just
+a raw "wait for $D5" loop -- apparently never encounter a `$D5` byte
+at the *exact* byte-alignment the CPU's poll captures, even though
+UPDATE 33 confirmed the stream position does pass through the known-
+good sync region repeatedly. Given track 21's data and address/data
+field validity are now doubly confirmed (this update and UPDATE 36),
+and DOS's own more complex RWTS succeeds there, the remaining PR#6
+mystery is specifically about `$C65E`'s bare-bones loop's own
+behavior -- worth a fresh, dedicated trace of that loop specifically
+(not the general track-21 question) next time.
+
+### UPDATE 38 — PR#6 hang: ROOT CAUSE FOUND, definitively
+
+Following UPDATE 37's correction (track 21 reads genuinely work via
+DOS's RWTS), re-examined `$C65E` specifically. First checked the
+Monitor ROM's own PR#-adjacent helpers (`$FE8B`-`$FEAD`, reached via
+`$A229`/`$A22B` in DOS's own PR# parsing) -- confirmed these are pure
+"compute $Cs00 from slot number, store into a zero-page vector"
+helpers, no seek/recalibrate logic. Then disassembled the full,
+previously-unexamined tail of the boot ROM (`$C6A0-$C6FF`) --
+confirmed this is purely the 6-and-2 GCR decode and relocate-to-$0801
+logic; no phase/seek code anywhere in the complete 256-byte ROM.
+
+Sampled every distinct byte value the CPU actually reads from
+`$C0EC` at `$C65E` across ~563,000 samples (~25+ revolutions):
+**`$D5` genuinely appears** in the observed values. Cross-referencing
+against UPDATE 30's original PC-hotspot data, `$C687`/`$C68A` and
+`$C68F`/`$C692` (part of the address-field byte-decode loop just
+after a full `D5 AA 96` match) were also visited thousands of times.
+**`$C65E`'s search does succeed and does reach the address-field
+decode** -- it was never stuck at the sync search itself, contrary
+to UPDATE 30's original framing.
+
+Traced the actual comparison immediately after decode (`$C699: PLP;
+CMP $3D; ...; $C6A0: CMP $41`): confirmed live, repeatedly, that
+`$3D=0` and `$41=0` -- **the boot ROM is specifically checking for
+track 0** (and an expected volume/checksum consistent with a
+from-scratch cold start), while the actual readback from wherever the
+head sits (track 21) is naturally non-zero. Since the boot ROM has no
+seek logic of its own (confirmed above) and neither does DOS's PR#
+handling or the Monitor ROM (both confirmed clean, this update and
+UPDATE 35), this comparison can mechanically never succeed once the
+head has moved away from track 0.
+
+**Root cause, stated plainly:** `$C600`'s boot code is only ever
+designed to work correctly when the head is already at track 0 --
+true on a genuine cold power-on (where the drive mechanically
+defaults there) but not true here, since HELLO's own execution left
+the head at track 21. There is no recalibration anywhere in the
+verified-genuine ROM chain (boot ROM, DOS's PR# handler, Monitor
+ROM's PR# helper) to correct for this. `$C65E` isn't failing to find
+sync at all -- it succeeds repeatedly, decodes real address fields,
+and correctly, endlessly rejects them because they are, correctly,
+never track 0.
+
+**Open reconciliation point, worth checking next:** this would mean
+real, unmodified Apple II hardware -- and by extension Virtual ][
+running the identical ROM -- should behave identically if `PR#6` is
+typed from a live prompt after the head has moved away from track 0.
+If Virtual ][ genuinely succeeds in that exact scenario (not just
+via its "Boot" button, which may perform a different, fuller reset
+including an implicit recalibration), that would mean Virtual ][
+itself adds behavior beyond the bare ROM semantics as a convenience/
+accuracy feature -- worth confirming directly with the person what
+exactly they did in Virtual ][ (typed `PR#6` at a live `]` prompt,
+vs. pressing the toolbar's "Boot" button) before concluding this
+emulator needs a behavior change to match.
+
+### UPDATE 39 — PR#6 hang: TRUE root cause found, definitively (corrects UPDATE 38)
+
+The person confirmed they typed `PR#6` at a live `]` prompt in
+Virtual ][ (the same scenario tested here), and it succeeded. This
+meant UPDATE 38's "real hardware would also hang" conclusion had to
+be wrong somewhere -- prompting a closer look specifically at
+whether real BOOT0 does, in fact, recalibrate.
+
+Searched further and found the real, authoritative *Beneath Apple
+DOS* description of BOOT0 (via a full-text mirror), which states
+plainly: after building the translate table, step (2) is "**Pull
+disk arm back over 80 tracks to recalibrate the arm to track
+zero.**" This directly contradicts UPDATE 30/38's conclusion that
+the verified-genuine ROM has no such logic.
+
+**Re-examined this project's own `$C600` disassembly and found the
+recalibration loop had been misread as an unrelated print/delay
+loop.** The code at `$C63D`/`$C647` (inside the `Y`-from-`$50`-down-
+to-`0` outer loop, 81 iterations) computes `X = ((Y & 3) << 1) |
+$60` each iteration and touches `$C080,X` then `$C081,X` -- i.e.
+`$C0E0/E2/E4/E6` (phase 0/1/2/3 OFF) followed immediately by
+`$C0E1/E3/E5/E7` (the SAME phase ON), cycling `N = 0,3,2,1,0,3,2,1...`
+across all 81 iterations. This *is* the real recalibration: pulsing
+each phase off-then-on in descending order, repeatedly, which on
+real hardware physically walks the head toward track 0 regardless of
+starting position.
+
+**Confirmed empirically that this emulator's head genuinely never
+moves during this loop** (qt stays fixed at 84 throughout PR#6's
+full execution). Traced why, precisely: this emulator's
+`turnOffPhase(n)` (in `Disk2Controller.java`) only registers a step
+when `phaseOn[n]` was already true *and* exactly one neighbor is
+energized. In this loop's specific access pattern -- turn off phase
+N (which was never on yet), then immediately turn phase N back on,
+moving to a different N next iteration without ever genuinely
+turning off a phase that's currently on -- **all four phases end up
+simultaneously "on" within the first 4 iterations, and never get
+turned off again**. Once that happens, every subsequent
+`turnOffPhase()` call finds both neighbors on, which this method's
+own documented logic explicitly treats as "no step" ("both neighbors
+on, or neither, means no step"). The result: all 81 iterations
+execute, touch the correct switches, yet produce zero actual head
+movement.
+
+**This is a genuine, well-understood, fixable bug in this
+emulator**, distinct from everything examined in UPDATE 27-38 (the
+step *magnitude* fix from UPDATE 27 was correct and remains correct
+for the normal SEEKABS one-phase-at-a-time pattern; this is a
+different code path -- BOOT0's own recalibration -- that uses a
+different, legitimate real-hardware access pattern this emulator's
+phase-stepping model doesn't handle). Real Disk II hardware has no
+software state machine deciding "was there a clean transition" --
+the stepper motor's rotor physically responds to whichever coils are
+currently energized, so pulsing phases off-then-on in a rotating
+sequence causes continuous, correct movement on real hardware
+regardless of how many phases end up simultaneously energized. This
+emulator's discrete, transition-counting model is a reasonable
+simplification for ordinary SEEKABS usage but breaks down for this
+legitimate, different recalibration access pattern.
+
+**Scoped next step:** this needs a real fix to
+`Disk2Controller`'s phase-stepping model, not just to BOOT0
+specifically -- likely reconsidering `turnOffPhase`/`phaseOn` to
+track something closer to the real stepper motor's actual physical
+response to the currently-energized coil set (e.g. tracking a
+"center of energized phases" position and moving toward it, rather
+than only reacting to discrete off-transitions), so that both the
+normal SEEKABS pattern (which must remain correct, per UPDATE 27's
+already-verified fix) and this recalibration pattern (and any other
+legitimate multi-phase-energized access pattern) both produce
+correct head movement. This is real, scoped implementation work for
+next time, not just more diagnosis.
+
+### UPDATE 40 — PR#6 FIXED: real code change implemented and verified
+
+Implemented and verified a real fix for UPDATE 39's root cause.
+
+**The fix** (`Disk2Controller.java`): split phase-transition stepping
+across both `turnOffPhase` (unchanged logic, now also tracks a new
+`currentPhase` field -- the motor's last-known settled phase) and a
+new `turnOnPhase` (replacing the old direct `phaseOn[n] = true`
+assignments in the switch cases for offsets 1/3/5/7). `turnOnPhase`
+only considers stepping when NO other phase is currently on at all;
+if there's overlap (normal SEEKABS's own turn-on-new-before-off-old
+pattern), it defers entirely to the existing, unchanged
+`turnOffPhase` logic, exactly as before. When resuming cleanly from
+all-off (BOOT0's recalibration pattern, which never overlaps), it
+steps if the newly-on phase is a clean neighbor of `currentPhase`.
+
+**Verified, not just implemented:**
+- Hand-traced, then empirically replicated (a standalone scratch
+  harness calling `writeIoSwitch` exactly as the real JUnit tests do)
+  all 10 existing `Disk2ControllerPhaseSteppingTest` cases against the
+  actual compiled fix: all 10 pass unchanged. Normal SEEKABS step
+  magnitude and direction (UPDATE 27's already-verified fix) is
+  provably untouched.
+- Re-ran the full normal boot scenario end to end: qt still settles
+  at exactly 84 (track 21), and `CATALOG` still produces the
+  identical, correct listing -- byte-for-byte the same as the
+  pre-fix baseline. No regression.
+- Re-ran PR#6: the head now genuinely recalibrates to qt=0, then
+  progresses through the same boot2/HELLO sequence as a real cold
+  boot, ending at qt=84 again (matching the original boot's own
+  resting position) rather than hanging forever.
+- Critically, confirmed this is a *complete*, not superficial, fix:
+  issued `CATALOG` after the PR#6-triggered reboot completed, and it
+  produced the full, correct file listing -- proving DOS is genuinely,
+  fully functional after the recalibration-driven reboot, not merely
+  "no longer stuck."
+- Added two new test cases to `Disk2ControllerPhaseSteppingTest`
+  locking in the new behavior (`recalibrationPatternStepsOutward...`
+  and `...ClampsAtTrackZero...`), each hand-traced and separately
+  empirically verified against the compiled fix before being written
+  into the test file, given no JUnit runner was available in this
+  environment to execute the suite directly.
+
+**Status: PR#6 is fixed.** This closes the thread that ran from
+UPDATE 30 through 39. Combined with UPDATE 7 (original boot-hang) and
+UPDATE 27 (seek-distance magnitude), this emulator now has three
+confirmed, verified fixes for real, distinct bugs found across this
+extended investigation. The UPDATE 29 ~5x slowdown question remains
+separately open (see UPDATE 37's tentative reframing: it may simply
+be normal DOS 3.3 retry/skew overhead rather than a distinct bug, but
+this was never independently, conclusively confirmed the way PR#6
+now has been).
+
+**Recommended before merging:** run this project's actual Gradle test
+suite (not available in this session's sandboxed environment) to get
+real JUnit confirmation alongside the empirical replica used here,
+and confirm `./gradlew build` passes cleanly end to end as it did
+after UPDATE 27/28's fixes.
+
+### UPDATE 41 — Slowdown root mechanism identified: NOT a coin-flip, fires systematically every sector
+
+Picked back up the UPDATE 29/37 slowdown thread. Counted actual
+per-sector attempts during boot (via IOB desired-track/sector
+tagging on every `$B944` call): 173 total `$B944` calls across 11
+distinct (track,sector) targets over the ~65M-cycle boot settle.
+Confirmed the file (HELLO) genuinely spans multiple, non-adjacent
+sectors across tracks 19 and 21, each requiring 15-39 search
+attempts except two lucky 1-attempt sectors.
+
+**Measured the actual cycle gap between finishing one sector and
+starting the hunt for the next.** Found a consistent pattern: many
+tight ~67-cycle gaps (quick, same-revolution address-field rejections
+for nearby wrong sectors), followed by one enormous gap of
+~1,040,000-1,240,000 cycles (4.7-5.6 full revolutions) before the
+sector genuinely, finally matches. This ~1M-cycle gap recurs on
+almost every single sector transition throughout the file read, not
+just once during the initial long seek documented in UPDATE 29.
+
+**Profiled exactly what runs during one such gap:** `$BD00xx` page
+(the outer retry/re-seek logic containing UPDATE 29's `$BD9E`
+free-running-counter-wrap delay) accounts for 837,606 of the
+1,044,241 total cycles (80%) -- directly confirming this is the same
+mechanism from UPDATE 29, now shown to recur on nearly every sector,
+not as an isolated event.
+
+**Key new fact that corrects UPDATE 29's "coin flip" framing:**
+checked the actual `$47` value at every one of 16 consecutive
+delay-triggering checks across the full boot. It is NOT randomly
+distributed -- it lands in a narrow 223-232 range (high bit reliably
+set) every single time, systematically triggering the expensive wait
+on essentially every sector. Traced the actual write: confirmed via
+direct instruction-level tracking that `$BA09` (the `INC $47` inside
+the real, verified `$BA00` seek-delay subroutine) is what sets this
+value, confirming the mechanism is genuine, verified DOS 3.3 code
+doing exactly what UPDATE 29 found -- just firing deterministically,
+not by chance.
+
+**Honest, open interpretation this update could NOT resolve:**
+whether this deterministic, near-full-revolution delay per sector is
+(a) genuine, historically-accurate DOS 3.3 RWTS behavior -- there is
+independent, real-world documentation (found via web search this
+update) that stock DOS 3.3's RWTS was historically known and
+criticized for exactly this kind of slow, retry-heavy sector access,
+particularly for track/sector-list orderings that don't align
+cleanly with the skew table -- or (b) a genuine emulator timing bug
+in how often `$BA00` gets called (and thus how fast `$46`/`$47`
+accumulates) between sector reads, relative to real hardware. Both
+remain plausible; this update did not find a way to distinguish them
+without either a real hardware/logic-analyzer trace of an actual
+DOS 3.3 multi-sector file read for comparison, or independently
+verifying Virtual ][ trace data the way UPDATE 27's step-magnitude
+fix was verified.
+
+**Next step, concretely scoped:** get a real Virtual ][ (or other
+verified-accurate emulator) cycle/instruction trace of this same
+disk loading HELLO, specifically covering one sector-to-sector
+transition within the multi-sector read (not just the initial seek
+UPDATE 27 already used), and check directly whether `$47`'s value at
+the equivalent `$BD9A` check point matches this emulator's
+consistently-high 223-232 range or is meaningfully different. That
+single data point would settle whether this is real DOS 3.3 slowness
+or an emulator-specific timing divergence, the same way UPDATE 27's
+real trace data settled the step-magnitude question.
+
+### UPDATE 42 — Drive-speed-drift hypothesis checked and ruled out; corrects an earlier measurement error
+
+The person, drawing on real hands-on Disk II hardware experience
+(drives commonly drifted from nominal 300 RPM, needing potentiometer
+adjustment), suggested the slowdown might trace to a rotation-speed
+mismatch. Worth checking directly, and doing so caught a genuine
+error in UPDATE 29's own measurement.
+
+UPDATE 29 measured "~222,222 cycles/revolution" by dividing a fixed,
+arbitrary 2,000,000-cycle window by the count of complete revolutions
+observed within it (9). That division method has rounding error
+whenever the window doesn't land exactly on a revolution boundary --
+which it didn't here.
+
+Remeasured properly this update: precise cycle-exact timestamps of
+six consecutive wraparounds give **201,216 cycles/revolution**,
+consistent to within ±1 cycle across all six -- exactly matching
+track 0's 50,304 bits at the confirmed-correct, hardware-accurate 4
+cycles/bit (50,304 x 4 = 201,216 exactly). This implies ~305 RPM,
+about 1.65% off perfect nominal 300 RPM -- well within real-world
+drive tolerance, not drift, not a bug.
+
+**Conclusion: rotation speed is accurate and essentially constant,
+not the source of the slowdown.** This rules out the drive-speed
+hypothesis specifically, and also corrects the "222,222 cycles/rev"
+figure that appeared in UPDATE 29 -- the true value is 201,216.
+Anywhere UPDATE 29's cycles-to-revolutions math was used for
+estimation (e.g. "~11 revolutions per retry") should be treated as
+approximate given the corrected per-revolution figure, though the
+qualitative finding (retries costing far more than a fraction of a
+revolution) still stands independent of this correction, since it
+was also confirmed directly via UPDATE 41's PC-page profiling, not
+just the revolution-count arithmetic.
+
+UPDATE 41's core open question -- whether the `$BD9E` delay firing on
+nearly every sector is genuine DOS 3.3 slowness or an emulator-side
+timing divergence -- remains exactly as scoped there. This update
+narrows what it's NOT: not rotation speed, which is confirmed
+accurate.
+
+### UPDATE 43 — Real bug found and fixed (hardcoded floating-bus read); does NOT explain the slowdown
+
+Traced deeper into UPDATE 41's `$BD9E` delay mechanism. Found the
+exact bytes: `$BA09`'s `INC $47` confirmed `$46`/`$47` are set by
+`$BA00`'s own delay loop, but the caller-trace revealed all 1,792
+`$BA00` "hits" in one gap came from a single JSR site at `$BD87` --
+resolved by checking the JSR return address on the stack directly.
+`$BA00`'s own `BNE $BA00` branches back to its own start, so one JSR
+call can visit PC=$BA00 many times internally; the real count of
+distinct calls from `$BD87` is 7, each looping internally based on
+whatever value A held going in.
+
+**Found A=0 on every single one of those 7 calls.** `$BA00`'s
+`SBC #$01; BNE $BA00` decrements A until it hits zero -- with A=0
+going in, this wraps to 255 and loops a full 256 times instead of a
+small intended count. Traced backward to the exact instruction last
+setting A: `$BD77: LDA $C08A,X` / `$BD7C: LDA $C08B,X` -- the
+drive-select soft switches.
+
+**Root cause, confirmed:** `Disk2Controller.readIoSwitch()` hardcoded
+`return 0` for offsets 0x0-0xB, with a comment claiming real software
+never inspects the result. That's false -- this exact RWTS code path
+reads it and uses it as `$BA00`'s delay count. Real hardware: these
+offsets don't drive the data bus, so a read shows the floating bus
+(whatever the video circuitry last fetched), not a fixed value.
+
+**Fix implemented:** added `Disk2Controller.setFloatingBusSupplier`
+(an `IntSupplier`) and wired it from `MotherboardBus` to the existing,
+already-verified `FloatingBus` class (confirmed via its own Javadoc
+and code to be a careful, cited port of real UTAIIe/AppleWin video-
+scanner logic, not naive code). `readIoSwitch` now returns the real
+floating-bus byte for offsets 0x0-0xB instead of a hardcoded 0.
+
+**Verified, carefully, after an initial false alarm:** a first,
+hasty test using a 10M-cycle "no qt change = settled" heuristic
+suggested this broke the boot (stuck at qt=4/track 1). Re-tested
+properly -- the SAME false "stuck at qt=4" result reproduces on the
+unmodified, REVERTED code too, proving the heuristic itself was
+flawed (qt genuinely pauses at qt=4 for longer than 10M cycles during
+completely normal boot2 processing), not a real effect of this
+change. With a proper, fixed 65M-cycle wait: both the fixed and
+unfixed versions reach identical qt=84 and produce byte-for-byte
+identical, correct `CATALOG` output. Re-ran the full PR#6 reboot
+scenario (UPDATE 39/40's fix) through to a working `CATALOG` again
+with this change present -- still fully correct.
+
+**Honest, load-bearing finding: this fix does NOT resolve the
+slowdown.** Measured true settle time (last qt change over a full
+100M-cycle window) with the fix applied: 46,139,426 cycles --
+essentially identical to the original, unfixed baseline (~46.2M,
+per UPDATE 32). Rechecked A's value at the exact same `$BD87` call
+site with the fix active: still exactly 0, every time. The floating-
+bus address at this point (`$16F4`) lands during blanking, and
+`VideoScanner` -- confirmed to be a careful, cited, non-naive port of
+AppleWin's real formula, not likely to be the bug itself -- is
+genuinely addressing a byte of memory that happens to hold 0 at this
+specific point in the boot sequence, most likely mundane (blank
+screen-adjacent memory, still mostly zero-filled this early).
+
+**Where this leaves things:** the fix is real, correct, and worth
+keeping (matches genuine hardware semantics, confirmed safe against
+every existing scenario), but it was not, after all, the explanation
+for the ~5x gap against Virtual ][. This doesn't resolve UPDATE 41's
+open question -- it actually strengthens the "genuine, historically-
+accurate DOS 3.3 slowness" side of it, since even a corrected,
+non-hardcoded implementation still produces the same worst-case delay
+at this exact point, for a boring, plausible reason (real memory
+genuinely holds zero there) rather than an emulator shortcut. The
+UPDATE 41 next step -- a real Virtual ][ trace of `$47`'s value or
+equivalent at the matching point in an actual multi-sector read --
+remains the most direct way to settle this definitively.
