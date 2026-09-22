@@ -2111,3 +2111,97 @@ genuinely holds zero there) rather than an emulator shortcut. The
 UPDATE 41 next step -- a real Virtual ][ trace of `$47`'s value or
 equivalent at the matching point in an actual multi-sector read --
 remains the most direct way to settle this definitively.
+
+### UPDATE 44 — Floating-bus fix REVERTED: real-world regression, not sandbox-visible
+
+The person reported a real, measured regression: actual startup now
+takes ~1 min 5 sec, longer than before. This directly contradicted
+UPDATE 43's sandbox measurements (which showed the fix causing no
+meaningful change in emulated cycle count either way -- 46,139,426
+cycles with the fix vs. 46,246,... without, essentially identical).
+
+**Re-ran the exact same fixed-vs-reverted comparison, focused on true
+motor-idle time (not just qt), and confirmed the cycle counts really
+are near-identical** (53,218,219 with the fix vs. 53,247,323
+reverted -- a difference of under 0.03 seconds' worth of cycles,
+noise-level). So the emulated CPU cycle count genuinely does not
+explain a 65-second real-world boot.
+
+**The likely real explanation, not visible to cycle-count-based
+sandbox testing:** this sandbox runs the emulation as fast as the JVM
+allows, with no real-time pacing. The actual application very
+plausibly paces itself toward real Apple II speed (~1.023 MHz). The
+reverted code returns a fixed `0` for offsets 0x0-0xB; the fix
+instead computed a real floating-bus value every single time --
+`VideoScanner.currentAddress()` (20+ bitwise operations) followed by
+an actual memory read. These offsets get touched very frequently
+during ordinary phase-stepping (multiple touches per phase
+transition, many phase transitions per seek). If a real-time-paced
+build now spends measurably more wall-clock JVM time computing this
+value on every one of those touches, that's real, additional
+per-touch overhead a headless, unpaced sandbox test structurally
+cannot see -- it would only show up as slower wall-clock time in the
+real, paced application, exactly matching what was reported.
+
+**Reverted, fully:** `readIoSwitch` back to a fixed `return 0` for
+offsets 0x0-0xB, `setFloatingBusSupplier` and its field removed from
+`Disk2Controller`, and the corresponding wiring removed from
+`MotherboardBus`. Re-verified clean: `CATALOG` at the same 65M-cycle
+checkpoint produces byte-for-byte identical, correct output to every
+prior baseline in this document.
+
+**Status of the underlying diagnosis (UPDATE 43): still true and
+still worth keeping in mind, just not worth acting on given the
+cost/benefit that just played out.** The root-cause finding itself
+-- readIoSwitch hardcoding 0 for offsets real DOS code does read and
+use, causing `$BA00` to wrap to its 8-bit maximum -- is real and
+correctly diagnosed. It just turned out to (a) not explain the
+slowdown (UPDATE 43's own finding, before this update's regression
+report) and (b) cost more in practice than it was worth to fix given
+(a). A future attempt at this specific fix, if ever revisited, should
+budget for measuring real wall-clock/JVM cost per call, not just
+emulated cycle count, before considering it safe to ship -- this
+session's mistake was trusting a cycle-count-only sandbox metric for
+a question that turned out to be about real execution cost.
+
+**The ~5x slowdown itself remains exactly as open as UPDATE 41 left
+it.** No progress toward resolving it was made this update; this
+update's work was entirely about correctly walking back an
+unproductive detour.
+
+### UPDATE 45 — Clarification: the "regression" was never real; this IS the pre-existing slowdown
+
+The person re-measured after UPDATE 44's full revert: ~1 min 4 sec,
+"an insignificant difference" from the ~1 min 5 sec measured with
+the floating-bus fix still in place.
+
+**This changes the correct interpretation of UPDATE 44's revert.**
+If removing the fix made no real difference either, then the fix was
+never the cause of the ~65-second boot time in the first place --
+UPDATE 44's "plausible JVM/wall-clock overhead" theory, while a
+reasonable thing to check, does not hold up against this new data
+point. The ~64-65 second real-world boot time was very likely present
+all along, both before and after this session's floating-bus
+detour -- it's the SAME ~5x-vs-Virtual-][ slowdown that UPDATE 29
+through 41 have been investigating throughout this document, not a
+new regression introduced by anything done this session.
+
+This is actually a reassuring, if humbling, data point rather than a
+setback: it confirms this session's earlier sandbox-based finding
+(cycle counts near-identical with and without the floating-bus fix)
+was measuring the right thing after all -- the fix genuinely doesn't
+move real boot time in either direction, for better or worse. The
+revert (UPDATE 44) remains fine to keep as-is: it's back to the
+simpler, cheaper, original behavior with no proven downside to
+reverting, even though the specific "real-world regression" concern
+that motivated it turned out not to be caused by the fix itself.
+
+**Status, unchanged in substance:** the ~5x slowdown (this
+document's central open question since UPDATE 29) is still open.
+UPDATE 41's scoped next step -- a real trace from Virtual ][ or
+equivalent, at the point in a multi-sector read equivalent to this
+emulator's `$BD9A` check, to see whether `$47`'s value there is
+genuinely different on real/reference hardware -- remains the most
+direct way to settle whether ~64 seconds for this specific boot is
+real, historically-accurate DOS 3.3 behavior or a genuine, still
+unfound emulator timing divergence.

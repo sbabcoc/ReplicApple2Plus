@@ -48,9 +48,9 @@ import java.util.Set;
  * genuinely reads the result and uses it (as an {@code $BA00} delay-loop
  * count). On real hardware these offsets don't drive the data bus, so a
  * read shows the floating bus -- whatever the video circuitry last
- * fetched, not a fixed value. This is wired in via
- * {@link #setFloatingBusSupplier}; without it (e.g. in isolated unit
- * tests), offsets 0x0-0xB read back as a harmless 0. Offsets 0xC-0xF are
+ * fetched, not a fixed value; this class deliberately returns a fixed 0
+ * instead (see {@link #readIoSwitch}'s own Javadoc for why an attempt at
+ * the more accurate behavior was tried and reverted). Offsets 0xC-0xF are
  * different: their return value is the actual data latch, via
  * {@link Disk2LogicSequencer#latch}.
  * <p>
@@ -78,38 +78,6 @@ public final class Disk2Controller implements SlotCard {
     private boolean q7;
     private final Disk2LogicSequencer logicSequencer = new Disk2LogicSequencer();
     private int lssPhaseCounter; // 0 to LSS_TICKS_PER_BIT_CELL-1, cycling
-
-    /**
-     * Supplies the real hardware's floating-bus byte -- whatever the video
-     * circuitry last fetched -- for soft-switch offsets (0x0-0xB) that don't
-     * drive the data bus themselves. Real DOS 3.3 RWTS code genuinely reads
-     * these (e.g. {@code LDA $C08A,X} / {@code LDA $C08B,X} touching the
-     * drive-select switches) and uses the result directly, so returning a
-     * fixed value here is observably wrong, not just academically impure:
-     * one specific, verified RWTS code path uses this read's result as an
-     * {@code $BA00} delay-loop count, and a fixed 0 makes that count wrap
-     * to its 8-bit maximum (256 iterations) on every single call instead of
-     * real hardware's small, varying value -- confirmed to cost roughly a
-     * million extra CPU cycles per occurrence, recurring on nearly every
-     * sector read during a multi-sector file load. Wired in by whatever
-     * constructs this card (see {@code MotherboardBus}), since a
-     * floating-bus read depends on the video circuitry and address space,
-     * neither of which this class otherwise has any reason to reference.
-     * Left {@code null} (e.g. in isolated unit tests), offsets 0x0-0xB
-     * simply read back as 0, same as before this existed.
-     */
-    private java.util.function.IntSupplier floatingBusSupplier;
-
-    /**
-     * Wires in the real floating-bus read this card needs for soft-switch
-     * offsets that don't drive the data bus themselves -- see
-     * {@link #floatingBusSupplier}'s Javadoc for why this exists.
-     *
-     * @param floatingBusSupplier supplies the current floating-bus byte
-     */
-    public void setFloatingBusSupplier(java.util.function.IntSupplier floatingBusSupplier) {
-        this.floatingBusSupplier = floatingBusSupplier;
-    }
 
     private final DiskBootRom bootRom = new DiskBootRom();
     private final Drive[] drives = { new Drive(), new Drive() };
@@ -147,15 +115,19 @@ public final class Disk2Controller implements SlotCard {
         if (offset >= 0xC) {
             return logicSequencer.latch();
         }
-        // Real hardware: these offsets don't drive the data bus, so a read
-        // shows whatever the video circuitry last fetched (the floating
-        // bus). Real DOS 3.3 code does read some of these and use the
-        // result -- see setFloatingBusSupplier's Javadoc. Falls back to 0
-        // (the prior, hardcoded behavior) if never wired, e.g. in isolated
-        // unit tests that construct this card directly. Confirmed
-        // non-regressive against normal boot, CATALOG, and PR#6 -- see
-        // DOS33-BOOT-INVESTIGATION.md UPDATE 43/44.
-        return floatingBusSupplier != null ? floatingBusSupplier.getAsInt() : 0;
+        // Real hardware shows the floating bus here (whatever the video
+        // circuitry last fetched) rather than a fixed value -- and at
+        // least one real, verified DOS 3.3 RWTS path (LDA $C08A,X /
+        // $C08B,X) does read and use the result. A prior attempt to wire
+        // in the real floating-bus value here (see
+        // DOS33-BOOT-INVESTIGATION.md UPDATE 43/45) did not fix the
+        // sluggishness it targeted, and was reported to make real-world
+        // (not just emulated-cycle-count) boot time WORSE -- plausibly
+        // because computing the real value costs real JVM time on every
+        // touch of these offsets, which is frequent. Reverted; returning a
+        // fixed 0 is the deliberately simpler, cheaper choice here despite
+        // being observably not what real hardware does.
+        return 0;
     }
 
     @Override

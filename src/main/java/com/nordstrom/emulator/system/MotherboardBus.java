@@ -95,12 +95,6 @@ public final class MotherboardBus implements MemoryBus {
 
         FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
 
-        for (SlotCard card : slots) {
-            if (card instanceof com.nordstrom.emulator.expansion.Disk2Controller disk) {
-                disk.setFloatingBusSupplier(floatingBus::read);
-            }
-        }
-
         addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0], floatingBus));
 
         ExpansionRomArbiter arbiter = new ExpansionRomArbiter(slots, floatingBus);
