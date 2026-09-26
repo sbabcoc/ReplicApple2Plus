@@ -2253,3 +2253,99 @@ scoped: this emulator's `VideoScanner` timing at the specific instant
 `$BD77`/`$BD7C` read it, compared directly against real Virtual ][''s
 own value at the identical point (obtainable via the same breakpoint/
 register-read technique already built and proven this session).
+
+### UPDATE 48 — ROOT CAUSE FOUND AND FIXED: motor-off modeled as instant cutoff instead of a real one-shot delay
+
+Following UPDATE 47, continued tracing the ~5x slowdown using a
+newly-built, fully-automated AppleScript Instruction Trail capture
+(arms a $B9A0 breakpoint, boots, opens Instruction Trail via the
+Inspector's gear menu, sets its instruction count, resumes to the
+next hit, and saves via the standard macOS save panel -- navigated
+with Cmd+Shift+G rather than typing a full path into the filename
+field directly, since the latter does not reliably fire Cocoa's real
+text-input handling for NSSavePanel).
+
+**The full chain, traced instruction-by-instruction against a real
+Virtual ][ capture:**
+- `$BD83: BNE $BD90` (the seek-retry preamble's branch) depends on
+  flags pulled by `$BD81: PLP` -- NOT flags set within this same
+  code block (an earlier theory, based on an incomplete read of the
+  code, was wrong: `$BD71: LDY #$00` does not always execute, since
+  `$BD6C: BEQ $BD74` can skip over it).
+- Those flags come from an outer `PHP` at `$BD4E`.
+- Immediately after it, `$BD4F: LDA $C089,X` explicitly turns the
+  motor ON (X = 0x60 for slot 6 -> $C0E9).
+- Immediately before it, an 8-iteration loop at `$BD3A`-`$BD4C`
+  polls the disk data latch (`$C08C,X` -> $C0EC), comparing
+  consecutive reads, waiting for the value to CHANGE.
+- Whether that loop exits early (latch changed, Z=0, BNE later
+  takes, fast path -- confirmed as exactly 148 cycles on both real
+  Virtual ][ and, after the fix below, this project) or runs the
+  full 8 iterations (latch frozen, Z=1, BNE never takes, slow path)
+  depends entirely on whether the motor is still actually spinning
+  at that moment.
+- Traced back further: the exact same code (byte-for-byte identical)
+  also exists at $3E4D-ish, a documented DOS 3.3 architecture detail
+  -- a low-memory mirror of this RWTS fragment used only during
+  early boot-stage loading, before the full high-memory copy at
+  $BD-ish takes over for the remainder of execution.
+- `Disk2Controller`'s motor-off switch (case 0x8) was a direct,
+  instant `motorOn = false`, with `tick()` gating ALL LSS advancement
+  on it (`if (!motorOn) { return; }`) -- meaning the disk latch
+  freezes the instant software touches the off-switch, every time,
+  unconditionally.
+
+**Root cause, confirmed against the real controller-card schematic
+(the user read the actual values off the published Disk II schematic
+image -- an initial misreading, 2.2uF, was corrected to the real
+value, 22uF; independently verified against several other sources
+before use):** the Disk II controller card has a real 556 dual-timer
+chip whose one-shot half is documented (multiple independent
+sources, including direct discussion of the real schematic) to keep
+the motor spinning for a bounded grace period after software
+commands it off -- specifically so quick, repeated accesses don't
+pay a real spin-down/spin-up cost each time. Using the real R = 47k
+ohm / C = 22uF values and the standard 555/556 monostable formula
+(`T = 1.1 * R * C`), this one-shot's real duration is **1.1374
+seconds** -- converted to CPU cycles at Sather's documented primary
+6502 clock rate (~1.0227 MHz, "Understanding the Apple II" Chapter
+3), **1,163,250 cycles**.
+
+Notably, this duration sits almost exactly within the ~1.0-1.2-second
+interval this project's own boot trace measured between DOS's own
+successive per-sector-attempt motor touches during early boot -- a
+genuine, close, hardware-timing-dependent race, not a fixed outcome
+either way. This explains something unresolved since early in this
+investigation: real Virtual ][''s own captured retries were a mix of
+fast (~200K cycles) and slow (~1,000,000+ cycles) rather than
+uniformly one or the other.
+
+**Fix applied to `Disk2Controller`:** motor-off is now a retriggerable
+one-shot (`MOTOR_OFF_DELAY_CYCLES = 1_163_250L`, `motorOffCountdownCycles`
+field): the off-switch starts (or restarts) a countdown rather than
+cutting power immediately; the motor stays reported on (and the LSS
+keeps advancing) until `tick()` observes that countdown actually
+reach zero; the on-switch cancels any pending countdown immediately
+and unconditionally, matching every real trace captured this session
+(no equivalent delay exists on power-up).
+
+**Verified:**
+- The exact diagnostic that measured the divergence
+  (`$BD60`-to-`$B9A0` cycle delta across all 16 boot-time retries)
+  now reads **148 cycles on every single retry** -- an exact match to
+  real Virtual ][''s own measured value, not just an improvement.
+- Total boot settle time dropped from this investigation's original
+  baseline (~46-53,000,000 cycles) to **7,801,512 cycles** -- in the
+  same range as real hardware's own measured ~11,000,000-cycle
+  (~11-second) boot, resolving the ~5x slowdown this entire
+  multi-session investigation set out to explain.
+- Both established safety checks still pass byte-for-byte: normal
+  boot settling at qt=84 with a complete, correct `CATALOG` listing,
+  and the full PR#6-reboot-then-`CATALOG` sequence producing an
+  identical, correct listing.
+
+**Status:** this is the fifth confirmed, verified, kept fix from this
+investigation (alongside the original boot-hang, the seek-distance
+magnitude, PR#6's recalibration handling, and the floating-bus read),
+and the one that actually closes the ~5x performance gap this
+investigation was named for.

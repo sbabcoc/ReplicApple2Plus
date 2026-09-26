@@ -70,10 +70,36 @@ public final class Disk2Controller implements SlotCard {
     private static final int LSS_TICKS_PER_BIT_CELL = 8;
     /** LSS ticks per CPU cycle (real hardware: the LSS runs at 2x the CPU clock rate). */
     private static final int LSS_TICKS_PER_CPU_CYCLE = 2;
+    /**
+     * Real hardware doesn't cut motor power the instant software touches
+     * the motor-off switch: the controller card has a 556 dual-timer chip
+     * whose one-shot half keeps the motor spinning for a bounded grace
+     * period after deselection, specifically so quick, repeated accesses
+     * (retries, or successive sector loads during boot) don't pay a real
+     * spin-down/spin-up cost each time. This value is 1.1 * R * C for that
+     * one-shot (the standard 555/556 monostable formula), using R = 47k
+     * ohms and C = 22uF read directly off the real Disk II controller
+     * schematic (independently verified against several sources; see
+     * DOS33-BOOT-INVESTIGATION.md UPDATE 48), converted to CPU cycles at
+     * Sather's documented primary 6502 clock rate (~1.0227 MHz, see
+     * "Understanding the Apple II" Chapter 3). This lands close enough to
+     * DOS's own natural per-attempt cadence (independently measured in
+     * this project's own boot trace at roughly 1.0-1.2 seconds between
+     * successive attempts) that whether the motor is still spinning when
+     * the next attempt begins is a genuine, hardware-timing-dependent
+     * race on real hardware -- not a fixed outcome either way.
+     */
+    private static final long MOTOR_OFF_DELAY_CYCLES = 1_163_250L;
 
     private final boolean[] phaseOn = new boolean[4];
     private int currentPhase = -1; // -1 = not yet established; set on first phase touch
     private boolean motorOn;
+    /**
+     * Cycles remaining before a pending motor-off actually takes effect;
+     * 0 means no shutoff is pending. Only meaningful while {@link
+     * #motorOn} is true -- see {@link #MOTOR_OFF_DELAY_CYCLES}.
+     */
+    private long motorOffCountdownCycles;
     private int selectedDrive; // 0 or 1
     private boolean q6;
     private boolean q7;
@@ -186,6 +212,13 @@ public final class Disk2Controller implements SlotCard {
      * @param cycles CPU cycles elapsed since the last tick
      */
     public void tick(int cycles) {
+        if (motorOn && motorOffCountdownCycles > 0) {
+            motorOffCountdownCycles -= cycles;
+            if (motorOffCountdownCycles <= 0) {
+                motorOffCountdownCycles = 0;
+                motorOn = false;
+            }
+        }
         if (!motorOn) {
             return;
         }
@@ -215,8 +248,24 @@ public final class Disk2Controller implements SlotCard {
             case 0x5 -> turnOnPhase(2);
             case 0x6 -> turnOffPhase(3);
             case 0x7 -> turnOnPhase(3);
-            case 0x8 -> motorOn = false;
-            case 0x9 -> motorOn = true;
+            case 0x8 -> {
+                // Real hardware doesn't cut power immediately -- it starts
+                // (or restarts) the controller card's one-shot grace period
+                // instead; see MOTOR_OFF_DELAY_CYCLES. The motor stays
+                // reported on, and the LSS keeps advancing, until tick()
+                // observes this countdown actually reach zero.
+                if (motorOn) {
+                    motorOffCountdownCycles = MOTOR_OFF_DELAY_CYCLES;
+                }
+            }
+            case 0x9 -> {
+                // Real hardware: no equivalent delay on power-up -- confirmed
+                // via this project's own soft-switch code (a direct,
+                // unconditional flip), matching every real trace this
+                // investigation captured.
+                motorOn = true;
+                motorOffCountdownCycles = 0;
+            }
             case 0xA -> selectedDrive = 0;
             case 0xB -> selectedDrive = 1;
             case 0xC -> { q6 = false; logicSequencer.setQ6(false); }
