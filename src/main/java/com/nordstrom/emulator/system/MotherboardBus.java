@@ -95,6 +95,16 @@ public final class MotherboardBus implements MemoryBus {
 
         FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
 
+        // Real hardware: soft-switch offsets 0x0-0xB on a Disk2Controller
+        // don't drive the data bus, so a read shows the floating bus, not
+        // a fixed value -- see Disk2Controller.readIoSwitch's own Javadoc
+        // for the confirmed, measured reason this matters.
+        for (SlotCard card : slots) {
+            if (card instanceof com.nordstrom.emulator.expansion.Disk2Controller disk) {
+                disk.setFloatingBusSupplier(floatingBus::read);
+            }
+        }
+
         addressSpace.register(0xC080, 0xC08F, new SlotZeroIoHandler(slots[0], floatingBus));
 
         ExpansionRomArbiter arbiter = new ExpansionRomArbiter(slots, floatingBus);

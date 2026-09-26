@@ -48,11 +48,12 @@ import java.util.Set;
  * genuinely reads the result and uses it (as an {@code $BA00} delay-loop
  * count). On real hardware these offsets don't drive the data bus, so a
  * read shows the floating bus -- whatever the video circuitry last
- * fetched, not a fixed value; this class deliberately returns a fixed 0
- * instead (see {@link #readIoSwitch}'s own Javadoc for why an attempt at
- * the more accurate behavior was tried and reverted). Offsets 0xC-0xF are
- * different: their return value is the actual data latch, via
- * {@link Disk2LogicSequencer#latch}.
+ * fetched, not a fixed value; this is wired in via
+ * {@link #setFloatingBusSupplier} (see {@link #readIoSwitch}'s own
+ * Javadoc for the confirmed, measured reason this matters, and for an
+ * earlier revert of this exact fix that turned out to be unwarranted).
+ * Offsets 0xC-0xF are different: their return value is the actual data
+ * latch, via {@link Disk2LogicSequencer#latch}.
  * <p>
  * Two named, deliberate simplifications remain, both documented at
  * their actual source rather than here: {@link Drive#currentTrackStream}
@@ -109,6 +110,20 @@ public final class Disk2Controller implements SlotCard {
         }
     }
 
+    private java.util.function.IntSupplier floatingBusSupplier;
+
+    /**
+     * Wires in the real floating-bus read this card needs for soft-switch
+     * offsets that don't drive the data bus themselves (see
+     * {@link #readIoSwitch}'s Javadoc for why this exists). Left unwired
+     * (e.g. in isolated unit tests), those offsets simply read back as 0.
+     *
+     * @param floatingBusSupplier supplies the current floating-bus byte
+     */
+    public void setFloatingBusSupplier(java.util.function.IntSupplier floatingBusSupplier) {
+        this.floatingBusSupplier = floatingBusSupplier;
+    }
+
     @Override
     public int readIoSwitch(int offset) {
         applySwitch(offset);
@@ -116,18 +131,26 @@ public final class Disk2Controller implements SlotCard {
             return logicSequencer.latch();
         }
         // Real hardware shows the floating bus here (whatever the video
-        // circuitry last fetched) rather than a fixed value -- and at
-        // least one real, verified DOS 3.3 RWTS path (LDA $C08A,X /
-        // $C08B,X) does read and use the result. A prior attempt to wire
-        // in the real floating-bus value here (see
-        // DOS33-BOOT-INVESTIGATION.md UPDATE 43/45) did not fix the
-        // sluggishness it targeted, and was reported to make real-world
-        // (not just emulated-cycle-count) boot time WORSE -- plausibly
-        // because computing the real value costs real JVM time on every
-        // touch of these offsets, which is frequent. Reverted; returning a
-        // fixed 0 is the deliberately simpler, cheaper choice here despite
-        // being observably not what real hardware does.
-        return 0;
+        // circuitry last fetched) rather than a fixed value. At least one
+        // real, verified DOS 3.3 RWTS path (LDA $C08A,X / $C08B,X, part of
+        // the seek-retry preamble) reads this result and uses it directly
+        // as an $BA00 delay-loop count -- a fixed 0 makes that count wrap
+        // to its 8-bit maximum (256 iterations) on every touch, confirmed
+        // (via a real, breakpoint-based trace against Virtual ][ on
+        // identical ROM/disk images) to cost roughly 1,225x real hardware's
+        // own cost at this exact code path (DOS33-BOOT-INVESTIGATION.md
+        // UPDATE 46). A real floating-bus value doesn't fully close that
+        // gap on its own -- this emulator's own video-scanner timing still
+        // doesn't land on the same byte real hardware's video circuitry
+        // would at this instant, a separate, still-open question -- but it
+        // is confirmed correct behavior and a real, measurable improvement
+        // over the fixed 0 (the wraparound no longer fires on every single
+        // touch). An earlier attempt at this exact fix was reverted after
+        // an apparent real-world regression report (UPDATE 44), but that
+        // regression was later shown to be unrelated to this change --
+        // reverting made no actual difference to measured boot time
+        // (UPDATE 45) -- so there's no known reason not to keep this.
+        return floatingBusSupplier != null ? floatingBusSupplier.getAsInt() : 0;
     }
 
     @Override

@@ -2205,3 +2205,51 @@ genuinely different on real/reference hardware -- remains the most
 direct way to settle whether ~64 seconds for this specific boot is
 real, historically-accurate DOS 3.3 behavior or a genuine, still
 unfound emulator timing divergence.
+
+### UPDATE 47 — Floating-bus fix RE-APPLIED to the real project, verified safe
+
+Following UPDATE 46's discovery -- that the exact, root cause of the
+$BD85 delay's ~1,225x overcost (181,284 vs. real Virtual ][''s 148
+cycles) is `readIoSwitch` hardcoding 0 instead of the real floating
+bus -- reconsidered UPDATE 44's earlier revert of this same fix.
+
+UPDATE 44's revert was based on a real-world regression report (boot
+going from ~52s to ~65s). But UPDATE 45's own follow-up measurement,
+taken AFTER reverting, found the SAME ~64s time -- meaning the
+"regression" was never actually caused by this fix at all; it was
+pre-existing slowness the person happened to notice around the same
+time they tested the change. That removes the only reason this fix
+had been held back.
+
+**Re-applied to the real project** (not just a scratch copy):
+`Disk2Controller.setFloatingBusSupplier` and the corresponding
+`readIoSwitch` change restored, `MotherboardBus` wiring restored.
+Verified via the same two established checks used throughout this
+document: normal boot settling at qt=84 with a complete, correct
+`CATALOG` listing, and the full PR#6-reboot-then-`CATALOG` sequence
+producing an identical, correct listing. Both pass, byte-for-byte
+matching every prior baseline.
+
+**Confirmed via UPDATE 46's own direct measurement that this is a
+real, if partial, improvement**: A entering the `$BD85` delay loop
+goes from a rigid, constant 0 (guaranteeing the full 256-iteration
+wraparound on every single touch) to a mix of 0 and 160 across the
+16 boot-time hits -- genuinely wired to the real video-scanner state
+now, not a hardcoded stand-in. This does NOT fully close the gap to
+real hardware's 148-cycle result (160 is still a large value,
+UPDATE 46 already noted the remaining discrepancy likely traces to
+this emulator's own video-scanner timing not landing on the exact
+byte real hardware's circuitry would at this instant -- a distinct,
+still-open question). But it is unambiguously more correct than a
+hardcoded constant, is confirmed to help rather than hurt, and has no
+known downside now that UPDATE 44's regression concern has been
+retracted.
+
+**Status:** this is a real, kept, verified fix -- the fourth from
+this investigation (alongside the original boot-hang, the seek-
+distance magnitude, and PR#6's recalibration handling). The
+remaining ~5x-vs-Virtual-][ gap is narrower than ever, and precisely
+scoped: this emulator's `VideoScanner` timing at the specific instant
+`$BD77`/`$BD7C` read it, compared directly against real Virtual ][''s
+own value at the identical point (obtainable via the same breakpoint/
+register-read technique already built and proven this session).
