@@ -49,7 +49,7 @@ package com.nordstrom.emulator.system;
  */
 public final class VideoScanner {
 
-    private static final int H_CLOCKS = 65;             // clocks per horizontal scan (including HBL)
+    static final int H_CLOCKS = 65;             // clocks per horizontal scan (including HBL)
     private static final int H_CLOCK_0_STATE = 0x18;     // H[543210] = 011000
     private static final int H_PE_CLOCK = 40;            // clock when HPE (horizontal preset enable) goes low
     private static final int H_PRESET_CLOCK = 41;        // clock when H state presets
@@ -58,7 +58,7 @@ public final class VideoScanner {
     private static final int V_LINE_0_STATE = 0x100;     // V[543210CBA] = 100000000
     private static final int V_PRESET_LINE = 256;        // line when V state presets
 
-    private static final int CYCLES_PER_FRAME = H_CLOCKS * SCAN_LINES; // 17030
+    static final int CYCLES_PER_FRAME = H_CLOCKS * SCAN_LINES; // 17030
 
     private final VideoSoftSwitches videoSoftSwitches;
     private long frameCycle;
@@ -111,12 +111,7 @@ public final class VideoScanner {
         int h4 = (hState >> 4) & 1;
         int h5 = (hState >> 5) & 1;
 
-        // vertical scanning state (UTAIIe:3-15,T3.2) -- the stutter lives here
-        int vLine = cycles / H_CLOCKS;
-        int vState = V_LINE_0_STATE + vLine;
-        if (vLine >= V_PRESET_LINE) {
-            vState -= SCAN_LINES;
-        }
+        int vState = vStateAt(cycles);
         int vA = (vState >> 0) & 1;
         int vB = (vState >> 1) & 1;
         int vC = (vState >> 2) & 1;
@@ -167,5 +162,66 @@ public final class VideoScanner {
         }
 
         return addressP | addressV | addressH;
+    }
+
+    /**
+     * The visible scan line (0-191) at the given frame-cycle position, or
+     * -1 during vertical blanking. Package-visible for {@link ScanlineModes},
+     * which needs to know, as cycles tick, exactly when a new visible line
+     * begins -- the same cycle-to-line arithmetic {@link #currentAddress()}
+     * already uses internally (via {@link #vStateAt}), exposed here instead
+     * of re-derived independently.
+     *
+     * @param cycles a frame-relative cycle position (0 to {@link #CYCLES_PER_FRAME}-1,
+     *                already including the same 25-cycle AppleWin phase shift
+     *                {@link #currentAddress()} applies)
+     */
+    static int visibleScanLine(int cycles) {
+        int vLine = cycles / H_CLOCKS;
+        return vLine < 192 ? vLine : -1;
+    }
+
+    /**
+     * Whether the real mixed-mode "force text on the bottom scan lines"
+     * condition (UTAIIe:5-7,P3 -- bits v4 and v2 of the real vertical state
+     * counter) applies at the given frame-cycle position. Package-visible
+     * for {@link ScanlineModes}, for the same reason as {@link #visibleScanLine}:
+     * reusing {@link #currentAddress()}'s own verified vertical-state
+     * arithmetic (including its genuine 6-line stutter) rather than
+     * re-deriving it.
+     *
+     * @param cycles a frame-relative cycle position, same convention as {@link #visibleScanLine}
+     */
+    static boolean isMixedModeTextLine(int cycles) {
+        int vState = vStateAt(cycles);
+        int v2 = (vState >> 5) & 1;
+        int v4 = (vState >> 7) & 1;
+        return v4 != 0 && v2 != 0;
+    }
+
+    /**
+     * The real vertical state counter's value (including its genuine 6-line
+     * stutter, UTAIIe:3-15,T3.2) at the given frame-cycle position. The one
+     * place this arithmetic lives -- {@link #currentAddress()},
+     * {@link #visibleScanLine}, and {@link #isMixedModeTextLine} all derive
+     * from this shared computation rather than each re-deriving it.
+     */
+    private static int vStateAt(int cycles) {
+        int vLine = cycles / H_CLOCKS;
+        int vState = V_LINE_0_STATE + vLine;
+        if (vLine >= V_PRESET_LINE) {
+            vState -= SCAN_LINES;
+        }
+        return vState;
+    }
+
+    /**
+     * The current frame-relative cycle position, already including the same
+     * 25-cycle AppleWin phase shift {@link #currentAddress()} applies, for
+     * {@link ScanlineModes} to pass to {@link #visibleScanLine} and
+     * {@link #isMixedModeTextLine}.
+     */
+    int phaseShiftedCycles() {
+        return (int) ((frameCycle + 25) % CYCLES_PER_FRAME);
     }
 }

@@ -94,6 +94,7 @@ public final class MotherboardBus implements MemoryBus {
         addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
         FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
+        videoSoftSwitches.setFloatingBusSupplier(floatingBus::read);
 
         // Real hardware: soft-switch offsets 0x0-0xB on a Disk2Controller
         // don't drive the data bus, so a read shows the floating bus, not

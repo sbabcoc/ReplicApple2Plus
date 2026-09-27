@@ -8,12 +8,9 @@ package com.nordstrom.emulator.system;
  * Every one of these 16 addresses is a pure toggle: ANY access, read or
  * write, sets the corresponding flag, exactly like {@link com.nordstrom.emulator.expansion.Disk2Controller}'s
  * phase-stepper and motor switches. Unlike that class's Q6/Q7 data latch,
- * though, nothing here ever needs to expose data a not-yet-built
- * subsystem would have to compute -- there's no deferred half to this
- * one. Reads return a harmless 0; real software accessing these
- * addresses does so purely for the side effect and never inspects the
- * returned byte, the same reasoning already applied to the equivalent
- * control switches in {@link com.nordstrom.emulator.expansion.Disk2Controller}.
+ * nothing here needs to expose data a subsystem computes -- but reads DO
+ * need to return the real floating-bus value, not a fixed one (see
+ * {@link #read}'s own Javadoc for why that assumption changed).
  * <pre>
  *   $C050/$C051  TEXT off/on       (graphics/text)
  *   $C052/$C053  MIXED off/on      (full screen/mixed)
@@ -29,13 +26,10 @@ package com.nordstrom.emulator.system;
  * double-hi-res, which does not apply to the machine this project
  * emulates.
  * <p>
- * These flags aren't consumed by anything yet -- there's no video
- * renderer or {@code SystemClock} in this project to read them for
- * actual pixel output. This class still gets built now because the
- * switches themselves are static, well-documented hardware facts with
- * no timing dependency, the same reasoning that let
- * {@link com.nordstrom.emulator.expansion.Disk2Controller}'s control switches be built ahead of the
- * clock loop that will eventually drive the rest of that card.
+ * These flags are consumed by {@link TextScreenRenderer}, {@link LoResRenderer},
+ * and {@link ScanlineModes}. This class itself only tracks the switches'
+ * own state and the real floating-bus read on access -- it has no
+ * opinion about rendering.
  */
 public final class VideoSoftSwitches implements AddressRangeHandler {
 
@@ -44,11 +38,47 @@ public final class VideoSoftSwitches implements AddressRangeHandler {
     private boolean page2;
     private boolean hires;
     private final boolean[] annunciator = new boolean[4];
+    private java.util.function.IntSupplier floatingBusSupplier;
+
+    /**
+     * Wires in the real floating-bus read these switches need on a read
+     * access (see {@link #read}'s own Javadoc for why this exists, and
+     * {@code Disk2Controller#setFloatingBusSupplier} for the identical
+     * pattern already established there for exactly the same real-hardware
+     * reason). Left unwired (e.g. in isolated unit tests), reads simply
+     * come back as 0.
+     *
+     * @param floatingBusSupplier supplies the current floating-bus byte
+     */
+    public void setFloatingBusSupplier(java.util.function.IntSupplier floatingBusSupplier) {
+        this.floatingBusSupplier = floatingBusSupplier;
+    }
 
     @Override
     public int read(int offset) {
         applySwitch(offset);
-        return 0; // harmless -- real software never inspects this, see class Javadoc
+        // Real hardware shows the floating bus here (whatever the video
+        // circuitry last fetched), not a fixed value -- these addresses
+        // don't drive the data bus themselves any more than the Disk II
+        // controller's own non-latched offsets do (see that class's
+        // identical reasoning). This was originally modeled as always
+        // returning 0, on the assumption that real software only ever
+        // touches these addresses for the switch side effect and never
+        // inspects the returned byte. That assumption is false for at
+        // least one real, historically significant, documented program:
+        // Bob Bishop's "floating bus" screen-split demo (Softalk, October
+        // 1982, included as a Virtual ][ example script) explicitly reads
+        // $C050/$C051 in a polling loop and compares the returned value
+        // against specific expected bytes to synchronize a screen-mode
+        // switch to an exact scan line -- confirmed directly by running
+        // that exact program's real, disassembled machine code against
+        // this emulator: with a fixed 0 return, its polling loop spins
+        // forever (0 never matches its target bytes), and the CPU can be
+        // observed stuck cycling through that loop's three instructions
+        // indefinitely. Wiring in the real floating-bus value here is the
+        // same fix already applied to Disk2Controller's own non-latched
+        // switch offsets, for the same underlying reason.
+        return floatingBusSupplier != null ? floatingBusSupplier.getAsInt() : 0;
     }
 
     @Override
@@ -78,27 +108,27 @@ public final class VideoSoftSwitches implements AddressRangeHandler {
         }
     }
 
-    /** Package-visible for tests and the not-yet-built video renderer. */
+    /** Package-visible for tests and the renderers. */
     boolean isText() {
         return text;
     }
 
-    /** Package-visible for tests and the not-yet-built video renderer. */
+    /** Package-visible for tests and the renderers. */
     boolean isMixed() {
         return mixed;
     }
 
-    /** Package-visible for tests and the not-yet-built video renderer. */
+    /** Package-visible for tests and the renderers. */
     boolean isPage2() {
         return page2;
     }
 
-    /** Package-visible for tests and the not-yet-built video renderer. */
+    /** Package-visible for tests and the renderers. */
     boolean isHires() {
         return hires;
     }
 
-    /** Package-visible for tests and the not-yet-built video renderer. {@code n} is 0-3. */
+    /** Package-visible for tests and the renderers. {@code n} is 0-3. */
     boolean isAnnunciatorOn(int n) {
         return annunciator[n];
     }

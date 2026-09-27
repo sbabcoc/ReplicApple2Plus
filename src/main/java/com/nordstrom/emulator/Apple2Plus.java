@@ -5,6 +5,7 @@ import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.system.CliArgs;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.PluginLoader;
+import com.nordstrom.emulator.system.ScanlineModes;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
@@ -134,11 +135,13 @@ public final class Apple2Plus {
         Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
+        ScanlineModes scanlineModes = new ScanlineModes(bus.videoSoftSwitches());
+        clock.addCycleListener(scanlineModes::tick);
         if (disk != null) {
             clock.addCycleListener(disk::tick);
         }
 
-        ScreenPanel screen = new ScreenPanel(bus);
+        ScreenPanel screen = new ScreenPanel(bus, scanlineModes);
 
         JFrame frame = new JFrame("ReplicApple2Plus");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
