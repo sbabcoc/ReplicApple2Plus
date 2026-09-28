@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -18,14 +19,34 @@ import java.util.Properties;
  * prefix within the section (e.g. {@code drive1.path=}, {@code
  * drive1.readOnly=}), not a new parser feature.
  */
-final class IniFile {
+public final class IniFile {
 
-    /** Parses {@code file} into a map of section name to that section's flat properties, in file order. */
-    static Map<String, Properties> parse(Path file) throws IOException {
+    /**
+     * Parses {@code file} into a map of section name to that section's flat properties, in file order.
+     *
+     * @param file the INI file to read
+     * @return each section's name mapped to its properties, in file order
+     * @throws IOException if the file can't be read
+     * @throws IllegalArgumentException if a line is malformed
+     */
+    public static Map<String, Properties> parse(Path file) throws IOException {
+        return parse(Files.readAllLines(file));
+    }
+
+    /**
+     * Parses INI-format text that is already in memory -- what lets a
+     * configuration ship as a classpath resource, which is not a
+     * {@link Path} once it is inside a jar.
+     *
+     * @param lines the file's lines
+     * @return each section's name mapped to its properties, in file order
+     * @throws IllegalArgumentException if a line is malformed
+     */
+    public static Map<String, Properties> parse(List<String> lines) {
         Map<String, Properties> sections = new LinkedHashMap<>();
         Properties current = null;
 
-        for (String rawLine : Files.readAllLines(file)) {
+        for (String rawLine : lines) {
             String line = rawLine.strip();
             if (line.isEmpty() || line.startsWith(";") || line.startsWith("#")) {
                 continue;

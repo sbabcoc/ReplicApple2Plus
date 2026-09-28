@@ -40,10 +40,12 @@ import com.nordstrom.emulator.MemoryBus;
  * <ul>
  *   <li>$C000-$C00F: keyboard data ({@link KeyboardDataHandler})</li>
  *   <li>$C010-$C01F: keyboard strobe clear ({@link KeyboardStrobeHandler})</li>
+ *   <li>$C020-$C02F: cassette output toggle ({@link InertSwitchHandler} -- no cassette modeled)</li>
  *   <li>$C030-$C03F: speaker toggle ({@link SpeakerToggle})</li>
+ *   <li>$C040-$C04F: utility strobe ({@link InertSwitchHandler} -- nothing on the pin)</li>
  *   <li>$0000-$BFFF: main RAM ({@link RamHandler})</li>
  *   <li>$C050-$C05F: video mode switches ({@link VideoSoftSwitches})</li>
- *   <li>$C060-$C06F: game I/O -- cassette/buttons (gaps), paddle reads at offsets 4-7 ({@link GameIoReadHandler})</li>
+ *   <li>$C060-$C06F: game I/O -- cassette input, pushbuttons ({@link GameButtons}), paddle reads ({@link GameIoReadHandler})</li>
  *   <li>$C070-$C07F: paddle trigger strobe ({@link PaddleStrobeHandler})</li>
  *   <li>$C080-$C08F: slot 0's I/O switches ({@link SlotZeroIoHandler})</li>
  *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
@@ -51,21 +53,20 @@ import com.nordstrom.emulator.MemoryBus;
  *   <li>$C800-$CFFF: the shared expansion ROM window ({@link ExpansionRomHandler}, via the shared {@link ExpansionRomArbiter}) -- slots 1-7 only</li>
  *   <li>$D000-$FFFF: slot 0's bank-switched RAM if it wants one ({@link SlotZeroBankingHandler}), else the system ROM directly ({@link SystemRomHandler})</li>
  * </ul>
- * Everything else -- $C020-$C02F and $C040-$C04F
- * (general/keyboard switches) -- is registered as a
- * {@link NotYetImplementedHandler}, naming the specific missing
- * subsystem. Building the real one later means changing exactly one
+ * No range in this map is currently a {@link NotYetImplementedHandler}:
+ * the last two ($C020-$C02F and $C040-$C04F) became
+ * {@link InertSwitchHandler}s. That handler is kept for the next gap
+ * that turns up -- registering one names the specific missing
+ * subsystem, and building the real one later means changing exactly one
  * registration line here; nothing about {@link AddressSpace}, the CPU,
  * or any other region's handler needs to change at all.
  */
 public final class MotherboardBus implements MemoryBus, AutoCloseable {
 
-    private static final String GENERAL_SWITCHES_GAP =
-        "General/keyboard soft switches ($C020-$C02F, $C040-$C04F) are not yet implemented";
-
     private final AddressSpace addressSpace = new AddressSpace();
     private final KeyboardRegister keyboardRegister = new KeyboardRegister();
     private final PaddleTimers paddleTimers = new PaddleTimers();
+    private final GameButtons gameButtons = new GameButtons();
     private final SpeakerToggle speakerToggle = new SpeakerToggle();
     private final SpeakerOutput speakerOutput = new SpeakerOutput(speakerToggle);
     private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
@@ -88,11 +89,11 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
 
         addressSpace.register(0xC000, 0xC00F, new KeyboardDataHandler(keyboardRegister));
         addressSpace.register(0xC010, 0xC01F, new KeyboardStrobeHandler(keyboardRegister));
-        addressSpace.register(0xC020, 0xC02F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
+        addressSpace.register(0xC020, 0xC02F, new InertSwitchHandler());
         addressSpace.register(0xC030, 0xC03F, speakerToggle);
-        addressSpace.register(0xC040, 0xC04F, new NotYetImplementedHandler(GENERAL_SWITCHES_GAP));
+        addressSpace.register(0xC040, 0xC04F, new InertSwitchHandler());
         addressSpace.register(0xC050, 0xC05F, videoSoftSwitches);
-        addressSpace.register(0xC060, 0xC06F, new GameIoReadHandler(paddleTimers));
+        addressSpace.register(0xC060, 0xC06F, new GameIoReadHandler(paddleTimers, gameButtons));
         addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
         FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
@@ -144,6 +145,18 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
      */
     public PaddleTimers paddleTimers() {
         return paddleTimers;
+    }
+
+    /**
+     * The game connector's pushbuttons, read at $C061-$C063 -- how a
+     * real input source reports a button press via
+     * {@link GameButtons#setPressed}. Emulator state: call it from the
+     * emulation thread only (see {@link GameButtons}).
+     *
+     * @return this machine's game pushbuttons
+     */
+    public GameButtons gameButtons() {
+        return gameButtons;
     }
 
     /**
