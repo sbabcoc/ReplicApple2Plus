@@ -58,7 +58,7 @@ import com.nordstrom.emulator.MemoryBus;
  * registration line here; nothing about {@link AddressSpace}, the CPU,
  * or any other region's handler needs to change at all.
  */
-public final class MotherboardBus implements MemoryBus {
+public final class MotherboardBus implements MemoryBus, AutoCloseable {
 
     private static final String GENERAL_SWITCHES_GAP =
         "General/keyboard soft switches ($C020-$C02F, $C040-$C04F) are not yet implemented";
@@ -67,8 +67,10 @@ public final class MotherboardBus implements MemoryBus {
     private final KeyboardRegister keyboardRegister = new KeyboardRegister();
     private final PaddleTimers paddleTimers = new PaddleTimers();
     private final SpeakerToggle speakerToggle = new SpeakerToggle();
+    private final SpeakerOutput speakerOutput = new SpeakerOutput(speakerToggle);
     private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
     private final VideoScanner videoScanner = new VideoScanner(videoSoftSwitches);
+    private final ScanlineModes scanlineModes = new ScanlineModes(videoSoftSwitches);
     private final SlotCard[] slots;
 
     /**
@@ -145,14 +147,51 @@ public final class MotherboardBus implements MemoryBus {
     }
 
     /**
-     * The speaker toggle wired into $C030-$C03F -- how anything outside
-     * this class would observe toggle events for real audio synthesis,
-     * once something exists to do that.
+     * The speaker toggle wired into $C030-$C03F -- how {@link SpeakerOutput}
+     * observes toggle events for real audio synthesis.
      *
      * @return this machine's speaker toggle
      */
     public SpeakerToggle speakerToggle() {
         return speakerToggle;
+    }
+
+    /**
+     * Turns {@link #speakerToggle}'s real-time toggle history into an
+     * actual audio square wave -- see that class's own Javadoc for why
+     * this, unlike video, is safe to drive directly off live state
+     * rather than needing {@link ScanlineModes}-style historical
+     * recording. Ticked via {@link SystemClock#addCycleListener}, the
+     * same mechanism {@link #videoScanner}, {@link #scanlineModes}, and
+     * {@link #paddleTimers} use; its own {@code flush()} is meant to be
+     * called once per driving-loop iteration, not once per sample.
+     *
+     * @return this machine's speaker output
+     */
+    public SpeakerOutput speakerOutput() {
+        return speakerOutput;
+    }
+
+    /**
+     * Releases the real OS audio resource {@link #speakerOutput}
+     * opened, if any. Every {@code MotherboardBus} unconditionally
+     * constructs a real {@link SpeakerOutput} (needed for the real
+     * application, which only ever constructs one), which in turn
+     * unconditionally tries to open a real audio device -- meaning any
+     * code that constructs a {@code MotherboardBus} at all, tests
+     * included, opens a real audio line as a side effect whether it
+     * cares about audio or not. Confirmed to matter in practice: an
+     * existing test constructing dozens of these in a loop, none ever
+     * closed, was traced directly to an audible artifact appearing
+     * during every build's test run. Callers that construct a
+     * {@code MotherboardBus} and don't need it to outlive the current
+     * scope should use try-with-resources or otherwise call this
+     * explicitly when done, exactly the same real-resource-cleanup
+     * discipline as any other {@link AutoCloseable}.
+     */
+    @Override
+    public void close() {
+        speakerOutput.close();
     }
 
     /**
@@ -177,6 +216,21 @@ public final class MotherboardBus implements MemoryBus {
      */
     public VideoScanner videoScanner() {
         return videoScanner;
+    }
+
+    /**
+     * Records which video source (text/lores/hires) and which page
+     * applied to each of the 192 visible scan lines, as cycles actually
+     * tick -- see that class's own Javadoc for why a renderer needs this
+     * rather than just reading {@link #videoSoftSwitches} directly at
+     * paint time. Ticked via {@link SystemClock#addCycleListener} once
+     * assembled with a real clock, the same mechanism {@link #videoScanner}
+     * and {@link #paddleTimers} use.
+     *
+     * @return this machine's scan-line mode recorder
+     */
+    public ScanlineModes scanlineModes() {
+        return scanlineModes;
     }
 
     /**

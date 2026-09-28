@@ -27,7 +27,7 @@ package com.nordstrom.emulator.system;
  * emulates.
  * <p>
  * These flags are consumed by {@link TextScreenRenderer}, {@link LoResRenderer},
- * and {@link ScanlineModes}. This class itself only tracks the switches'
+ * {@link HiResRenderer}, and {@link ScanlineModes}. This class itself only tracks the switches'
  * own state and the real floating-bus read on access -- it has no
  * opinion about rendering.
  */

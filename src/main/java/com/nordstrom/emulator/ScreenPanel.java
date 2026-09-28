@@ -1,5 +1,6 @@
 package com.nordstrom.emulator;
 
+import com.nordstrom.emulator.system.HiResRenderer;
 import com.nordstrom.emulator.system.LoResRenderer;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.ScanlineModes;
@@ -21,13 +22,13 @@ import java.awt.Graphics;
  * from {@link ScanlineModes}, which this class also has no opinion
  * about beyond reading it.
  * <p>
- * Deliberately renders BOTH the full text screen and the full lo-res
- * screen every single paint, then picks per-row which one's data to
- * actually use, rather than trying to render only the "active" one --
- * simpler and more robust than threading a per-row "which renderer"
- * decision into either renderer's own internals, and cheap enough
- * (at most a few hundred thousand pixel lookups, a handful of times a
- * second) that the wasted work from rendering the "wrong" mode's data
+ * Deliberately renders the full text screen, the full lo-res screen,
+ * AND the full hi-res screen every single paint, then picks per-row
+ * which one's data to actually use, rather than trying to render only
+ * the "active" one -- simpler and more robust than threading a per-row
+ * "which renderer" decision into any renderer's own internals, and
+ * cheap enough (well under a million pixel lookups, a handful of times
+ * a second) that the wasted work from rendering the "wrong" mode's data
  * for a given row is not worth avoiding.
  * <p>
  * Flash state (which characters in the flash range currently show
@@ -70,6 +71,7 @@ final class ScreenPanel extends JPanel {
         super.paintComponent(g);
         boolean[][] textPixels = TextScreenRenderer.render(bus, bus.videoSoftSwitches(), flashVisible);
         Color[][] loResPixels = LoResRenderer.render(bus, bus.videoSoftSwitches());
+        Color[][] hiResPixels = HiResRenderer.render(bus, bus.videoSoftSwitches());
         ScanlineModes.LineMode[] modes = scanlineModes.completedFrame();
 
         for (int row = 0; row < textPixels.length; row++) {
@@ -78,7 +80,7 @@ final class ScreenPanel extends JPanel {
                 Color color = switch (source) {
                     case TEXT -> textPixels[row][col] ? Color.GREEN : Color.BLACK;
                     case LORES -> loResPixels[row][col];
-                    case HIRES -> Color.BLACK; // not yet implemented -- see HARDWARE-REFERENCE.md
+                    case HIRES -> hiResPixels[row][col];
                 };
                 if (!color.equals(Color.BLACK)) {
                     g.setColor(color);

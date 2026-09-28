@@ -16,8 +16,11 @@ import java.awt.event.KeyEvent;
  * ASCII code, regardless of shift state or what Java's own key handling
  * produced. Ctrl+letter sends the standard ASCII control code
  * ({@code letter & 0x1F}, computed here as an offset from {@code VK_A}),
- * a general rule rather than per-key special-casing. Left-arrow doubles
- * as the era's backspace-equivalent ($08).
+ * a general rule rather than per-key special-casing. The two arrow keys
+ * the real keyboard actually had are the left arrow ($08, which doubles
+ * as the era's backspace-equivalent) and the right arrow ($15, the same
+ * code as Ctrl-U). There are no up or down arrows to map: the Apple II+
+ * keyboard never had them.
  * <p>
  * Split into two methods rather than one taking a full {@link KeyEvent},
  * matching how Swing itself delivers keyboard input in two distinct
@@ -32,7 +35,7 @@ import java.awt.event.KeyEvent;
  * <p>
  * Deliberately incomplete: this covers what's needed to type at a
  * BASIC/Monitor prompt (letters, digits, common punctuation, RETURN,
- * left-arrow, ESC, and Ctrl-combinations) -- not full fidelity to every
+ * left- and right-arrow, ESC, and Ctrl-combinations) -- not full fidelity to every
  * key the real keyboard and its era-specific quirks had.
  */
 public final class KeyboardMapper {
@@ -66,6 +69,7 @@ public final class KeyboardMapper {
         return switch (keyCode) {
             case KeyEvent.VK_ENTER -> 0x0D;
             case KeyEvent.VK_LEFT, KeyEvent.VK_BACK_SPACE -> 0x08;
+            case KeyEvent.VK_RIGHT -> 0x15;
             case KeyEvent.VK_ESCAPE -> 0x1B;
             default -> -1;
         };

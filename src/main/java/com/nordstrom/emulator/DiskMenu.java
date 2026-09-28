@@ -9,7 +9,9 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
+import java.awt.EventQueue;
 import java.io.IOException;
+import java.util.concurrent.Executor;
 
 /**
  * Builds the "Disk" menu for runtime insert/eject on both of a
@@ -36,13 +38,17 @@ final class DiskMenu {
      *
      * @param disk the controller whose drives this menu operates on
      * @param parent the component to anchor dialogs to (typically the main frame)
+     * @param emulationThread runs each insert and eject on the emulation thread --
+     *                        menu actions arrive on the Swing event thread, and a
+     *                        disk swap changes several fields the running machine
+     *                        reads, so it must not happen concurrently with a tick
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
-    static JMenu build(Disk2Controller disk, Component parent) {
+    static JMenu build(Disk2Controller disk, Component parent, Executor emulationThread) {
         JMenu menu = new JMenu("Disk");
-        menu.add(driveMenuItems(disk.removableDrives().get(0), "Drive 1", parent));
+        menu.add(driveMenuItems(disk.removableDrives().get(0), "Drive 1", parent, emulationThread));
         menu.addSeparator();
-        menu.add(driveMenuItems(disk.removableDrives().get(1), "Drive 2", parent));
+        menu.add(driveMenuItems(disk.removableDrives().get(1), "Drive 2", parent, emulationThread));
         return menu;
     }
 
@@ -51,15 +57,16 @@ final class DiskMenu {
      * a small submenu per drive rather than trying to flatten both
      * drives' items into one menu with ambiguous labels.
      */
-    private static JMenu driveMenuItems(RemovableMediaDrive drive, String label, Component parent) {
+    private static JMenu driveMenuItems(RemovableMediaDrive drive, String label, Component parent,
+                                        Executor emulationThread) {
         JMenu driveMenu = new JMenu(label);
 
         JMenuItem insert = new JMenuItem("Insert...");
-        insert.addActionListener(event -> promptAndInsert(drive, parent));
+        insert.addActionListener(event -> promptAndInsert(drive, parent, emulationThread));
         driveMenu.add(insert);
 
         JMenuItem eject = new JMenuItem("Eject");
-        eject.addActionListener(event -> drive.eject());
+        eject.addActionListener(event -> emulationThread.execute(drive::eject));
         driveMenu.add(eject);
 
         return driveMenu;
@@ -77,8 +84,10 @@ final class DiskMenu {
      *
      * @param drive the drive to insert into
      * @param parent the component to anchor dialogs to
+     * @param emulationThread runs the insert itself; pass {@code Runnable::run} when
+     *                        emulation is not running yet (the startup prompt)
      */
-    static void promptAndInsert(RemovableMediaDrive drive, Component parent) {
+    static void promptAndInsert(RemovableMediaDrive drive, Component parent, Executor emulationThread) {
         JFileChooser chooser = new JFileChooser();
         chooser.setFileFilter(new FileNameExtensionFilter(
             "Disk images (*.woz, *.dsk, *.do)", "woz", "dsk", "do"));
@@ -86,11 +95,24 @@ final class DiskMenu {
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
         }
-        try {
-            drive.insert(chooser.getSelectedFile().toPath());
-        } catch (IOException | IllegalArgumentException | IllegalStateException e) {
-            JOptionPane.showMessageDialog(parent, "Could not load disk image:\n" + e.getMessage(),
-                "Disk Error", JOptionPane.ERROR_MESSAGE);
+        java.nio.file.Path image = chooser.getSelectedFile().toPath();
+        emulationThread.execute(() -> {
+            try {
+                drive.insert(image);
+            } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+                showLoadError(parent, e);
+            }
+        });
+    }
+
+    /** The insert may be running on the emulation thread; dialogs belong on the event thread. */
+    private static void showLoadError(Component parent, Exception e) {
+        Runnable show = () -> JOptionPane.showMessageDialog(parent,
+            "Could not load disk image:\n" + e.getMessage(), "Disk Error", JOptionPane.ERROR_MESSAGE);
+        if (EventQueue.isDispatchThread()) {
+            show.run();
+        } else {
+            EventQueue.invokeLater(show);
         }
     }
 }

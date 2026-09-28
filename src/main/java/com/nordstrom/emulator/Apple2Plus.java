@@ -5,7 +5,6 @@ import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.system.CliArgs;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.PluginLoader;
-import com.nordstrom.emulator.system.ScanlineModes;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
@@ -14,7 +13,6 @@ import javax.swing.JFrame;
 import javax.swing.JMenuBar;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -63,23 +61,28 @@ import java.nio.file.Path;
  * disabled.
  * <p>
  * Cycle pacing: this class, not {@link SystemClock}, decides how fast
- * to run and how often to repaint -- {@link SystemClock} deliberately
- * has no opinion about real-time pacing at all (see its own Javadoc).
- * {@link #CYCLES_PER_TICK} is a rough approximation of the real
- * ~1.023 MHz clock rate at this timer's interval, not an exact,
- * calibrated match -- real-time accuracy to that degree isn't this
- * project's current goal.
+ * to run -- {@link SystemClock} deliberately has no opinion about
+ * real-time pacing at all (see its own Javadoc). The machine runs on
+ * its own thread ({@link EmulationLoop}), paced by the audio device: it
+ * runs {@link #CYCLES_PER_TICK} cycles, hands that tick's audio to the
+ * sound card, and blocks there whenever the card is full, which locks
+ * emulated time to real time. It replaced a Swing-timer design that
+ * measurably ran at about 83% speed and let the audio line run dry.
+ * Because that thread owns all emulator state, the event thread never
+ * touches it directly: keystrokes and disk changes are posted to the
+ * loop and run between ticks.
  * <p>
  * A gap hit during interactive use (an address range this project
  * hasn't modeled yet, say) is reported and stops emulation cleanly
- * rather than crashing the Swing event thread with an unhandled
- * exception -- the window stays open and showing whatever was last
- * drawn, rather than vanishing.
+ * rather than crashing with an unhandled exception -- the window stays
+ * open and showing whatever was last drawn, rather than vanishing.
  */
 public final class Apple2Plus {
 
     private static final int FRAME_INTERVAL_MS = 20; // ~50 Hz
     private static final int CYCLES_PER_TICK = 20_000; // ~1.023 MHz * 20ms, approximately
+    private static final long TICK_NANOS = FRAME_INTERVAL_MS * 1_000_000L; // fallback pacing only: no audio device
+    private static final long SHUTDOWN_JOIN_MS = 300; // longest the exit hook waits for the loop to stop
     private static final int FLASH_TOGGLE_EVERY_N_TICKS = 15; // roughly twice a second at 50 Hz
     private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR]";
 
@@ -135,13 +138,34 @@ public final class Apple2Plus {
         Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
-        ScanlineModes scanlineModes = new ScanlineModes(bus.videoSoftSwitches());
-        clock.addCycleListener(scanlineModes::tick);
+        clock.addCycleListener(bus.scanlineModes()::tick);
+        clock.addCycleListener(bus.speakerOutput()::tick);
         if (disk != null) {
             clock.addCycleListener(disk::tick);
         }
+        ScreenPanel screen = new ScreenPanel(bus, bus.scanlineModes());
 
-        ScreenPanel screen = new ScreenPanel(bus, scanlineModes);
+        int[] ticksSinceFlash = {0}; // touched only by the emulation thread
+        EmulationLoop loop = new EmulationLoop(clock::step, CYCLES_PER_TICK, TICK_NANOS,
+            bus.speakerOutput()::flush, bus.speakerOutput()::hasDevice,
+            () -> {
+                if (++ticksSinceFlash[0] >= FLASH_TOGGLE_EVERY_N_TICKS) {
+                    ticksSinceFlash[0] = 0;
+                    SwingUtilities.invokeLater(screen::toggleFlash); // flash state belongs to the paint thread
+                }
+                screen.repaint(); // safe from any thread
+            });
+
+        // Runs on both a normal EXIT_ON_CLOSE-triggered exit and a
+        // SIGINT/SIGTERM (e.g. Ctrl+C from a terminal) -- shutdown hooks
+        // cover either path, unlike relying on JFrame's own close
+        // handling alone, which only fires for the window-close case.
+        // The loop stops first: closing the audio line out from under a
+        // thread that is blocked writing to it is not something to rely on.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            loop.stop(SHUTDOWN_JOIN_MS);
+            bus.speakerOutput().close();
+        }));
 
         JFrame frame = new JFrame("ReplicApple2Plus");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -150,11 +174,11 @@ public final class Apple2Plus {
 
         if (disk != null) {
             JMenuBar menuBar = new JMenuBar();
-            menuBar.add(DiskMenu.build(disk, frame));
+            menuBar.add(DiskMenu.build(disk, frame, loop));
             frame.setJMenuBar(menuBar);
         }
 
-        KeyboardInputListener keyboardInput = new KeyboardInputListener(bus.keyboardRegister());
+        KeyboardInputListener keyboardInput = new KeyboardInputListener(bus.keyboardRegister(), loop);
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 
@@ -167,25 +191,7 @@ public final class Apple2Plus {
             promptForBootDisk(disk, frame);
         }
 
-        int[] ticksSinceFlash = {0};
-        Timer timer = new Timer(FRAME_INTERVAL_MS, event -> {
-            try {
-                for (int cycles = 0; cycles < CYCLES_PER_TICK; ) {
-                    cycles += clock.step();
-                }
-            } catch (RuntimeException e) {
-                System.err.println("Emulation stopped: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                ((Timer) event.getSource()).stop();
-                return;
-            }
-
-            if (++ticksSinceFlash[0] >= FLASH_TOGGLE_EVERY_N_TICKS) {
-                screen.toggleFlash();
-                ticksSinceFlash[0] = 0;
-            }
-            screen.repaint();
-        });
-        timer.start();
+        loop.start();
     }
 
     private Apple2Plus() {}
@@ -211,6 +217,6 @@ public final class Apple2Plus {
             + "or Cancel to start with no disk -- real boot code will keep\n"
             + "waiting for one, but you can insert one later from the Disk menu.",
             "No Disk Loaded", JOptionPane.INFORMATION_MESSAGE);
-        DiskMenu.promptAndInsert(disk.removableDrives().get(0), parent);
+        DiskMenu.promptAndInsert(disk.removableDrives().get(0), parent, Runnable::run); // emulation hasn't started yet
     }
 }

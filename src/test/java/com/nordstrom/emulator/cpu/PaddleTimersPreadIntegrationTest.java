@@ -58,25 +58,25 @@ class PaddleTimersPreadIntegrationTest {
     }
 
     private static int runRealPread(int position) {
-        SlotCard[] slots = new SlotCard[8];
-        MotherboardBus bus = new MotherboardBus(slots);
-        for (int i = 0; i < PREAD_PROGRAM.length; i++) {
-            bus.write(0x1000 + i, PREAD_PROGRAM[i]);
-        }
-        bus.paddleTimers().setPosition(0, position);
-
-        Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // reads real ROM's own reset vector -- irrelevant, overridden below
-        cpu.pc = 0x1000;
-        SystemClock clock = new SystemClock(cpu);
-        clock.addCycleListener(bus.paddleTimers()::tick);
-
-        for (int i = 0; i < 10_000; i++) {
-            int opcode = bus.read(cpu.pc);
-            clock.step();
-            if (opcode == 0x60) { // just executed RTS -- the routine is done
-                break;
+        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+            for (int i = 0; i < PREAD_PROGRAM.length; i++) {
+                bus.write(0x1000 + i, PREAD_PROGRAM[i]);
             }
+            bus.paddleTimers().setPosition(0, position);
+
+            Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // reads real ROM's own reset vector -- irrelevant, overridden below
+            cpu.pc = 0x1000;
+            SystemClock clock = new SystemClock(cpu);
+            clock.addCycleListener(bus.paddleTimers()::tick);
+
+            for (int i = 0; i < 10_000; i++) {
+                int opcode = bus.read(cpu.pc);
+                clock.step();
+                if (opcode == 0x60) { // just executed RTS -- the routine is done
+                    break;
+                }
+            }
+            return cpu.y;
         }
-        return cpu.y;
     }
 }

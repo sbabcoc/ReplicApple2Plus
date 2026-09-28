@@ -4,6 +4,7 @@ import com.nordstrom.emulator.system.KeyboardRegister;
 
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
+import java.util.concurrent.Executor;
 
 /**
  * Feeds real Swing keyboard events into the emulated
@@ -15,16 +16,24 @@ import java.awt.event.KeyListener;
 final class KeyboardInputListener implements KeyListener {
 
     private final KeyboardRegister keyboardRegister;
+    private final Executor emulationThread;
 
-    KeyboardInputListener(KeyboardRegister keyboardRegister) {
+    /**
+     * @param keyboardRegister the register keystrokes are delivered to
+     * @param emulationThread runs each delivery on the emulation thread --
+     *                        AWT calls this listener on the event thread, which
+     *                        must not touch emulator state directly
+     */
+    KeyboardInputListener(KeyboardRegister keyboardRegister, Executor emulationThread) {
         this.keyboardRegister = keyboardRegister;
+        this.emulationThread = emulationThread;
     }
 
     @Override
     public void keyTyped(KeyEvent e) {
         int mapped = KeyboardMapper.mapTypedCharacter(e.getKeyChar());
         if (mapped >= 0) {
-            keyboardRegister.keyPressed(mapped);
+            emulationThread.execute(() -> keyboardRegister.keyPressed(mapped));
         }
     }
 
@@ -32,7 +41,7 @@ final class KeyboardInputListener implements KeyListener {
     public void keyPressed(KeyEvent e) {
         int mapped = KeyboardMapper.mapSpecialKey(e.getKeyCode(), e.isControlDown());
         if (mapped >= 0) {
-            keyboardRegister.keyPressed(mapped);
+            emulationThread.execute(() -> keyboardRegister.keyPressed(mapped));
         }
     }
 

@@ -69,7 +69,11 @@ public final class ScanlineModes {
     private final VideoSoftSwitches videoSoftSwitches;
 
     private LineMode[] recording = freshFrame();
-    private LineMode[] completed = freshFrame();
+    // Volatile: written by the emulation thread when a frame finishes,
+    // read by the Swing paint thread. Every entry is always non-null and
+    // LineMode is an immutable record, so publishing the reference is all
+    // the synchronization a reader needs.
+    private volatile LineMode[] completed = freshFrame();
     private int frameCycle;
     private int lastRecordedLine = -1;
 

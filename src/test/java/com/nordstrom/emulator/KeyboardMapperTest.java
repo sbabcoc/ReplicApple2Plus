@@ -33,8 +33,24 @@ class KeyboardMapperTest {
         assertEquals(0x0D, KeyboardMapper.mapSpecialKey(KeyEvent.VK_ENTER, false));
         assertEquals(0x08, KeyboardMapper.mapSpecialKey(KeyEvent.VK_LEFT, false));
         assertEquals(0x08, KeyboardMapper.mapSpecialKey(KeyEvent.VK_BACK_SPACE, false));
+        assertEquals(0x15, KeyboardMapper.mapSpecialKey(KeyEvent.VK_RIGHT, false));
         assertEquals(0x1B, KeyboardMapper.mapSpecialKey(KeyEvent.VK_ESCAPE, false));
         assertEquals(-1, KeyboardMapper.mapSpecialKey(KeyEvent.VK_F1, false));
+    }
+
+    @Test
+    void rightArrowSendsTheSameCodeAsCtrlU() {
+        // The right arrow was silently dropped (unmapped, so -1) until a
+        // game -- Joust -- needed it. It is the same physical signal as
+        // Ctrl-U on the real keyboard, so the two paths must agree.
+        assertEquals(KeyboardMapper.mapSpecialKey(KeyEvent.VK_U, true),
+            KeyboardMapper.mapSpecialKey(KeyEvent.VK_RIGHT, false));
+    }
+
+    @Test
+    void upAndDownArrowsStayUnmappedBecauseTheHardwareHadNone() {
+        assertEquals(-1, KeyboardMapper.mapSpecialKey(KeyEvent.VK_UP, false));
+        assertEquals(-1, KeyboardMapper.mapSpecialKey(KeyEvent.VK_DOWN, false));
     }
 
     @Test
