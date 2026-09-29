@@ -20,6 +20,7 @@ class PadPollerTest {
     private static final class RecordingSink implements InputSink {
         final List<String> events = new CopyOnWriteArrayList<>();
         @Override public void setPaddle(int channel, int position) { events.add("P" + channel + "=" + position); }
+        @Override public void disconnectPaddle(int channel) { events.add("P" + channel + "=open"); }
         @Override public void setButton(int button, boolean pressed) { events.add("B" + button + "=" + pressed); }
     }
 
@@ -105,7 +106,8 @@ class PadPollerTest {
         poller.stop(2000);
 
         assertEquals("B0=false", lastEventFor(sink, "B0"), "no button may stay pressed after polling stops");
-        assertEquals("P0=128", lastEventFor(sink, "P0"), "no paddle may stay deflected after polling stops");
+        assertEquals("P0=open", lastEventFor(sink, "P0"),
+            "once polling stops the pad is gone: the paddle must read as unplugged, not stay deflected or centered");
     }
 
     private static String lastEventFor(RecordingSink sink, String prefix) {

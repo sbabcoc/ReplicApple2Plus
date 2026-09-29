@@ -14,15 +14,34 @@ import java.util.Set;
  */
 public final class PadSnapshot {
 
-    /** A pad at rest: sticks centered, nothing pressed. Also what "no pad connected" looks like. */
+    /** A pad that is connected and at rest: sticks centered, nothing pressed. */
     public static final PadSnapshot NEUTRAL = new Builder().build();
+
+    /**
+     * No pad connected at all. Deliberately not the same as {@link #NEUTRAL}:
+     * a pad at rest is a joystick plugged in and centered, while this is
+     * nothing plugged in, and the Apple II can tell the two apart -- an
+     * unplugged paddle reads 255 where a centered one reads 128.
+     */
+    public static final PadSnapshot ABSENT = new PadSnapshot(new float[PadAxis.values().length], EnumSet.noneOf(PadButton.class), false);
 
     private final float[] axes;
     private final Set<PadButton> pressed;
+    private final boolean present;
 
-    private PadSnapshot(float[] axes, Set<PadButton> pressed) {
+    private PadSnapshot(float[] axes, Set<PadButton> pressed, boolean present) {
         this.axes = axes;
         this.pressed = pressed;
+        this.present = present;
+    }
+
+    /**
+     * Whether a pad is connected at all.
+     *
+     * @return false only for {@link #ABSENT}
+     */
+    public boolean isPresent() {
+        return present;
     }
 
     /**
@@ -47,17 +66,17 @@ public final class PadSnapshot {
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof PadSnapshot s && Arrays.equals(axes, s.axes) && pressed.equals(s.pressed);
+        return other instanceof PadSnapshot s && present == s.present && Arrays.equals(axes, s.axes) && pressed.equals(s.pressed);
     }
 
     @Override
     public int hashCode() {
-        return 31 * Arrays.hashCode(axes) + pressed.hashCode();
+        return 31 * (31 * Arrays.hashCode(axes) + pressed.hashCode()) + Boolean.hashCode(present);
     }
 
     @Override
     public String toString() {
-        return "PadSnapshot" + Arrays.toString(axes) + pressed;
+        return present ? "PadSnapshot" + Arrays.toString(axes) + pressed : "PadSnapshot(absent)";
     }
 
     /**
@@ -109,7 +128,7 @@ public final class PadSnapshot {
          * @return an immutable snapshot of what was set
          */
         public PadSnapshot build() {
-            return new PadSnapshot(axes.clone(), pressed.clone());
+            return new PadSnapshot(axes.clone(), pressed.clone(), true);
         }
     }
 }

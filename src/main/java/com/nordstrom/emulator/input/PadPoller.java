@@ -15,8 +15,9 @@ import java.util.function.Supplier;
  * when no provider is available, in which case this thread simply ends.
  * <p>
  * When polling stops for any reason -- a stop request, or the provider
- * failing -- the mapper is given a neutral pad, so no button stays
- * pressed and no paddle stays deflected.
+ * failing -- the mapper is told the pad is gone, as if it were unplugged:
+ * no button stays pressed and no paddle stays deflected or reads as if a
+ * joystick were still attached.
  */
 public final class PadPoller {
 
@@ -106,7 +107,7 @@ public final class PadPoller {
             log.println("input: gamepad polling stopped after an error: " + e);
         } finally {
             try {
-                mapper.apply(PadSnapshot.NEUTRAL);
+                mapper.apply(PadSnapshot.ABSENT);
             } catch (RuntimeException ignored) {
                 // nothing sensible left to do about a sink that is already gone
             }

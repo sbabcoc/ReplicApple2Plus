@@ -91,7 +91,7 @@ class JamepadProviderTest {
             assertNotNull(snapshot);
             assertFalse(provider.description().isEmpty());
             if (provider.description().equals("no gamepad connected")) {
-                assertEquals(PadSnapshot.NEUTRAL, snapshot);
+                assertEquals(PadSnapshot.ABSENT, snapshot);
             }
         } finally {
             provider.close();

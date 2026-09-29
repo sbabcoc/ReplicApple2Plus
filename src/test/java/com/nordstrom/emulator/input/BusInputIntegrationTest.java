@@ -5,6 +5,7 @@ import com.nordstrom.emulator.system.SlotCard;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -26,6 +27,18 @@ class BusInputIntegrationTest {
             }
         }
         return cycles;
+    }
+
+    /** Triggers the strobe and reports whether the channel's timer ever trips within {@code limit} cycles. */
+    private static boolean tripsWithin(MotherboardBus bus, int channel, int limit) {
+        bus.write(0xC070, 0);
+        for (int cycles = 0; cycles < limit; cycles++) {
+            if ((bus.read(0xC064 + channel) & 0x80) == 0) {
+                return true;
+            }
+            bus.paddleTimers().tick(1);
+        }
+        return false;
     }
 
     private static InputMapper mapperFor(MotherboardBus bus) {
@@ -70,14 +83,45 @@ class BusInputIntegrationTest {
     }
 
     @Test
-    void thePaddlesAreCenteredOnceTheMapperHasBeenPrimedEvenWithNoPadAtAll() {
+    void aMachineWithNoPadTheTimersNeverTripLikeAnEmptyGamePort() {
         try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
-            int untouched = cyclesUntilExpired(bus, 0);
-            assertEquals(0, untouched, "with no input layer, an untouched paddle sits at the extreme");
+            for (int channel = 0; channel < 4; channel++) {
+                assertFalse(tripsWithin(bus, channel, 20_000), "channel " + channel + " untouched, nothing plugged in");
+            }
+            mapperFor(bus).apply(PadSnapshot.ABSENT);
+            for (int channel = 0; channel < 4; channel++) {
+                assertFalse(tripsWithin(bus, channel, 20_000), "channel " + channel + " after an explicit 'no pad'");
+            }
+        }
+    }
 
-            mapperFor(bus).apply(PadSnapshot.NEUTRAL);
+    @Test
+    void connectingAPadAtRestPlugsInACenteredJoystickAndDisconnectingItUnplugsItAgain() {
+        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+            InputMapper mapper = mapperFor(bus);
+            mapper.apply(PadSnapshot.ABSENT);
+            assertFalse(tripsWithin(bus, 0, 20_000));
+
+            mapper.apply(PadSnapshot.NEUTRAL);
             int center = cyclesUntilExpired(bus, 0);
-            assertTrue(center > 1000 && center < 1800, "after priming it should read mid-scale, was " + center);
+            assertTrue(center > 1000 && center < 1800, "a pad at rest should read mid-scale, was " + center);
+
+            mapper.apply(PadSnapshot.ABSENT);
+            assertFalse(tripsWithin(bus, 0, 20_000), "unplugged again once the pad is gone");
+        }
+    }
+
+    @Test
+    void aParticularPaddleLeftUnboundStaysUnpluggedWhileTheOthersWork() {
+        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+            InputMapping oneJoystick = InputMapping.fromSections(com.nordstrom.emulator.system.IniFile.parse(java.util.List.of(
+                "[paddle2]", "axis =", "[paddle3]", "axis =")));
+            new InputMapper(oneJoystick, new BusInputSink(bus, Runnable::run)).apply(PadSnapshot.NEUTRAL);
+
+            assertTrue(tripsWithin(bus, 0, 20_000), "paddle 0 is the joystick's X");
+            assertTrue(tripsWithin(bus, 1, 20_000), "paddle 1 is the joystick's Y");
+            assertFalse(tripsWithin(bus, 2, 20_000), "paddle 2 has nothing attached");
+            assertFalse(tripsWithin(bus, 3, 20_000), "paddle 3 has nothing attached");
         }
     }
 

@@ -16,7 +16,7 @@ public interface PadProvider extends AutoCloseable {
     /**
      * Reads the pad's current state.
      *
-     * @return the state now, or {@link PadSnapshot#NEUTRAL} if no pad is connected
+     * @return the state now, or {@link PadSnapshot#ABSENT} if no pad is connected
      */
     PadSnapshot poll();
 

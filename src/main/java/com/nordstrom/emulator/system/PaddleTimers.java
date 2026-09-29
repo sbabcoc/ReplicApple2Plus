@@ -35,6 +35,20 @@ package com.nordstrom.emulator.system;
  * match between the position set here and the value that real routine
  * computes, across the full 0-255 range, not merely a close one.
  * <p>
+ * <b>Nothing plugged in.</b> With no paddle attached, the potentiometer's
+ * leg of the circuit is an open circuit -- infinite resistance -- so the
+ * capacitor never charges to the threshold and the one-shot never trips:
+ * its output goes high when triggered and simply stays high. Software
+ * that counts how long it takes, like the ROM's {@code PREAD}, runs into
+ * its own counting cap instead and returns 255. That is what real
+ * hardware does, and it is the starting state here: every channel is
+ * unplugged until {@link #setPosition} connects it. It matters because
+ * it is the only signal a program has for "there is no joystick", and a
+ * channel that reads 0 or 128 instead tells it there is one. A channel
+ * that stays high forever is not the same as one that trips at
+ * {@code PREAD}'s cap (position 255): code that counts longer than
+ * {@code PREAD} sees the difference.
+ * <p>
  * Ticked by {@link SystemClock#addCycleListener}, not by holding a
  * reference back to a clock -- this class only needs to know how many
  * cycles just elapsed, not the clock's own identity or total count.
@@ -59,19 +73,47 @@ public final class PaddleTimers {
      */
     private static final int FULL_SCALE_CYCLES = 2816;
 
+    /** A running countdown that never ends: the timer output of a channel with nothing plugged in. */
+    private static final int NEVER = Integer.MAX_VALUE;
+
     private final int[] remainingCycles = new int[4];
     private final int[] tripCycles = new int[4];
+    private final boolean[] connected = new boolean[4]; // nothing is plugged in until setPosition says so
 
     /**
-     * Sets channel {@code channel}'s dial position, effective the next
-     * time it's triggered (a channel already running is unaffected
-     * until it next expires and is retriggered).
+     * Plugs a paddle into channel {@code channel} (if it was not already)
+     * and sets its dial position, effective the next time it's triggered
+     * (a channel already running is unaffected until it next expires and
+     * is retriggered). One exception: a channel that was sitting high
+     * because nothing was plugged in starts charging the moment
+     * something is, so it trips after the new position's time.
      *
      * @param channel 0-3
      * @param position 0-255, the conventional Apple II+ paddle range
      */
     public void setPosition(int channel, int position) {
         tripCycles[channel] = (position * FULL_SCALE_CYCLES) / 255;
+        if (!connected[channel]) {
+            connected[channel] = true;
+            if (remainingCycles[channel] == NEVER) {
+                remainingCycles[channel] = tripCycles[channel];
+            }
+        }
+    }
+
+    /**
+     * Unplugs the paddle from channel {@code channel}: an open circuit
+     * again, whose timer never trips once triggered. A channel that is
+     * partway through counting down stops charging where it is and stays
+     * high.
+     *
+     * @param channel 0-3
+     */
+    public void disconnect(int channel) {
+        connected[channel] = false;
+        if (remainingCycles[channel] > 0) {
+            remainingCycles[channel] = NEVER;
+        }
     }
 
     /**
@@ -83,14 +125,15 @@ public final class PaddleTimers {
     void trigger() {
         for (int ch = 0; ch < 4; ch++) {
             if (remainingCycles[ch] <= 0) {
-                remainingCycles[ch] = tripCycles[ch];
+                remainingCycles[ch] = connected[ch] ? tripCycles[ch] : NEVER;
             }
         }
     }
 
     /**
      * Advances every running channel's countdown by the cycles just
-     * elapsed, clamped at zero. Public, unlike {@link #trigger}: this
+     * elapsed, clamped at zero. A channel with nothing plugged in has no
+     * countdown to advance. Public, unlike {@link #trigger}: this
      * is meant to be wired externally via
      * {@link SystemClock#addCycleListener}, typically from wherever
      * assembles the whole machine (a different package entirely), so
@@ -101,7 +144,7 @@ public final class PaddleTimers {
      */
     public void tick(int cycles) {
         for (int ch = 0; ch < 4; ch++) {
-            if (remainingCycles[ch] > 0) {
+            if (remainingCycles[ch] > 0 && remainingCycles[ch] != NEVER) {
                 remainingCycles[ch] = Math.max(0, remainingCycles[ch] - cycles);
             }
         }
@@ -109,7 +152,8 @@ public final class PaddleTimers {
 
     /**
      * Reads channel {@code channel}'s current state: bit 7 set while
-     * still counting down, clear once expired.
+     * still counting down, clear once expired. A channel with nothing
+     * plugged in, once triggered, is never clear.
      *
      * @param channel 0-3
      * @return 0x80 if still running, 0x00 if expired

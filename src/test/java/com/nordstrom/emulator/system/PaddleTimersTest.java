@@ -2,6 +2,7 @@ package com.nordstrom.emulator.system;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,5 +85,92 @@ class PaddleTimersTest {
 
         paddles.tick(1);
         assertFalse(paddles.isRunning(1), "channel 1 expires exactly at the shared-start-relative point");
+    }
+
+    // ---- nothing plugged in: an open circuit whose timer never trips ----
+
+    @Test
+    void everyChannelStartsUnpluggedAndOnceTriggeredStaysHighForever() {
+        PaddleTimers paddles = new PaddleTimers();
+        for (int ch = 0; ch < 4; ch++) {
+            assertEquals(0x00, paddles.read(ch), "idle before any trigger, channel " + ch);
+        }
+        paddles.trigger();
+        paddles.tick(1_000_000);
+        for (int ch = 0; ch < 4; ch++) {
+            assertEquals(0x80, paddles.read(ch),
+                "with nothing plugged in the capacitor never charges, so channel " + ch + " never trips");
+            assertTrue(paddles.isRunning(ch));
+        }
+    }
+
+    @Test
+    void anUnpluggedChannelIsNotTheSameAsOneAtFullScale() {
+        PaddleTimers paddles = new PaddleTimers();
+        paddles.setPosition(0, 255);   // plugged in, at the far end of its travel
+        paddles.trigger();             // channel 1 is left unplugged
+        paddles.tick(2816);
+        assertEquals(0x00, paddles.read(0), "full scale trips at exactly 2816 cycles");
+        assertEquals(0x80, paddles.read(1), "an open circuit does not, however long you wait");
+        paddles.tick(100_000);
+        assertEquals(0x80, paddles.read(1));
+    }
+
+    @Test
+    void unpluggingAPluggedInPaddleMakesItAnOpenCircuit() {
+        PaddleTimers paddles = new PaddleTimers();
+        paddles.setPosition(0, 10);
+        paddles.disconnect(0);
+        paddles.trigger();
+        paddles.tick(1_000_000);
+        assertEquals(0x80, paddles.read(0));
+    }
+
+    @Test
+    void unpluggingMidCountdownStopsTheChargingAndLeavesTheOutputHigh() {
+        PaddleTimers paddles = new PaddleTimers();
+        paddles.setPosition(0, 255);
+        paddles.trigger();
+        paddles.tick(100);
+        assertEquals(0x80, paddles.read(0), "still counting");
+        paddles.disconnect(0);
+        paddles.tick(100_000);
+        assertEquals(0x80, paddles.read(0), "the resistor is gone: it never finishes charging");
+    }
+
+    @Test
+    void pluggingInWhileSittingHighStartsChargingFromThatMoment() {
+        PaddleTimers paddles = new PaddleTimers();
+        paddles.trigger();             // unplugged: goes high and stays there
+        paddles.tick(5000);
+        assertEquals(0x80, paddles.read(0));
+
+        paddles.setPosition(0, 10);    // 10 * 2816 / 255 = 110 cycles
+        paddles.tick(109);
+        assertEquals(0x80, paddles.read(0), "not yet");
+        paddles.tick(1);
+        assertEquals(0x00, paddles.read(0), "trips 110 cycles after being plugged in");
+    }
+
+    @Test
+    void channelsArePluggedInIndependently() {
+        PaddleTimers paddles = new PaddleTimers();
+        paddles.setPosition(1, 20);
+        paddles.trigger();
+        paddles.tick(3000);
+        assertEquals(0x80, paddles.read(0), "channel 0: nothing plugged in");
+        assertEquals(0x00, paddles.read(1), "channel 1: a paddle that has long since tripped");
+        assertEquals(0x80, paddles.read(2), "channel 2: nothing plugged in");
+        assertEquals(0x80, paddles.read(3), "channel 3: nothing plugged in");
+    }
+
+    @Test
+    void aPaddlePluggedBackInAfterBeingUnpluggedBehavesNormallyAgain() {
+        PaddleTimers paddles = new PaddleTimers();
+        paddles.setPosition(0, 128);
+        paddles.disconnect(0);
+        paddles.setPosition(0, 0);
+        paddles.trigger();
+        assertEquals(0x00, paddles.read(0), "position 0 expires immediately, as it always did");
     }
 }

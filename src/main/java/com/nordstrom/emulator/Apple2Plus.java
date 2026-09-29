@@ -84,9 +84,9 @@ import java.nio.file.Path;
  * with {@code --input}). Gamepad support is optional and adds no
  * dependency: it needs the Jamepad jar in the {@code --plugins}
  * directory or on the class path, and without it everything else works
- * exactly as before. The
- * paddles are always initialized to center, whether or not a pad is
- * present.
+ * exactly as before. With no pad connected the paddles read as
+ * unplugged (255), exactly as real hardware does with nothing in the
+ * game port; a connected pad at rest reads centered (128).
  * <p>
  * A gap hit during interactive use (an address range this project
  * hasn't modeled yet, say) is reported and stops emulation cleanly
@@ -194,12 +194,13 @@ public final class Apple2Plus {
                 screen.repaint(); // safe from any thread
             });
 
-        // Game input. The mapper is primed with a neutral pad right away,
-        // before any pad is even looked for, so the paddles start centered
-        // instead of wherever the machine happens to leave them; the sink
-        // queues that for the emulation thread, which runs it first thing.
+        // Game input. The mapper is primed with an absent pad right away,
+        // before any pad is even looked for, so the paddles start out
+        // unplugged (reading 255, like an empty game port) and stay that
+        // way until a pad actually connects; the sink queues that for the
+        // emulation thread, which runs it first thing.
         InputMapper inputMapper = new InputMapper(inputMapping, new BusInputSink(bus, loop));
-        inputMapper.apply(PadSnapshot.NEUTRAL);
+        inputMapper.apply(PadSnapshot.ABSENT);
         final ClassLoader providerLoader = classLoader;
         PadPoller padPoller = new PadPoller(() -> JamepadProvider.create(providerLoader, System.err),
             inputMapper, PAD_POLL_INTERVAL_MS, System.err);

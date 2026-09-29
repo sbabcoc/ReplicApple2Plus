@@ -57,12 +57,35 @@ class PaddleTimersPreadIntegrationTest {
         }
     }
 
+    @Test
+    void withNothingPluggedInTheRealPreadRoutineReturns255OnEveryChannel() {
+        // Real hardware: an empty game port leaves the timer's resistor open, so the
+        // timer never trips and PREAD runs into its own counting cap. Not 0, and not 128.
+        for (int channel = 0; channel < 4; channel++) {
+            assertEquals(255, runPread(channel, null), "PREAD(" + channel + ") with nothing plugged in");
+        }
+    }
+
+    @Test
+    void aPluggedInChannelIsUnaffectedByOthersBeingUnplugged() {
+        assertEquals(64, runPread(2, 64), "channel 2 plugged in at 64");
+    }
+
     private static int runRealPread(int position) {
+        return runPread(0, position);
+    }
+
+    /** Runs the real ROM PREAD on a channel; a null position leaves that channel unplugged. */
+    private static int runPread(int channel, Integer position) {
         try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
-            for (int i = 0; i < PREAD_PROGRAM.length; i++) {
-                bus.write(0x1000 + i, PREAD_PROGRAM[i]);
+            int[] program = PREAD_PROGRAM.clone();
+            program[1] = channel; // LDX #channel
+            for (int i = 0; i < program.length; i++) {
+                bus.write(0x1000 + i, program[i]);
             }
-            bus.paddleTimers().setPosition(0, position);
+            if (position != null) {
+                bus.paddleTimers().setPosition(channel, position);
+            }
 
             Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // reads real ROM's own reset vector -- irrelevant, overridden below
             cpu.pc = 0x1000;

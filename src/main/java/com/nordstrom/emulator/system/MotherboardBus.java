@@ -139,7 +139,8 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
      * real input source would set dial positions via
      * {@link PaddleTimers#setPosition}, and how the running countdowns
      * get ticked via {@link SystemClock#addCycleListener} once assembled
-     * with a real clock.
+     * with a real clock. Every channel starts unplugged, reading 255 as
+     * real hardware with nothing in the game port does.
      *
      * @return this machine's paddle timers
      */

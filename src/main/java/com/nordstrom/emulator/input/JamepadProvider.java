@@ -79,6 +79,8 @@ public final class JamepadProvider implements PadProvider {
 
     private int lastCount = -1;
     private String description = NONE_CONNECTED;
+    private long lastDiagnosticLogNanos = 0;
+    private int diagnosticLogCount = 0;
 
     private JamepadProvider(URLClassLoader jamepadLoader, Object manager, Class<?> managerClass, Class<?> stateClass)
             throws ReflectiveOperationException {
@@ -302,12 +304,34 @@ public final class JamepadProvider implements PadProvider {
                 lastCount = count;
                 description = count == 0 ? NONE_CONNECTED : "gamepad connected: " + nameOfFirst();
             }
+            // Temporary diagnostic: reported PDL() values stayed at 255 (the
+            // "no pad" reading) despite a controller connecting successfully.
+            // This narrows down exactly which of getNumControllers(),
+            // ControllerState.isConnected, and the axis fields is the one not
+            // behaving as expected when read through this class's private
+            // class loader -- something no automated test here could check,
+            // since none of them run against a real, physical controller.
+            long now = System.nanoTime();
+            boolean shouldLog = now - lastDiagnosticLogNanos > 500_000_000L && diagnosticLogCount < 40;
+            if (shouldLog) {
+                lastDiagnosticLogNanos = now;
+                diagnosticLogCount++;
+            }
             if (count == 0) {
-                return PadSnapshot.NEUTRAL;
+                if (shouldLog) {
+                    System.err.println("[JamepadProvider diagnostic] getNumControllers()=0 -- SDL reports no pad connected");
+                }
+                return PadSnapshot.ABSENT;
             }
             Object state = getState.invoke(manager, 0);
-            if (!isConnected.getBoolean(state)) {
-                return PadSnapshot.NEUTRAL;
+            boolean connected = isConnected.getBoolean(state);
+            if (shouldLog) {
+                System.err.printf("[JamepadProvider diagnostic] count=%d isConnected=%b LX=%.2f LY=%.2f RX=%.2f RY=%.2f%n",
+                    count, connected, leftStickX.getFloat(state), leftStickY.getFloat(state),
+                    rightStickX.getFloat(state), rightStickY.getFloat(state));
+            }
+            if (!connected) {
+                return PadSnapshot.ABSENT;
             }
             PadSnapshot.Builder snapshot = PadSnapshot.builder()
                 .axis(PadAxis.LEFT_X, leftStickX.getFloat(state))

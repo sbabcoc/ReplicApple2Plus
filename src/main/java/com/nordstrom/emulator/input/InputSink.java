@@ -16,6 +16,15 @@ public interface InputSink {
     void setPaddle(int channel, int position);
 
     /**
+     * Unplugs one paddle: nothing attached, so its timer never trips and
+     * software reading it sees 255, as on real hardware with nothing in
+     * the game port.
+     *
+     * @param channel 0-3
+     */
+    void disconnectPaddle(int channel);
+
+    /**
      * Sets one pushbutton.
      *
      * @param button 0-2

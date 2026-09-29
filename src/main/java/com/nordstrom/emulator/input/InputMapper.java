@@ -7,6 +7,14 @@ package com.nordstrom.emulator.input;
  * rescaling, inversion, D-pad override -- so it is one piece of pure
  * arithmetic that behaves identically wherever the pad is read.
  * <p>
+ * A paddle is either plugged in, at some position, or unplugged. It is
+ * unplugged whenever no pad is connected ({@link PadSnapshot#ABSENT}),
+ * and also whenever the mapping binds neither a stick nor D-pad buttons
+ * to it: nothing is attached to that input, so it must read as
+ * nothing attached -- 255, like real hardware -- and not as a joystick
+ * held at center. A pad at rest is a joystick plugged in and centered,
+ * a different thing that the Apple II can tell apart.
+ * <p>
  * Only changes are reported, except for the very first snapshot, which
  * reports everything: the machine's own idea of where the paddles sit
  * before any input arrives is not something to rely on, so the first
@@ -21,6 +29,9 @@ public final class InputMapper {
 
     private final InputMapping mapping;
     private final InputSink sink;
+    /** Stands for "unplugged" in {@link #lastPaddle}; no real position is negative. */
+    private static final int UNPLUGGED = -1;
+
     private final int[] lastPaddle = new int[InputMapping.PADDLES];
     private final boolean[] lastButton = new boolean[InputMapping.BUTTONS];
     private boolean primed;
@@ -43,10 +54,17 @@ public final class InputMapper {
      */
     public void apply(PadSnapshot snapshot) {
         for (int channel = 0; channel < InputMapping.PADDLES; channel++) {
-            int position = position(mapping.paddle(channel), mapping.deadZone(), snapshot);
-            if (!primed || position != lastPaddle[channel]) {
-                lastPaddle[channel] = position;
-                sink.setPaddle(channel, position);
+            InputMapping.PaddleBinding binding = mapping.paddle(channel);
+            int state = (snapshot.isPresent() && isBound(binding))
+                ? position(binding, mapping.deadZone(), snapshot)
+                : UNPLUGGED;
+            if (!primed || state != lastPaddle[channel]) {
+                lastPaddle[channel] = state;
+                if (state == UNPLUGGED) {
+                    sink.disconnectPaddle(channel);
+                } else {
+                    sink.setPaddle(channel, state);
+                }
             }
         }
         for (int button = 0; button < InputMapping.BUTTONS; button++) {
@@ -62,8 +80,13 @@ public final class InputMapper {
         primed = true;
     }
 
+    /** Whether the mapping attaches anything to this paddle at all. */
+    private static boolean isBound(InputMapping.PaddleBinding binding) {
+        return binding.axis() != null || binding.dpadLow() != null;
+    }
+
     /**
-     * One paddle's position for a snapshot: 0 to 255, 128 at center.
+     * One plugged-in paddle's position for a snapshot: 0 to 255, 128 at center.
      * <p>
      * The stick is inverted if configured, then passed through the dead
      * zone: nothing registers inside it, and the travel outside it is

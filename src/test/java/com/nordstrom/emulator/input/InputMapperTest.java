@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.input;
 
+import com.nordstrom.emulator.system.IniFile;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ class InputMapperTest {
     private static final class RecordingSink implements InputSink {
         final List<String> events = new ArrayList<>();
         @Override public void setPaddle(int channel, int position) { events.add("P" + channel + "=" + position); }
+        @Override public void disconnectPaddle(int channel) { events.add("P" + channel + "=open"); }
         @Override public void setButton(int button, boolean pressed) { events.add("B" + button + "=" + pressed); }
     }
 
@@ -100,12 +102,6 @@ class InputMapperTest {
             new InputMapping.PaddleBinding(PadAxis.LEFT_X, false, PadButton.DPAD_LEFT, PadButton.DPAD_RIGHT);
         assertEquals(128, pos(withDpad, PadSnapshot.builder().axis(PadAxis.LEFT_X, 1f)
             .press(PadButton.DPAD_LEFT, PadButton.DPAD_RIGHT).build()));
-    }
-
-    @Test
-    void aPaddleWithNeitherStickNorDpadStaysCentered() {
-        InputMapping.PaddleBinding none = new InputMapping.PaddleBinding(null, false, null, null);
-        assertEquals(128, pos(none, PadSnapshot.builder().axis(PadAxis.LEFT_X, 1f).press(PadButton.A).build()));
     }
 
     @Test
@@ -217,5 +213,77 @@ class InputMapperTest {
     void theDefaultRightStickHasNoDpadOverride() {
         assertEquals(List.of(), reportFor(PadSnapshot.builder().press(PadButton.DPAD_LEFT, PadButton.DPAD_UP).build())
             .stream().filter(e -> e.startsWith("P2") || e.startsWith("P3")).toList());
+    }
+
+    // ---- unplugged versus at rest ----
+    //
+    // On real hardware a paddle with nothing attached reads 255 (its timer never
+    // trips), while a joystick at rest reads about 128. The mapper has to keep
+    // those apart, or a program that wants to know whether a joystick is
+    // connected is told there always is one.
+
+    @Test
+    void noPadConnectedLeavesEveryPaddleUnpluggedAndEveryButtonReleased() {
+        RecordingSink sink = new RecordingSink();
+        mapperWithDefaults(sink).apply(PadSnapshot.ABSENT);
+        assertEquals(List.of("P0=open", "P1=open", "P2=open", "P3=open", "B0=false", "B1=false", "B2=false"), sink.events);
+    }
+
+    @Test
+    void aPadConnectedAtRestIsAJoystickPluggedInAndCentered() {
+        RecordingSink sink = new RecordingSink();
+        InputMapper mapper = mapperWithDefaults(sink);
+        mapper.apply(PadSnapshot.ABSENT);
+        sink.events.clear();
+        mapper.apply(PadSnapshot.NEUTRAL);
+        assertEquals(List.of("P0=128", "P1=128", "P2=128", "P3=128"), sink.events,
+            "plugging a pad in centers each bound paddle; the buttons were released and stay so");
+    }
+
+    @Test
+    void aPadThatDisappearsUnplugsThePaddlesAndReleasesTheButtons() {
+        RecordingSink sink = new RecordingSink();
+        InputMapper mapper = mapperWithDefaults(sink);
+        mapper.apply(PadSnapshot.builder().axis(PadAxis.LEFT_X, 1f).press(PadButton.A).build());
+        sink.events.clear();
+        mapper.apply(PadSnapshot.ABSENT);
+        assertEquals(List.of("P0=open", "P1=open", "P2=open", "P3=open", "B0=false"), sink.events);
+    }
+
+    @Test
+    void anUnpluggedPadStaysQuietAcrossRepeatedPolls() {
+        RecordingSink sink = new RecordingSink();
+        InputMapper mapper = mapperWithDefaults(sink);
+        mapper.apply(PadSnapshot.ABSENT);
+        sink.events.clear();
+        mapper.apply(PadSnapshot.ABSENT);
+        mapper.apply(PadSnapshot.ABSENT);
+        assertEquals(List.of(), sink.events);
+    }
+
+    @Test
+    void aPaddleWithNothingBoundToItStaysUnpluggedEvenWhileAPadIsConnected() {
+        InputMapping oneJoystick = InputMapping.fromSections(IniFile.parse(List.of(
+            "[paddle2]", "axis =", "[paddle3]", "axis =")));
+        RecordingSink sink = new RecordingSink();
+        InputMapper mapper = new InputMapper(oneJoystick, sink);
+
+        mapper.apply(PadSnapshot.NEUTRAL);
+        assertEquals(List.of("P0=128", "P1=128", "P2=open", "P3=open", "B0=false", "B1=false", "B2=false"), sink.events,
+            "a game sees one joystick, exactly like a real single Apple joystick");
+
+        sink.events.clear();
+        mapper.apply(PadSnapshot.builder().axis(PadAxis.RIGHT_X, 1f).axis(PadAxis.RIGHT_Y, 1f).build());
+        assertEquals(List.of(), sink.events, "there is nothing attached for the right stick to move");
+    }
+
+    @Test
+    void aPaddleDrivenOnlyByDpadButtonsIsPluggedInAndCenteredAtRest() {
+        InputMapping dpadOnly = InputMapping.fromSections(IniFile.parse(List.of(
+            "[paddle0]", "axis =", "dpad = DPAD_LEFT, DPAD_RIGHT")));
+        RecordingSink sink = new RecordingSink();
+        InputMapper mapper = new InputMapper(dpadOnly, sink);
+        mapper.apply(PadSnapshot.NEUTRAL);
+        assertTrue(sink.events.contains("P0=128"), "a D-pad-only paddle is a plugged-in control at rest: " + sink.events);
     }
 }

@@ -54,7 +54,9 @@ public final class InputMapping {
     private static final List<String> BUTTON_KEYS = List.of("pad");
 
     /**
-     * What drives one paddle.
+     * What drives one paddle. A paddle with neither a stick axis nor
+     * D-pad buttons has nothing attached: it reads as unplugged (255), the
+     * way a real game port input does with nothing connected.
      *
      * @param axis the stick axis, or null if no stick drives this paddle
      * @param invert whether the stick axis is flipped
