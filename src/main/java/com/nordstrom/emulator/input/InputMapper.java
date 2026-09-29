@@ -32,8 +32,7 @@ public final class InputMapper {
     /** Stands for "unplugged" in {@link #lastPaddle}; no real position is negative. */
     private static final int UNPLUGGED = -1;
 
-    private final int[] lastPaddle = new int[InputMapping.PADDLES];
-    private final boolean[] lastButton = new boolean[InputMapping.BUTTONS];
+    private final int[] lastPaddle = new int[InputMapping.PADDLES];    private final boolean[] lastButton = new boolean[InputMapping.BUTTONS];
     private boolean primed;
 
     /**
@@ -45,6 +44,7 @@ public final class InputMapper {
     public InputMapper(InputMapping mapping, InputSink sink) {
         this.mapping = mapping;
         this.sink = sink;
+        java.util.Arrays.fill(lastPaddle, UNPLUGGED); // so an un-sent slot never reads as "sent at 0"
     }
 
     /**

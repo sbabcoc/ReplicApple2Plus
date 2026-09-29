@@ -178,6 +178,7 @@ public final class Apple2Plus {
         clock.addCycleListener(bus.videoScanner()::tick);
         clock.addCycleListener(bus.scanlineModes()::tick);
         clock.addCycleListener(bus.speakerOutput()::tick);
+        clock.addCycleListener(bus.paddleTimers()::tick);
         if (disk != null) {
             clock.addCycleListener(disk::tick);
         }
