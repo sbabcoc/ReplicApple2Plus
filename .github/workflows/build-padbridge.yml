@@ -41,10 +41,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Provisions the Android SDK components this project needs
-      # (platform 34, matching compileSdk in app/build.gradle) directly
-      # on the runner -- nothing to install or configure locally.
-      - uses: android-actions/setup-android@v3
+      # v3 requests the legacy 'tools' SDK package by default
+      # (packages: 'tools platform-tools'). Google removed that package
+      # from the SDK repository entirely -- confirmed directly, not
+      # assumed: the first real run of this workflow failed exactly
+      # here with "Warning: Failed to find package 'tools'" before any
+      # Gradle step ran at all. v4 fixed this upstream by dropping
+      # 'tools' from its own default and no longer treating a request
+      # for it as fatal. packages is also set explicitly here rather
+      # than left on whatever the action's default happens to be --
+      # this is exactly the kind of default that silently changed once
+      # already.
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      # setup-android only ever installs platform-tools -- it was never
+      # going to provide the specific platform this project's compileSdk
+      # actually needs. That has to be requested explicitly.
+      - name: Install the Android platform and build tools this project needs
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       # Provisions Gradle itself on the runner, so no gradlew wrapper
       # needs to be checked into this repo at all.
