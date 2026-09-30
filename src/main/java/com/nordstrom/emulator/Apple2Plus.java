@@ -6,6 +6,8 @@ import com.nordstrom.emulator.input.BusInputSink;
 import com.nordstrom.emulator.input.InputMapper;
 import com.nordstrom.emulator.input.InputMapping;
 import com.nordstrom.emulator.input.JamepadProvider;
+import com.nordstrom.emulator.input.NetworkPadProvider;
+import com.nordstrom.emulator.input.PadProvider;
 import com.nordstrom.emulator.input.PadPoller;
 import com.nordstrom.emulator.input.PadSnapshot;
 import com.nordstrom.emulator.system.CliArgs;
@@ -23,6 +25,7 @@ import javax.swing.SwingUtilities;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 /**
  * The application's entry point. Assembles a real, running machine.
@@ -88,6 +91,18 @@ import java.nio.file.Path;
  * unplugged (255), exactly as real hardware does with nothing in the
  * game port; a connected pad at rest reads centered (128).
  * <p>
+ * {@code --network-input PORT} selects {@link NetworkPadProvider} instead
+ * of Jamepad -- the route for Android/Termux/PRoot, where an
+ * unprivileged process has no device-node access at all (confirmed
+ * directly: {@code ls -l /dev} inside that environment shows nothing),
+ * ruling out Jamepad's SDL backend regardless of which native library it
+ * ships. A companion Android app reads the real controller through
+ * Android's own APIs and sends its state here over loopback UDP. The two
+ * providers are mutually exclusive by design, not combined or
+ * auto-detected between: {@code --network-input} always wins if given,
+ * so which one is active is always exactly what was asked for on the
+ * command line, never a guess.
+ * <p>
  * A gap hit during interactive use (an address range this project
  * hasn't modeled yet, say) is reported and stops emulation cleanly
  * rather than crashing with an unhandled exception -- the window stays
@@ -101,12 +116,12 @@ public final class Apple2Plus {
     private static final long PAD_POLL_INTERVAL_MS = 10; // 100 Hz: far faster than any game reads a paddle
     private static final long SHUTDOWN_JOIN_MS = 300; // longest the exit hook waits for the loop to stop
     private static final int FLASH_TOGGLE_EVERY_N_TICKS = 15; // roughly twice a second at 50 Hz
-    private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR] [--input input.ini]";
+    private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR] [--input input.ini] [--network-input PORT]";
 
     /**
      * Application entry point.
      *
-     * @param args {@code [--config slots.ini] [--plugins DIR] [--input input.ini]},
+     * @param args {@code [--config slots.ini] [--plugins DIR] [--input input.ini] [--network-input PORT]},
      *             all optional and independent -- see this class's own
      *             Javadoc for what happens with neither
      */
@@ -203,8 +218,11 @@ public final class Apple2Plus {
         InputMapper inputMapper = new InputMapper(inputMapping, new BusInputSink(bus, loop));
         inputMapper.apply(PadSnapshot.ABSENT);
         final ClassLoader providerLoader = classLoader;
-        PadPoller padPoller = new PadPoller(() -> JamepadProvider.create(providerLoader, System.err),
-            inputMapper, PAD_POLL_INTERVAL_MS, System.err);
+        String networkInputPort = cli.get("network-input");
+        Supplier<PadProvider> padProviderFactory = (networkInputPort != null)
+            ? () -> NetworkPadProvider.create(Integer.parseInt(networkInputPort), System.err)
+            : () -> JamepadProvider.create(providerLoader, System.err);
+        PadPoller padPoller = new PadPoller(padProviderFactory, inputMapper, PAD_POLL_INTERVAL_MS, System.err);
         padPoller.start();
 
         // Runs on both a normal EXIT_ON_CLOSE-triggered exit and a

@@ -35,3 +35,27 @@ pasted" ambiguity to resolve.
   single `\r` keystroke (Apple II's own Return), not a raw pass-through.
 - Pacing between characters: fixed delay, or configurable (matching the
   spirit of Virtual ][''s own "keyboard delay" setting)?
+
+## Reset and Reboot menu items
+
+Add "Reset" and "Reboot" items to the emulator's menu bar.
+
+**Reset**: the real Apple II's Ctrl-Reset. `Cpu6502` already has a
+complete, hardware-faithful RESET line implementation --
+`raiseReset()`/`lowerReset()` -- correctly modeling the real sequence
+(SP decremented by 3, PC reloaded from the reset vector, interrupt-disable
+forced, D left indeterminate as on real hardware). It's fully built and
+tested at the CPU level; nothing anywhere currently calls it. Wiring a
+menu item to it should be straightforward.
+
+**Reboot**: no existing mechanism. Scope still undecided -- options
+raised but not chosen between:
+- A full cold restart: recreate `MotherboardBus`/`Cpu6502` from scratch,
+  as if the emulator had just launched.
+- Something closer to a real Apple II power-cycle specifically, which
+  does more than a soft reset (disk drive re-homing, video/soft-switch
+  state clearing) but isn't a full restart.
+- Something else not yet discussed.
+
+Both menu items are deferred behind Android game controller support
+(current top priority).
