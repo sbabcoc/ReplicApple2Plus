@@ -1,0 +1,74 @@
+# Builds PadBridge's APK on GitHub's own runners, so it never has to be
+# built locally with Android Studio. Assumes this project lives at
+# android-bridge/ in the repo root -- adjust the paths below if it's
+# placed elsewhere.
+#
+# Every successful build is attached to a GitHub Release named after the
+# commit, so the download link stays valid indefinitely -- unlike a
+# workflow-run artifact, which GitHub deletes after 90 days by default.
+# For a personal-use app that might not be rebuilt often, that
+# expiration would be a real problem, not just a minor inconvenience.
+#
+# This produces a debug-signed APK, not a release-signed one. Android's
+# own auto-generated debug key is used, which needs no secrets in this
+# repo and installs and runs identically to a release build for personal
+# use; the only real difference is that it can't be published to the
+# Play Store, which was never the goal here.
+name: Build PadBridge APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android-bridge/**'
+      - '.github/workflows/build-padbridge.yml'
+  workflow_dispatch: {} # lets you trigger a rebuild manually with no code change, from the Actions tab
+
+permissions:
+  contents: write # needed to create the Release this workflow publishes to
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-bridge
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Provisions the Android SDK components this project needs
+      # (platform 34, matching compileSdk in app/build.gradle) directly
+      # on the runner -- nothing to install or configure locally.
+      - uses: android-actions/setup-android@v3
+
+      # Provisions Gradle itself on the runner, so no gradlew wrapper
+      # needs to be checked into this repo at all.
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Find the built APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Publish as a Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: padbridge-${{ github.sha }}
+          name: PadBridge (${{ github.sha }})
+          files: android-bridge/${{ steps.find_apk.outputs.path }}
+          body: |
+            Automatically built from commit ${{ github.sha }}.
+            Download the .apk below, transfer it to the phone (or open
+            this page directly in the phone's browser), and install it.
+            Android will prompt once to allow installing from this
+            source; that is expected for anything not from the Play
+            Store or F-Droid.

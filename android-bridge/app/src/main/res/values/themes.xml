@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.PadBridge" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>
