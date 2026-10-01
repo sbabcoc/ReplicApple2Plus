@@ -153,8 +153,17 @@ is the source of truth, not this README.
   custom `--input` file) is what should handle it, the same as it does
   for the desktop Jamepad path. Applying a second dead zone here would
   just make that setting harder to reason about.
-- **Send rate vs. screen-off behavior.** Android may throttle or pause
-  background threads when the screen locks. This app doesn't request
-  any wake lock, on the assumption the phone stays awake and on-screen
-  while actively playing. If input stops working when the screen would
-  normally sleep, that's the likely cause.
+- **PadBridge must be the foreground/focused app to receive controller
+  input at all** -- confirmed directly: Android only delivers
+  `MotionEvent`/`KeyEvent` to whichever app currently has focus, so
+  switching away to look at the emulator stops input dead. Also
+  confirmed: this is about focus, not visibility. A desktop-mode feature
+  that supports multiple windows (Samsung DeX, or an equivalent) lets
+  PadBridge stay focused while positioned almost entirely off-screen,
+  with the emulator's own window taking up the visible display --
+  genuinely unobtrusive in practice, not just in theory. Plain
+  alt-tabbing between the two apps works too, just with the expected
+  back-and-forth friction. The original concern here was about screen-off
+  throttling specifically; in actual use, needing foreground focus turned
+  out to be the real constraint, and a multi-window desktop mode is the
+  practical answer to it.
