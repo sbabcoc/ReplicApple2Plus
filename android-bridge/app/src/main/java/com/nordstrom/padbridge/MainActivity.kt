@@ -26,17 +26,22 @@ import java.util.concurrent.atomic.AtomicLong
  * Termux/PRoot on the same device.
  *
  * Confirmed directly against a real 8BitDo SN30 Pro in Android mode,
- * over two real-device test passes: left stick, right stick (full -1.0
- * to 1.0 range on both), A/B/X/Y, and both bumpers all work exactly as
- * written -- AXIS_Z/AXIS_RZ for the right stick and the standard
- * KeyEvent codes for those buttons were correct guesses.
+ * across four real-device test passes, and in actual gameplay (Joust):
+ * both sticks (full -1.0 to 1.0 range), A/B/X/Y, both bumpers, both
+ * triggers, the full D-pad including diagonals, and both stick clicks
+ * all work correctly. Start and Back also confirmed. Guide never
+ * appeared -- likely because this controller has no physical
+ * equivalent (it has Home and Screenshot buttons instead, per 8BitDo's
+ * own spec), though Android intercepting a literal Home press as system
+ * navigation before it reaches any app is a second plausible
+ * explanation; either way, not something to chase further.
  *
- * Two things were confirmed WRONG by those same tests, not just
- * unverified, and are now handled two ways each since which path a
- * given controller actually uses varies:
+ * Two of those were confirmed WRONG on the first attempt, not just
+ * unverified, and are handled two ways each since which path a given
+ * controller actually uses varies:
  *   - Triggers never appeared via AXIS_LTRIGGER/AXIS_RTRIGGER or the
- *     AXIS_BRAKE/AXIS_GAS fallback despite being pressed in both tests.
- *     This controller (or Android in this mode) sends them as discrete
+ *     AXIS_BRAKE/AXIS_GAS fallback despite being pressed. This
+ *     controller (or Android in this mode) sends them as discrete
  *     KEYCODE_BUTTON_L2/R2 presses instead of an analog axis at all --
  *     now handled via onKeyDown/onKeyUp like any other button, with the
  *     analog path left in place for controllers that do use it.
@@ -45,10 +50,12 @@ import java.util.concurrent.atomic.AtomicLong
  *     (AXIS_HAT_X/AXIS_HAT_Y) in onGenericMotionEvent, which is how
  *     many controllers report it instead.
  *
- * Still unconfirmed: Start, Back, and Guide, and the stick-click
- * buttons -- not shown broken, just not yet exercised in testing. The
- * SN30 Pro may not physically have a Guide-equivalent button at all, in
- * which case its absence is expected rather than a bug.
+ * Confirmed through real use, not just a quick test: PadBridge must be
+ * the foreground/focused app to receive any controller input at all --
+ * this is about focus, not visibility, so a multi-window desktop mode
+ * (Samsung DeX or similar) lets it stay focused while positioned almost
+ * entirely off-screen, leaving the emulator's own window as the visible
+ * one. See the project README for the full writeup.
  *
  * Wire protocol: see NetworkPadProvider's own Javadoc in the Java
  * project. One UDP packet per update, ASCII text, either the literal
