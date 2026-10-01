@@ -13,6 +13,7 @@ import com.nordstrom.emulator.input.PadSnapshot;
 import com.nordstrom.emulator.system.CliArgs;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.PluginLoader;
+import com.nordstrom.emulator.system.RemovableMediaDrive;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
@@ -20,11 +21,15 @@ import com.nordstrom.emulator.system.SystemClock;
 import javax.swing.JFrame;
 import javax.swing.JMenuBar;
 import javax.swing.JOptionPane;
+import javax.swing.JToolBar;
 import javax.swing.SwingUtilities;
 
+import java.awt.BorderLayout;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -64,11 +69,10 @@ import java.util.function.Supplier;
  * When a {@link Disk2Controller} is found, a "Disk" menu
  * ({@link DiskMenu}) is added to let the disk in either drive be
  * swapped while the emulator runs -- the same
- * {@link com.nordstrom.emulator.system.RemovableMediaDrive#insert} call
- * {@link Disk2Controller#configure} itself already uses at startup, not
- * a separate mechanism. With no disk card at all, there's nothing this
- * menu could operate on, so it's simply not added, rather than shown
- * disabled.
+ * {@link RemovableMediaDrive#insert} call {@link Disk2Controller#configure}
+ * itself already uses at startup, not a separate mechanism. With no
+ * disk card at all, there's nothing this menu could operate on, so
+ * it's simply not added, rather than shown disabled.
  * <p>
  * Cycle pacing: this class, not {@link SystemClock}, decides how fast
  * to run -- {@link SystemClock} deliberately has no opinion about
@@ -107,6 +111,19 @@ import java.util.function.Supplier;
  * hasn't modeled yet, say) is reported and stops emulation cleanly
  * rather than crashing with an unhandled exception -- the window stays
  * open and showing whatever was last drawn, rather than vanishing.
+ * <p>
+ * REBOOT: tears down and rebuilds everything volatile -- slots, bus,
+ * CPU, clock, screen, emulation loop, gamepad input wiring -- exactly
+ * as if the process had just launched, while preserving whatever disk
+ * media is currently inserted (a real Apple II power-cycle doesn't
+ * eject a floppy either). See {@link #buildMachine} for what gets
+ * rebuilt and {@link #createAndRun}'s own {@code onReboot} lambda for
+ * the teardown/rebuild/rewire sequence itself. The frame, and the pad
+ * poller's underlying controller connection's *configuration* (not its
+ * live connection -- see {@link #buildMachine}'s own note on that), are
+ * the only things this project treats as surviving a reboot the way
+ * they'd survive a real power-cycle too: the physical window and the
+ * physical controller don't go anywhere.
  */
 public final class Apple2Plus {
 
@@ -114,7 +131,7 @@ public final class Apple2Plus {
     private static final int CYCLES_PER_TICK = 20_000; // ~1.023 MHz * 20ms, approximately
     private static final long TICK_NANOS = FRAME_INTERVAL_MS * 1_000_000L; // fallback pacing only: no audio device
     private static final long PAD_POLL_INTERVAL_MS = 10; // 100 Hz: far faster than any game reads a paddle
-    private static final long SHUTDOWN_JOIN_MS = 300; // longest the exit hook waits for the loop to stop
+    private static final long SHUTDOWN_JOIN_MS = 300; // longest the exit hook (or a reboot) waits for the loop to stop
     private static final int FLASH_TOGGLE_EVERY_N_TICKS = 15; // roughly twice a second at 50 Hz
     private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR] [--input input.ini] [--network-input PORT]";
 
@@ -137,6 +154,25 @@ public final class Apple2Plus {
         }
         SwingUtilities.invokeLater(() -> createAndRun(cli));
     }
+
+    /**
+     * Everything that gets torn down and rebuilt on reboot --
+     * deliberately NOT the {@code JFrame} itself, nor the shared,
+     * reboot-independent configuration ({@code cli}, {@code
+     * classLoader}, {@code inputMapping}) {@link #buildMachine} closes
+     * over instead. A plain holder, not a class with behavior of its
+     * own: every operation on these pieces already belongs to them
+     * individually.
+     *
+     * @param disk the disk controller found in {@code slots}, or null if none was configured
+     * @param bus the motherboard bus this machine's CPU, screen, and keyboard register all share
+     * @param screen the panel currently showing this machine's video output
+     * @param loop the emulation thread currently running this machine
+     * @param padPoller the thread currently polling a gamepad into this machine
+     * @param toolbar the toolbar currently wired to this machine's CPU
+     */
+    private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
+                            PadPoller padPoller, JToolBar toolbar) {}
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
@@ -165,15 +201,120 @@ public final class Apple2Plus {
             return;
         }
 
+        JFrame frame = new JFrame("ReplicApple2Plus");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setResizable(false);
+
+        final ClassLoader finalClassLoader = classLoader;
+        final InputMapping finalInputMapping = inputMapping;
+
+        // Mutable only across a reboot -- read by the shutdown hook from a
+        // different thread, hence AtomicReference rather than a plain field.
+        AtomicReference<Machine> current = new AtomicReference<>();
+
+        // A one-element holder, not a plain Runnable field, specifically so
+        // the lambda below can pass itself to buildMachine when rebuilding
+        // the toolbar on reboot -- a lambda cannot refer to the local
+        // variable it is itself being assigned to (fails Java's definite
+        // assignment check), but it CAN refer to a separately-declared,
+        // already-initialized holder that happens to contain it.
+        Runnable[] onRebootHolder = new Runnable[1];
+        onRebootHolder[0] = () -> {
+            Machine old = current.get();
+            old.padPoller().stop(SHUTDOWN_JOIN_MS);
+            old.loop().stop(SHUTDOWN_JOIN_MS);
+            Machine fresh = buildMachine(cli, finalClassLoader, finalInputMapping, old.disk(), frame, onRebootHolder[0]);
+            rewireFrame(frame, old, fresh);
+            current.set(fresh);
+            fresh.loop().start();
+        };
+        Runnable onReboot = onRebootHolder[0];
+
+        Machine initial = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onReboot);
+        current.set(initial);
+        rewireFrame(frame, null, initial);
+
+        // Runs on both a normal EXIT_ON_CLOSE-triggered exit and a
+        // SIGINT/SIGTERM (e.g. Ctrl+C from a terminal) -- shutdown hooks
+        // cover either path, unlike relying on JFrame's own close
+        // handling alone, which only fires for the window-close case.
+        // Reads `current` at the moment of shutdown, not at hook-registration
+        // time, so this closes down whichever machine (original or a later
+        // reboot's) actually happens to be running when the JVM exits.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Machine m = current.get();
+            m.padPoller().stop(SHUTDOWN_JOIN_MS);
+            m.loop().stop(SHUTDOWN_JOIN_MS);
+        }));
+
+        frame.pack();
+        frame.setLocationRelativeTo(null);
+        frame.setVisible(true);
+        frame.requestFocusInWindow();
+
+        if (initial.disk() != null && !initial.disk().removableDrives().get(0).isPresent()) {
+            promptForBootDisk(initial.disk(), frame);
+        }
+
+        initial.loop().start();
+    }
+
+    /**
+     * Builds one complete, running machine: slots, bus, CPU, clock,
+     * screen, emulation loop, and gamepad wiring -- everything
+     * {@link #createAndRun} originally built inline, now shared with
+     * its own {@code onReboot} lambda so the two can never silently
+     * drift apart into two different ways of constructing "a machine."
+     * <p>
+     * {@code mediaSource}, when given (a reboot, not initial startup),
+     * supplies the disk(s) to restore: before anything else, whatever is
+     * currently loaded in each of its drives is captured, and -- once
+     * the fresh {@link Disk2Controller} exists -- re-inserted into the
+     * corresponding drive here, matching how a real Apple II power-cycle
+     * doesn't eject a floppy. {@code null} on initial startup, where
+     * {@link SlotCardLoader}'s own {@code driveN=} config handling (and,
+     * failing that, {@link #promptForBootDisk}) already covers it.
+     * <p>
+     * {@code onReboot}, when non-null, is wired into this machine's
+     * toolbar REBOOT button. {@code null} is accepted (and simply means
+     * "no toolbar yet") only because the reboot sequence itself needs a
+     * machine built before it has anywhere to put a REBOOT button that
+     * reboots -- in practice every real {@code Machine} this class keeps
+     * around has a real toolbar; see {@link #rewireFrame}, which is the
+     * only caller that actually uses the returned toolbar.
+     * <p>
+     * Not preserved across a rebuild, by design, not oversight: the pad
+     * poller's underlying controller connection. {@link PadPoller}'s
+     * {@code InputMapper} is set once, at construction, with no way to
+     * swap it later -- so a fresh {@link InputMapper} here means a fresh
+     * {@link PadPoller}, which means briefly reconnecting to the real
+     * controller (re-initializing SDL, or re-binding a UDP socket).
+     * Acceptable for a deliberate, infrequent action like Reboot; not
+     * something to redesign {@link PadPoller}'s API around.
+     *
+     * @param cli the parsed command line, unchanged across a reboot
+     * @param classLoader plugins classloader (or the application's own), unchanged across a reboot
+     * @param inputMapping the gamepad mapping configuration, unchanged across a reboot
+     * @param mediaSource the previous machine's disk controller, to carry its loaded media forward, or null on initial startup
+     * @param frame the single, reused application window, needed only to wire this machine's toolbar's REBOOT button
+     * @param onReboot runs when this machine's REBOOT button is clicked, or null if this machine will never have a toolbar
+     * @return the fully built, not-yet-started machine
+     */
+    private static Machine buildMachine(CliArgs cli, ClassLoader classLoader, InputMapping inputMapping,
+                                         Disk2Controller mediaSource, JFrame frame, Runnable onReboot) {
         SlotCard[] slots;
         String configFile = cli.get("config");
         if (configFile != null) {
             try {
                 slots = SlotCardLoader.load(Path.of(configFile), classLoader);
             } catch (IOException | IllegalArgumentException | IllegalStateException e) {
-                System.err.println("Could not load slot configuration: " + e.getMessage());
-                System.exit(1);
-                return;
+                // The same configuration already loaded successfully once
+                // (at initial startup) if mediaSource != null -- a failure
+                // here on reboot would mean the config file changed or
+                // vanished out from under a running process, which is
+                // exceptional enough to surface loudly rather than attempt
+                // any fallback.
+                throw new IllegalStateException("Could not reload slot configuration on reboot: " + e.getMessage(), e);
             }
         } else {
             slots = new SlotCard[8]; // no config given -- no cards at all
@@ -184,6 +325,22 @@ public final class Apple2Plus {
             if (card instanceof Disk2Controller d) {
                 disk = d;
                 break;
+            }
+        }
+
+        if (disk != null && mediaSource != null) {
+            List<RemovableMediaDrive> oldDrives = mediaSource.removableDrives();
+            List<RemovableMediaDrive> newDrives = disk.removableDrives();
+            for (int i = 0; i < oldDrives.size() && i < newDrives.size(); i++) {
+                RemovableMediaDrive newDrive = newDrives.get(i);
+                int driveNumber = i + 1;
+                oldDrives.get(i).currentImagePath().ifPresent(path -> {
+                    try {
+                        newDrive.insert(path);
+                    } catch (IOException e) {
+                        System.err.println("Could not restore disk into drive " + driveNumber + " after reboot: " + e.getMessage());
+                    }
+                });
             }
         }
 
@@ -225,45 +382,51 @@ public final class Apple2Plus {
         PadPoller padPoller = new PadPoller(padProviderFactory, inputMapper, PAD_POLL_INTERVAL_MS, System.err);
         padPoller.start();
 
-        // Runs on both a normal EXIT_ON_CLOSE-triggered exit and a
-        // SIGINT/SIGTERM (e.g. Ctrl+C from a terminal) -- shutdown hooks
-        // cover either path, unlike relying on JFrame's own close
-        // handling alone, which only fires for the window-close case.
-        // The pad poller stops first so it stops feeding a machine that is
-        // about to go away, then the loop; closing the audio line out from
-        // under a thread that is blocked writing to it is not something to
-        // rely on.
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            padPoller.stop(SHUTDOWN_JOIN_MS);
-            loop.stop(SHUTDOWN_JOIN_MS);
-            bus.speakerOutput().close();
-        }));
+        JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, loop, onReboot) : null;
 
-        JFrame frame = new JFrame("ReplicApple2Plus");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.getContentPane().add(screen);
-        frame.setResizable(false);
+        return new Machine(disk, bus, screen, loop, padPoller, toolbar);
+    }
 
-        if (disk != null) {
-            JMenuBar menuBar = new JMenuBar();
-            menuBar.add(DiskMenu.build(disk, frame, loop));
-            frame.setJMenuBar(menuBar);
+    /**
+     * Swaps {@code frame}'s contents from {@code previous} (if any) to
+     * {@code next} -- the screen, the toolbar, the keyboard listener, and
+     * the disk menu (if a disk controller is present). Does not call
+     * {@code frame.pack()}: the new screen has the same preferred size as
+     * the old one (same video hardware, unchanged configuration), so
+     * revalidating in place avoids an unnecessary resize/flicker that
+     * {@code pack()} would otherwise cause on every reboot.
+     *
+     * @param frame the single, reused application window
+     * @param previous the machine whose components are being removed, or null on initial startup
+     * @param next the machine whose components are being installed
+     */
+    private static void rewireFrame(JFrame frame, Machine previous, Machine next) {
+        if (previous != null) {
+            frame.getContentPane().remove(previous.screen());
+            frame.getContentPane().remove(previous.toolbar());
+            for (var listener : frame.getKeyListeners()) {
+                frame.removeKeyListener(listener);
+            }
         }
 
-        KeyboardInputListener keyboardInput = new KeyboardInputListener(bus.keyboardRegister(), loop);
+        frame.getContentPane().add(next.screen());
+        frame.getContentPane().add(next.toolbar(), BorderLayout.NORTH);
+
+        if (next.disk() != null) {
+            JMenuBar menuBar = new JMenuBar();
+            menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));
+            frame.setJMenuBar(menuBar);
+        } else {
+            frame.setJMenuBar(null);
+        }
+
+        KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(), next.loop());
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 
-        frame.pack();
-        frame.setLocationRelativeTo(null);
-        frame.setVisible(true);
+        frame.getContentPane().revalidate();
+        frame.getContentPane().repaint();
         frame.requestFocusInWindow();
-
-        if (disk != null && !disk.removableDrives().get(0).isPresent()) {
-            promptForBootDisk(disk, frame);
-        }
-
-        loop.start();
     }
 
     private Apple2Plus() {}

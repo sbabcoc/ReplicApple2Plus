@@ -36,29 +36,102 @@ pasted" ambiguity to resolve.
 - Pacing between characters: fixed delay, or configurable (matching the
   spirit of Virtual ][''s own "keyboard delay" setting)?
 
-## Reset and Reboot menu items
+## Reset and Reboot toolbar buttons -- both done
 
-Add "Reset" and "Reboot" items to the emulator's menu bar.
+Both built, wired, and verified -- see `ToolbarControls.java` and
+`Apple2Plus.java`. Kept here as a reference for the real-hardware
+context and the design reasoning behind each, in case that matters
+again later (e.g. if VideoTerm or the Saturn card ever need similar
+toolbar controls).
 
-**Reset**: the real Apple II's Ctrl-Reset. `Cpu6502` already has a
-complete, hardware-faithful RESET line implementation --
-`raiseReset()`/`lowerReset()` -- correctly modeling the real sequence
-(SP decremented by 3, PC reloaded from the reset vector, interrupt-disable
-forced, D left indeterminate as on real hardware). It's fully built and
-tested at the CPU level; nothing anywhere currently calls it. Wiring a
-menu item to it should be straightforward.
+**What was actually built**: a toolbar (not a menu -- deliberate,
+see below), with a "Reset" `JButton` whose `MouseListener` calls
+`cpu.raiseReset()` on press and `cpu.lowerReset()` on release, each
+posted onto the emulation thread via the same `Executor` pattern
+`KeyboardInputListener`/`DiskMenu` already use. Verified directly with
+a real `Cpu6502` and a real built button (not just compiled): pressing
+freezes the CPU (`step()` returns 0 while held), and releasing fires
+the actual reset sequence -- PC lands exactly at the reset vector, SP
+decrements by exactly 3, confirmed by reading the real post-reset
+values. One genuine mistake caught and fixed along the way: a first
+test attempt checked only `getMouseListeners()[0]`, which turned out
+to be Swing's own internal `BasicButtonListener` installed before mine
+-- not a bug in the button itself, but a reminder that
+`addMouseListener` appends, it doesn't replace, and real event
+dispatch calls every registered listener, not just the first.
 
-**Reboot**: no existing mechanism. Scope still undecided -- options
-raised but not chosen between:
-- A full cold restart: recreate `MotherboardBus`/`Cpu6502` from scratch,
-  as if the emulator had just launched.
-- Something closer to a real Apple II power-cycle specifically, which
-  does more than a soft reset (disk drive re-homing, video/soft-switch
-  state clearing) but isn't a full restart.
-- Something else not yet discussed.
+**Why press/release, not a single click action**: `Cpu6502` already
+had a complete, hardware-faithful RESET line --
+`raiseReset()`/`lowerReset()`, with `step()` a no-op while the line is
+held. This isn't incidental complexity: RESET is a real,
+level-triggered line, and the actual reset sequence fires only on the
+*release* edge, so the API maps directly onto a physical press and
+release. This is also why toolbar beat menu as more than a style
+preference: a `JMenuItem`'s `actionPerformed` fires once per completed
+click, with no natural way to get separate press/release events; a
+toolbar `JButton`'s `MouseListener` gives both halves directly.
 
-Both menu items are deferred behind Android game controller support
-(current top priority).
+**Real hardware wiring, confirmed, and still relevant if this area
+gets touched again**: on a genuine Apple II/II+, RESET bypasses the
+keyboard encoder entirely -- wired directly to the 6502's hardware
+RESET pin, never touching the ASCII-producing path every other key
+uses (confirmed across several sources, including a repair thread
+where a fully dead encoder chip still left RESET working, precisely
+because its circuit has no dependency on the encoder). This project
+models an Apple II **Plus**, where Ctrl-Reset (not bare RESET) is the
+historically correct behavior -- the original Apple II shipped with no
+Control interlock, and a widely-adopted mod added one after enough
+people bumped it by accident. None of this ended up mattering for the
+toolbar button itself (keyboard-triggered RESET was explicitly ruled
+out of scope), but it's why the button goes straight to
+`raiseReset()`/`lowerReset()` with zero dependency on `KeyboardMapper`,
+rather than being modeled as a keyboard special case that happens to
+have no key bound to it.
+
+**Reboot**: done. No press/release split, unlike Reset -- a plain
+`ActionListener` click, since there's no real hardware line this
+corresponds to (a power switch is a single discrete event, not
+something with a meaningful "hold" duration).
+
+Settled on, after checking MAME's own documented soft-reset/hard-reset
+distinction as a reference point (confirmed directly against
+docs.mamedev.org, not taken on secondhand faith): a hard reset in MAME
+"tears down the emulation session and starts another session with the
+same system and options" -- confirmed via a MAMETesters bug thread that
+this does NOT wipe NVRAM or swap out the loaded ROM. Adapted to this
+project: Reboot recreates `MotherboardBus`/`Cpu6502`/the slot cards
+from scratch (everything volatile resets -- RAM, CPU state, soft
+switches), while preserving whatever disk image is currently inserted,
+read via `RemovableMediaDrive.currentImagePath()` from the outgoing
+`Disk2Controller` and re-inserted into the fresh one via `insert(Path)`
+-- matching how a real Apple II power-cycle doesn't eject a floppy
+either.
+
+The implementation (`Apple2Plus.buildMachine` + a `Machine` record
+holding everything reboot-sensitive: disk, bus, screen, loop, pad
+poller, toolbar) also rebuilds the screen, keyboard listener, disk
+menu, and toolbar in place in the same, reused `JFrame` -- none of
+those are safe to leave pointing at the old, torn-down machine. Not
+preserved across a reboot, by design: the pad poller's underlying
+controller *connection* (SDL/Jamepad or the network socket) briefly
+restarts, since `PadPoller`'s `InputMapper` is fixed at construction
+with no way to swap it -- an acceptable, brief reconnection cost for a
+deliberate, infrequent action, not something worth redesigning
+`PadPoller`'s API around.
+
+Verified two ways, not just compiled: a focused test built a real
+`Disk2Controller` with a real synthetic WOZ image (via the existing
+`WozTestFixtures`), called `buildMachine` a second time as a reboot
+would, and confirmed the new `Disk2Controller` is a genuinely different
+instance with the same media still present. Separately, a full
+end-to-end test launched the actual application under Xvfb and clicked
+the real Reboot button -- which caught a real bug before delivery: the
+reboot lambda initially passed `null` instead of itself when rebuilding
+(a lambda can't refer to the local variable it's being assigned to;
+fixed with a one-element array holder), which silently left the rebuilt
+toolbar with no REBOOT button at all. After the fix, the same test
+confirmed a genuinely new Reset button exists post-reboot and still
+works correctly (no stale references to the torn-down CPU).
 
 ## VideoTerm 80-column card and Saturn 128K RAM card
 
