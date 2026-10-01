@@ -25,20 +25,30 @@ import java.util.concurrent.atomic.AtomicLong
  * ReplicApple2Plus emulator's NetworkPadProvider, running inside
  * Termux/PRoot on the same device.
  *
- * NOT VERIFIED ON A REAL DEVICE. This was written against Android's
- * documented game-controller APIs, but never compiled or run -- there is
- * no Android SDK, emulator, or device available in the environment that
- * produced it. Treat this as a starting point, not a finished app.
- * Specific things likely to need adjustment on real hardware:
- *   - Which MotionEvent axis constants this specific controller actually
- *     reports for the right stick and the triggers (AXIS_Z/AXIS_RZ and
- *     AXIS_LTRIGGER/AXIS_RTRIGGER are the standard, documented mapping,
- *     but some controllers or Android versions report triggers as
- *     AXIS_BRAKE/AXIS_GAS instead -- this reads both and uses whichever
- *     is non-zero, but that fallback itself is unverified).
- *   - Whether onGenericMotionEvent/onKeyDown actually fire for every
- *     button on the SN30 Pro specifically, or whether some buttons need
- *     a different KeyEvent code than assumed here.
+ * Confirmed directly against a real 8BitDo SN30 Pro in Android mode,
+ * over two real-device test passes: left stick, right stick (full -1.0
+ * to 1.0 range on both), A/B/X/Y, and both bumpers all work exactly as
+ * written -- AXIS_Z/AXIS_RZ for the right stick and the standard
+ * KeyEvent codes for those buttons were correct guesses.
+ *
+ * Two things were confirmed WRONG by those same tests, not just
+ * unverified, and are now handled two ways each since which path a
+ * given controller actually uses varies:
+ *   - Triggers never appeared via AXIS_LTRIGGER/AXIS_RTRIGGER or the
+ *     AXIS_BRAKE/AXIS_GAS fallback despite being pressed in both tests.
+ *     This controller (or Android in this mode) sends them as discrete
+ *     KEYCODE_BUTTON_L2/R2 presses instead of an analog axis at all --
+ *     now handled via onKeyDown/onKeyUp like any other button, with the
+ *     analog path left in place for controllers that do use it.
+ *   - The D-pad never appeared via KEYCODE_DPAD_UP/DOWN/LEFT/RIGHT
+ *     despite being pressed. Now also read as a hat axis
+ *     (AXIS_HAT_X/AXIS_HAT_Y) in onGenericMotionEvent, which is how
+ *     many controllers report it instead.
+ *
+ * Still unconfirmed: Start, Back, and Guide, and the stick-click
+ * buttons -- not shown broken, just not yet exercised in testing. The
+ * SN30 Pro may not physically have a Guide-equivalent button at all, in
+ * which case its absence is expected rather than a bug.
  *
  * Wire protocol: see NetworkPadProvider's own Javadoc in the Java
  * project. One UDP packet per update, ASCII text, either the literal
@@ -79,13 +89,13 @@ class MainActivity : AppCompatActivity() {
             "RIGHT_STICK" to KeyEvent.KEYCODE_BUTTON_THUMBR,
             "LEFT_BUMPER" to KeyEvent.KEYCODE_BUTTON_L1,
             "RIGHT_BUMPER" to KeyEvent.KEYCODE_BUTTON_R1,
-            "DPAD_UP" to KeyEvent.KEYCODE_DPAD_UP,
-            "DPAD_DOWN" to KeyEvent.KEYCODE_DPAD_DOWN,
-            "DPAD_LEFT" to KeyEvent.KEYCODE_DPAD_LEFT,
-            "DPAD_RIGHT" to KeyEvent.KEYCODE_DPAD_RIGHT,
             // MISC1 has no clean, universal Android KeyEvent equivalent
             // across different controllers, so it's intentionally not
             // wired here. Nothing downstream requires it.
+            // DPAD_UP/DOWN/LEFT/RIGHT and LEFT_TRIGGER/RIGHT_TRIGGER are
+            // handled separately in applyButtonKey's when block, not
+            // through this map -- see the class Javadoc and
+            // recomputeDpadButtons/recomputeTriggerButtons for why.
         )
     }
 
@@ -100,6 +110,37 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var pressedButtons: Set<String> = emptySet()
     @Volatile private var controllerConnected = false
     @Volatile private var controllerName = ""
+
+    // Left/right trigger state, tracked per source and combined with OR
+    // logic rather than one path overwriting the other. This matters
+    // because onGenericMotionEvent fires on every tiny stick movement and
+    // recomputes the analog reading every time; on hardware that sends
+    // triggers as discrete key events instead of an analog axis (confirmed
+    // true for this controller), that axis always reads 0.0, and without
+    // this separation the very next stick wiggle after a trigger press
+    // would immediately clear it again.
+    @Volatile private var analogLeftTriggerPressed = false
+    @Volatile private var analogRightTriggerPressed = false
+    @Volatile private var digitalLeftTriggerHeld = false
+    @Volatile private var digitalRightTriggerHeld = false
+
+    // D-pad state, tracked per source and OR-combined for the same reason
+    // as the triggers above: if a future controller sends the D-pad via
+    // both the hat axis and discrete key events, the hat axis reading
+    // (centered = 0) on every stick movement would otherwise clobber a
+    // key-event-based press. Not confirmed as an active bug on this
+    // specific controller -- its key-event D-pad path appears to simply
+    // never fire -- but it's the identical pattern already proven real
+    // for the triggers, so it's fixed the same way rather than left as a
+    // known-bad shape.
+    @Volatile private var hatDpadUp = false
+    @Volatile private var hatDpadDown = false
+    @Volatile private var hatDpadLeft = false
+    @Volatile private var hatDpadRight = false
+    @Volatile private var keyDpadUp = false
+    @Volatile private var keyDpadDown = false
+    @Volatile private var keyDpadLeft = false
+    @Volatile private var keyDpadRight = false
 
     private val running = AtomicBoolean(false)
     private var senderThread: Thread? = null
@@ -210,7 +251,33 @@ class MainActivity : AppCompatActivity() {
         val rightTrigger = betterOf(event.getAxisValue(AXIS_RIGHT_TRIGGER_PRIMARY), event.getAxisValue(AXIS_RIGHT_TRIGGER_FALLBACK))
         updateTriggerButtons(leftTrigger, rightTrigger)
 
+        // Confirmed necessary directly, not a speculative addition: the
+        // D-pad never showed up via onKeyDown/onKeyUp with KEYCODE_DPAD_*
+        // in two real-device tests despite pressing it. Many controllers
+        // report the D-pad as a hat axis here instead of as discrete key
+        // events -- this is that path, kept alongside the key-event path
+        // rather than replacing it, since which one a given controller
+        // actually uses varies.
+        updateHatDpad(event.getAxisValue(MotionEvent.AXIS_HAT_X), event.getAxisValue(MotionEvent.AXIS_HAT_Y))
+
         return true
+    }
+
+    private fun updateHatDpad(hatX: Float, hatY: Float) {
+        hatDpadLeft = hatX < -0.5f
+        hatDpadRight = hatX > 0.5f
+        hatDpadUp = hatY < -0.5f
+        hatDpadDown = hatY > 0.5f
+        recomputeDpadButtons()
+    }
+
+    private fun recomputeDpadButtons() {
+        val current = pressedButtons.toMutableSet()
+        setButtonState(current, "DPAD_LEFT", hatDpadLeft || keyDpadLeft)
+        setButtonState(current, "DPAD_RIGHT", hatDpadRight || keyDpadRight)
+        setButtonState(current, "DPAD_UP", hatDpadUp || keyDpadUp)
+        setButtonState(current, "DPAD_DOWN", hatDpadDown || keyDpadDown)
+        pressedButtons = current
     }
 
     /** Whichever of a controller's two possible trigger axis sources is actually reporting something. */
@@ -218,9 +285,20 @@ class MainActivity : AppCompatActivity() {
         if (primary != 0f) primary else fallback
 
     private fun updateTriggerButtons(leftTrigger: Float, rightTrigger: Float) {
+        analogLeftTriggerPressed = leftTrigger > TRIGGER_THRESHOLD
+        analogRightTriggerPressed = rightTrigger > TRIGGER_THRESHOLD
+        recomputeTriggerButtons()
+    }
+
+    /**
+     * Combines the analog and digital trigger sources with OR rather than
+     * letting either one overwrite the other -- see the field comments on
+     * analogLeftTriggerPressed etc. for why that matters here.
+     */
+    private fun recomputeTriggerButtons() {
         val current = pressedButtons.toMutableSet()
-        setButtonState(current, "LEFT_TRIGGER", leftTrigger > TRIGGER_THRESHOLD)
-        setButtonState(current, "RIGHT_TRIGGER", rightTrigger > TRIGGER_THRESHOLD)
+        setButtonState(current, "LEFT_TRIGGER", analogLeftTriggerPressed || digitalLeftTriggerHeld)
+        setButtonState(current, "RIGHT_TRIGGER", analogRightTriggerPressed || digitalRightTriggerHeld)
         pressedButtons = current
     }
 
@@ -242,6 +320,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyButtonKey(keyCode: Int, isDown: Boolean) {
+        // L2/R2 and the D-pad keys are handled separately from
+        // BUTTON_KEY_CODES so each can combine with its other input
+        // source via OR rather than either overwriting the other -- see
+        // recomputeTriggerButtons and recomputeDpadButtons.
+        when (keyCode) {
+            KeyEvent.KEYCODE_BUTTON_L2 -> { digitalLeftTriggerHeld = isDown; recomputeTriggerButtons(); return }
+            KeyEvent.KEYCODE_BUTTON_R2 -> { digitalRightTriggerHeld = isDown; recomputeTriggerButtons(); return }
+            KeyEvent.KEYCODE_DPAD_UP -> { keyDpadUp = isDown; recomputeDpadButtons(); return }
+            KeyEvent.KEYCODE_DPAD_DOWN -> { keyDpadDown = isDown; recomputeDpadButtons(); return }
+            KeyEvent.KEYCODE_DPAD_LEFT -> { keyDpadLeft = isDown; recomputeDpadButtons(); return }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> { keyDpadRight = isDown; recomputeDpadButtons(); return }
+        }
         val name = BUTTON_KEY_CODES.entries.firstOrNull { it.value == keyCode }?.key ?: return
         val current = pressedButtons.toMutableSet()
         setButtonState(current, name, isDown)
