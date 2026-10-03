@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -140,14 +141,32 @@ class WozDiskImageTest {
     }
 
     @Test
-    void quarterTrackFarFromAnyMappedNeighborReturnsTheSpecsEmptyTrackLength(@TempDir Path tempDir) throws IOException {
-        WozDiskImage image = WozDiskImage.load(WozTestFixtures.buildSyntheticWozFile(tempDir, true));
+    void quarterTrackFarFromAnyMappedNeighborReturnsTheSpecsEmptyTrackLengthAndGenuineRandomness(@TempDir Path tempDir) throws IOException {
+        Path path = WozTestFixtures.buildSyntheticWozFile(tempDir, true);
         // Distance 10 from quarter-track 0 and distance 6 from quarter-track 4 -- both beyond the
         // fallback search radius, so no real hardware would pick up either track from here either.
-        TrackBitStream emptyTrack = image.trackAt(10);
-
+        WozDiskImage firstLoad = WozDiskImage.load(path);
+        TrackBitStream emptyTrack = firstLoad.trackAt(10);
         assertEquals(51_200, emptyTrack.bitCount());
-        assertEquals(0, emptyTrack.nextBit());
+
+        // Genuinely random per the WOZ spec's own requirement for blank
+        // media (confirmed directly against applesaucefdc.com's own
+        // reference: "the emulator should be outputting random bits in
+        // this case") -- not the fixed zero this project's own code
+        // previously, and deliberately, documented as a simplification.
+        // Two completely separate loads of the same quarter-track must
+        // differ, the same way two separate reads of a blank-disk track
+        // already must (see the createBlank-specific test for that).
+        WozDiskImage secondLoad = WozDiskImage.load(path);
+        TrackBitStream emptyTrackAgain = secondLoad.trackAt(10);
+        StringBuilder first = new StringBuilder();
+        StringBuilder second = new StringBuilder();
+        for (int i = 0; i < 64; i++) {
+            first.append(emptyTrack.nextBit());
+            second.append(emptyTrackAgain.nextBit());
+        }
+        assertFalse(first.toString().equals(second.toString()),
+            "a genuinely unmapped track must read as fresh randomness each time, not a fixed pattern");
     }
 
     @Test
@@ -275,5 +294,233 @@ class WozDiskImageTest {
         path.toFile().setWritable(false);
 
         assertTrue(image.isWriteProtected(), "host-level read-only should be sufficient on its own, regardless of the INFO flag");
+    }
+
+    @Test
+    void persistWritesModifiedTrackDataToTheHostFile(@TempDir Path tempDir) throws IOException {
+        Path path = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        WozDiskImage image = WozDiskImage.load(path);
+
+        TrackBitStream track0 = image.trackAt(0);
+        track0.writeBit(1);
+        track0.writeBit(0);
+        track0.writeBit(1);
+        image.markDirty(); // Disk2Controller's own job normally -- done directly here to isolate persist() itself
+
+        image.persist();
+
+        // A completely fresh instance, from a fresh read of the file,
+        // must see the change -- not just the live image's own
+        // trackData array, which would trivially already reflect it.
+        WozDiskImage reloaded = WozDiskImage.load(path);
+        TrackBitStream reloadedTrack0 = reloaded.trackAt(0);
+        assertEquals(1, reloadedTrack0.nextBit());
+        assertEquals(0, reloadedTrack0.nextBit());
+        assertEquals(1, reloadedTrack0.nextBit());
+    }
+
+    @Test
+    void persistDoesNothingWhenNothingHasBeenWritten(@TempDir Path tempDir) throws IOException, InterruptedException {
+        // The real assertion is that persist() does not even attempt a
+        // rewrite -- checked via the file's own last-modified time,
+        // which changes on any actual write regardless of whether the
+        // bytes written happen to be identical to what was already
+        // there. Root-independent, unlike an earlier version of this
+        // test that relied on a read-only file throwing on write:
+        // confirmed directly, by mutation-testing that version, that it
+        // was a false positive under this sandbox's root privileges,
+        // which bypass the read-only attribute entirely -- a rewrite
+        // would have silently succeeded either way.
+        Path path = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        WozDiskImage image = WozDiskImage.load(path);
+        Thread.sleep(10); // ensure a real rewrite, if one happened, would produce a detectably later timestamp
+        java.nio.file.attribute.FileTime before = Files.getLastModifiedTime(path);
+
+        image.persist();
+
+        java.nio.file.attribute.FileTime after = Files.getLastModifiedTime(path);
+        assertEquals(before, after, "persist() with nothing dirty must not rewrite the file at all");
+    }
+
+    @Test
+    void metaChunkSurvivesAWriteAndPersistRoundTripVerbatim(@TempDir Path tempDir) throws IOException {
+        String metaContent = "title\tTest Disk\nauthor\tReplicApple2Plus Tests\n";
+        Path path = WozTestFixtures.buildSyntheticWozFile(tempDir, false, metaContent);
+        WozDiskImage image = WozDiskImage.load(path);
+
+        TrackBitStream track0 = image.trackAt(0);
+        track0.writeBit(1);
+        image.markDirty();
+        image.persist();
+
+        byte[] file = Files.readAllBytes(path);
+        String fileText = new String(file, java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(fileText.contains(metaContent),
+            "the META chunk's exact content must survive a write+persist cycle untouched");
+    }
+
+    @Test
+    void fileStaysLoadableAfterAWriteAndPersistCycle(@TempDir Path tempDir) throws IOException {
+        // The same CRC-staleness regression class covered for
+        // setWriteProtected earlier, now for track-data persistence
+        // specifically.
+        Path path = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        WozDiskImage image = WozDiskImage.load(path);
+        image.trackAt(0).writeBit(1);
+        image.markDirty();
+        image.persist();
+
+        assertDoesNotThrow(() -> WozDiskImage.load(path), "the file must still pass CRC verification after a persist");
+    }
+
+    @Test
+    void createBlankProducesALoadableNotWriteProtectedFile(@TempDir Path tempDir) throws IOException {
+        Path path = tempDir.resolve("blank.woz");
+        WozDiskImage image = WozDiskImage.createBlank(path);
+
+        assertTrue(Files.exists(path));
+        assertFalse(image.isWriteProtected(), "a freshly created disk should be writable, not protected");
+        assertDoesNotThrow(() -> WozDiskImage.load(path), "the created file must itself be a valid, loadable WOZ2 file");
+    }
+
+    @Test
+    void createBlankRefusesToOverwriteAnExistingFile(@TempDir Path tempDir) throws IOException {
+        Path path = tempDir.resolve("existing.woz");
+        WozTestFixtures.buildSyntheticWozFile(tempDir, false); // just to confirm the fixture itself still works independent of this
+        Files.write(path, new byte[]{1, 2, 3}); // anything -- just needs to already exist
+
+        assertThrows(IOException.class, () -> WozDiskImage.createBlank(path));
+    }
+
+    @Test
+    void unwrittenTrackOnABlankDiskReadsAsGenuinelyRandomEachTime(@TempDir Path tempDir) throws IOException {
+        Path path = tempDir.resolve("blank.woz");
+        WozDiskImage image = WozDiskImage.createBlank(path);
+
+        TrackBitStream firstRead = image.trackAt(0);
+        TrackBitStream secondRead = image.trackAt(0); // a fresh wrapper, same underlying track, still virgin
+        StringBuilder first = new StringBuilder();
+        StringBuilder second = new StringBuilder();
+        for (int i = 0; i < 64; i++) {
+            first.append(firstRead.nextBit());
+            second.append(secondRead.nextBit());
+        }
+
+        assertFalse(first.toString().equals(second.toString()),
+            "two reads of the same unformatted track must differ -- a fixed, repeating pattern is exactly "
+            + "what the WOZ spec's own weak-bit requirement exists to avoid, and what real software "
+            + "checking for genuine blank media specifically tests for");
+    }
+
+    @Test
+    void writingToAVirginTrackPermanentlyExitsWeakBitMode(@TempDir Path tempDir) throws IOException {
+        Path path = tempDir.resolve("blank.woz");
+        WozDiskImage image = WozDiskImage.createBlank(path);
+
+        TrackBitStream writer = image.trackAt(0);
+        writer.seekTo(0);
+        int byteToWrite = 0xD5;
+        for (int i = 7; i >= 0; i--) {
+            writer.writeBit((byteToWrite >> i) & 1);
+        }
+
+        // Two SEPARATE reads, from two fresh TrackBitStream wrappers --
+        // confirms the track itself (not just the one stream instance
+        // that happened to write it) has permanently left weak-bit mode.
+        TrackBitStream readerA = image.trackAt(0);
+        TrackBitStream readerB = image.trackAt(0);
+        readerA.seekTo(0);
+        readerB.seekTo(0);
+        StringBuilder a = new StringBuilder();
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            a.append(readerA.nextBit());
+            b.append(readerB.nextBit());
+        }
+        assertEquals("11010101", a.toString());
+        assertEquals(a.toString(), b.toString(), "once written, repeated reads must be stable, real data -- not random anymore");
+    }
+
+    @Test
+    void writingToAVirginTrackPersistsCorrectlyAcrossAFreshReload(@TempDir Path tempDir) throws IOException {
+        Path path = tempDir.resolve("blank.woz");
+        WozDiskImage image = WozDiskImage.createBlank(path);
+
+        TrackBitStream track0 = image.trackAt(0);
+        track0.seekTo(0);
+        int byteToWrite = 0xAA;
+        for (int i = 7; i >= 0; i--) {
+            track0.writeBit((byteToWrite >> i) & 1);
+        }
+        image.markDirty();
+        image.persist();
+
+        WozDiskImage reloaded = WozDiskImage.load(path);
+        TrackBitStream reloadedTrack0 = reloaded.trackAt(0);
+        StringBuilder bits = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            bits.append(reloadedTrack0.nextBit());
+        }
+        assertEquals("10101010", bits.toString(), "a persisted write to a formerly-virgin track must survive a completely fresh reload");
+    }
+
+    @Test
+    void anUnwrittenTrackOnACompletelyFreshReloadStillReadsAsGenuineRandomness(@TempDir Path tempDir) throws IOException {
+        // Confirms the fix for what was originally a disclosed, accepted
+        // limitation: virgin status is now detected from the file's own
+        // content (every byte zero -- confirmed physically impossible for
+        // real, formatted Apple II disk data, see isAllZero's own
+        // Javadoc), not remembered only in the one in-memory instance
+        // createBlank() happened to return. A track that was never
+        // written, reloaded via a completely independent load() call
+        // (standing in for a separate session), must still read as fresh
+        // randomness on each access, not the stable placeholder bytes
+        // that were actually saved.
+        Path path = tempDir.resolve("blank.woz");
+        WozDiskImage.createBlank(path); // this specific instance is discarded -- the point is the file alone
+
+        WozDiskImage reloaded = WozDiskImage.load(path);
+        TrackBitStream track34 = reloaded.trackAt(34 * 4); // never written
+        TrackBitStream track34Again = reloaded.trackAt(34 * 4);
+        StringBuilder first = new StringBuilder();
+        StringBuilder second = new StringBuilder();
+        for (int i = 0; i < 64; i++) {
+            first.append(track34.nextBit());
+            second.append(track34Again.nextBit());
+        }
+
+        assertFalse(first.toString().equals(second.toString()),
+            "an unwritten track must still read as genuine randomness after a completely independent reload");
+    }
+
+    @Test
+    void aFormattedTrackOnAReloadIsNeverMistakenForVirgin(@TempDir Path tempDir) throws IOException {
+        // The other direction: confirms formatting a track, persisting,
+        // and reloading correctly leaves it OUT of weak-bit mode -- the
+        // all-zero detection must not misfire on real data. Uses a
+        // non-zero byte specifically (0xD5, never 0x00) so this test
+        // cannot pass by accident the way writing all-zero data would.
+        Path path = tempDir.resolve("blank.woz");
+        WozDiskImage image = WozDiskImage.createBlank(path);
+        TrackBitStream track0 = image.trackAt(0);
+        track0.seekTo(0);
+        for (int i = 7; i >= 0; i--) {
+            track0.writeBit((0xD5 >> i) & 1);
+        }
+        image.markDirty();
+        image.persist();
+
+        WozDiskImage reloaded = WozDiskImage.load(path);
+        TrackBitStream reloadedTrack0 = reloaded.trackAt(0);
+        TrackBitStream reloadedTrack0Again = reloaded.trackAt(0);
+        StringBuilder first = new StringBuilder();
+        StringBuilder second = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            first.append(reloadedTrack0.nextBit());
+            second.append(reloadedTrack0Again.nextBit());
+        }
+        assertEquals("11010101", first.toString());
+        assertEquals(first.toString(), second.toString(),
+            "a formatted track must read as stable, real data after a reload -- never randomized");
     }
 }

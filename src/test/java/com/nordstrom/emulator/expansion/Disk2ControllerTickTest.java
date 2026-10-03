@@ -4,10 +4,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -258,5 +261,156 @@ class Disk2ControllerTickTest {
         assertEquals(original.toString(), actual.toString(),
             "a write-protected disk's track data must be completely unchanged by a write attempt, "
             + "matching how a real write-protect notch physically prevents the write at the drive");
+    }
+
+    /** Writes a known byte to track 0 through the real soft switches -- shared by several tests below. */
+    private static void writeKnownByteToTrack0(Disk2Controller controller, int byteToWrite) {
+        controller.writeIoSwitch(0xF, 0); // Q7 high
+        controller.writeIoSwitch(0xD, byteToWrite); // Q6 high, loads the write-data register
+        controller.tick(8);
+        controller.writeIoSwitch(0xC, 0); // Q6 low -- shift-for-write mode
+        controller.tick(32);
+        controller.writeIoSwitch(0xE, 0); // Q7 low -- back to read mode, so a track step below behaves normally
+    }
+
+    @Test
+    void movingTheHeadAwayFromAWrittenTrackPersistsItToTheHostFile(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        controller.drive(0).insert(wozFile);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+
+        controller.drive(0).currentTrackStream(); // establishes streamedQuarterTrack at 0 before any write
+        writeKnownByteToTrack0(controller, 0xD5);
+
+        // Not yet persisted -- a fresh reload should still show the
+        // original, unwritten track data at this point.
+        WozDiskImage beforeStep = WozDiskImage.load(wozFile);
+        TrackBitStream beforeTrack = beforeStep.trackAt(0);
+        StringBuilder beforeBits = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            beforeBits.append(beforeTrack.nextBit());
+        }
+        assertEquals(WozTestFixtures.TRACK_0_BITS.substring(0, 8), beforeBits.toString(),
+            "the host file should not reflect the write yet -- persistence happens on track change, not immediately");
+
+        // Step the head to a different track -- this is the trigger.
+        controller.drive(0).step(+1);
+        controller.drive(0).currentTrackStream(); // actually triggers the track-change persist
+
+        WozDiskImage afterStep = WozDiskImage.load(wozFile);
+        TrackBitStream afterTrack = afterStep.trackAt(0);
+        StringBuilder afterBits = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            afterBits.append(afterTrack.nextBit());
+        }
+        assertEquals("11010101", afterBits.toString(),
+            "moving the head away from the written track should have persisted it to the host file");
+    }
+
+    @Test
+    void ejectingAWrittenDiskPersistsItFirst(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        controller.drive(0).insert(wozFile);
+        controller.writeIoSwitch(0x9, 0);
+        controller.writeIoSwitch(0xA, 0);
+
+        controller.drive(0).currentTrackStream();
+        writeKnownByteToTrack0(controller, 0xFF);
+
+        controller.drive(0).eject();
+
+        WozDiskImage reloaded = WozDiskImage.load(wozFile);
+        TrackBitStream track = reloaded.trackAt(0);
+        StringBuilder bits = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            bits.append(track.nextBit());
+        }
+        assertEquals("11111111", bits.toString(), "ejecting should have persisted the pending write first");
+    }
+
+    @Test
+    void ejectDoesNotActuallyEjectWhenPersistFails(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        controller.drive(0).insert(wozFile);
+        controller.writeIoSwitch(0x9, 0);
+        controller.writeIoSwitch(0xA, 0);
+
+        controller.drive(0).currentTrackStream();
+        writeKnownByteToTrack0(controller, 0xAA); // marks the image dirty, so persist() will actually try to read/write the file
+
+        Files.delete(wozFile); // simulates the file becoming inaccessible -- persist() will throw reading it
+
+        assertThrows(IOException.class, () -> controller.drive(0).eject());
+        assertTrue(controller.drive(0).isPresent(),
+            "the disk must still be considered present after a failed eject -- "
+            + "the in-memory write (and the only reference to it) must not be discarded along with a failed persist");
+    }
+
+    @Test
+    void insertNewBlankDiskPreservesVirginStateThroughTheRealDrive(@TempDir Path tempDir) throws IOException {
+        // The whole point of Drive.insertNewBlankDisk existing as its own
+        // method, rather than createBlank() followed by the ordinary
+        // insert(path): confirms that path through the REAL Disk2Controller
+        // actually preserves genuine per-read randomization on an
+        // unformatted track, not just that WozDiskImage.createBlank()
+        // does in isolation.
+        Disk2Controller controller = new Disk2Controller();
+        Path path = tempDir.resolve("blank.woz");
+
+        controller.drive(0).insertNewBlankDisk(path);
+
+        assertTrue(controller.drive(0).isPresent());
+        assertFalse(controller.drive(0).isWriteProtected());
+
+        TrackBitStream firstRead = controller.drive(0).diskImage().trackAt(0);
+        TrackBitStream secondRead = controller.drive(0).diskImage().trackAt(0);
+        StringBuilder first = new StringBuilder();
+        StringBuilder second = new StringBuilder();
+        for (int i = 0; i < 64; i++) {
+            first.append(firstRead.nextBit());
+            second.append(secondRead.nextBit());
+        }
+        assertFalse(first.toString().equals(second.toString()),
+            "a disk inserted via insertNewBlankDisk must read as genuine randomness on its unformatted tracks, "
+            + "not whatever would happen if it had been silently reloaded from disk via plain insert() instead");
+    }
+
+    @Test
+    void writingToANewBlankDiskThroughTheRealSoftSwitchesFormatsItCorrectly(@TempDir Path tempDir) throws IOException {
+        // The actual, real-world use case end to end: insert a blank
+        // disk, then "format" track 0 by writing a real byte to it
+        // through the same soft switches any real software (DOS 3.3's
+        // INIT included) would use -- confirming the whole chain from
+        // insertNewBlankDisk through Disk2LogicSequencer's real write
+        // mechanism works together, not just each piece in isolation.
+        Disk2Controller controller = new Disk2Controller();
+        Path path = tempDir.resolve("blank.woz");
+        controller.drive(0).insertNewBlankDisk(path);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+
+        writeKnownByteToTrack0(controller, 0xD5);
+
+        TrackBitStream track = controller.drive(0).diskImage().trackAt(0);
+        track.seekTo(0);
+        StringBuilder bits = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            bits.append(track.nextBit());
+        }
+        assertEquals("11010101", bits.toString());
+
+        // And a second read must be stable now -- no longer random,
+        // confirming the track actually, permanently left weak-bit mode.
+        TrackBitStream trackAgain = controller.drive(0).diskImage().trackAt(0);
+        trackAgain.seekTo(0);
+        StringBuilder bitsAgain = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            bitsAgain.append(trackAgain.nextBit());
+        }
+        assertEquals(bits.toString(), bitsAgain.toString());
     }
 }

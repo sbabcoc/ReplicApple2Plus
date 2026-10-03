@@ -223,6 +223,13 @@ public final class Apple2Plus {
             Machine old = current.get();
             old.padPoller().stop(SHUTDOWN_JOIN_MS);
             old.loop().stop(SHUTDOWN_JOIN_MS);
+            // After the loop stops (so the emulation thread can't be
+            // concurrently writing the same track data this reads), and
+            // before buildMachine below captures old.disk()'s media for
+            // the fresh machine -- a write made just before Reboot must
+            // not be silently lost the same way the whole point of
+            // persisting at all is to avoid.
+            persistDiskQuietly(old.disk());
             Machine fresh = buildMachine(cli, finalClassLoader, finalInputMapping, old.disk(), frame, onRebootHolder[0]);
             rewireFrame(frame, old, fresh);
             current.set(fresh);
@@ -245,6 +252,7 @@ public final class Apple2Plus {
             Machine m = current.get();
             m.padPoller().stop(SHUTDOWN_JOIN_MS);
             m.loop().stop(SHUTDOWN_JOIN_MS);
+            persistDiskQuietly(m.disk()); // after the loop stops, same reasoning as the reboot lambda above
         }));
 
         frame.pack();
@@ -400,6 +408,28 @@ public final class Apple2Plus {
      * @param previous the machine whose components are being removed, or null on initial startup
      * @param next the machine whose components are being installed
      */
+    /**
+     * Persists {@code disk}'s loaded media (if any), logging rather than
+     * propagating a failure -- called from the reboot lambda and the
+     * shutdown hook, neither of which has anywhere to usefully route a
+     * thrown exception, and in both cases the alternative to "log and
+     * move on" is "the application fails to reboot or exit at all over
+     * a disk write that didn't save," which is worse than losing that
+     * one write with a visible warning about it.
+     *
+     * @param disk the controller to persist, or null if no disk card was configured at all
+     */
+    private static void persistDiskQuietly(Disk2Controller disk) {
+        if (disk == null) {
+            return;
+        }
+        try {
+            disk.persist();
+        } catch (IOException e) {
+            System.err.println("Could not persist a disk write: " + e.getMessage());
+        }
+    }
+
     private static void rewireFrame(JFrame frame, Machine previous, Machine next) {
         if (previous != null) {
             frame.getContentPane().remove(previous.screen());

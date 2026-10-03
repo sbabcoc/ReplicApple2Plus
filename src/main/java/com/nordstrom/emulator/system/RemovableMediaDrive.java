@@ -36,12 +36,62 @@ public interface RemovableMediaDrive {
      */
     void insert(Path imagePath) throws IOException;
 
-    /** Removes whatever media is currently loaded, if any -- the drive becomes empty, matching a real drive with its door open and nothing inside. */
-    void eject();
+    /**
+     * Creates a new, blank WOZ disk image file at {@code path} and
+     * inserts it into this drive directly, replacing whatever (if
+     * anything) was previously loaded -- the same as {@link #insert}, but
+     * for media that doesn't exist yet rather than an existing file.
+     * <p>
+     * Not simply {@code createBlank} followed by a separate
+     * {@link #insert} call: the disk starts out entirely unformatted,
+     * with every track reading as fresh, genuine randomness until real
+     * software actually formats it, and that "still unformatted" state
+     * is tracked only in memory -- going through a second, separate load
+     * from the file this just wrote would immediately and silently lose
+     * it. DSK images aren't offered here: this project's DSK write
+     * support doesn't exist yet, so a blank DSK file would be a format
+     * nothing could actually write to.
+     *
+     * @param path where to write the new file -- must not already exist
+     * @throws IOException if the file can't be created
+     */
+    void insertNewBlankDisk(Path path) throws IOException;
+
+    /**
+     * Ejects the currently loaded disk, first persisting any unpersisted
+     * writes to it.
+     *
+     * @throws IOException if those writes exist but can't be persisted --
+     *         the disk is NOT ejected in that case, so the in-memory
+     *         state (and the chance to retry) isn't lost along with it
+     */
+    void eject() throws IOException;
 
     /** @return true if media is currently loaded */
     boolean isPresent();
 
     /** @return the path of the currently loaded image, if any -- for a host UI to display, e.g. "Drive 1: disk1.woz" */
     Optional<Path> currentImagePath();
+
+    /**
+     * Whether the currently loaded disk is write-protected.
+     *
+     * @return true if write-protected, or false if nothing is loaded --
+     *         there's nothing to protect in an empty drive, matching how
+     *         {@link #isPresent} is the real signal a host UI should check
+     *         before deciding whether to even show a write-protect control
+     *         as enabled
+     */
+    boolean isWriteProtected();
+
+    /**
+     * Sets the currently loaded disk's write-protect state, persisting
+     * it to the host disk image file -- see whichever concrete disk
+     * image class is actually loaded for the format-specific mechanism.
+     *
+     * @param protect true to write-protect the loaded disk, false to allow writes
+     * @throws IOException if the change can't be persisted
+     * @throws IllegalStateException if no disk is currently loaded
+     */
+    void setWriteProtected(boolean protect) throws IOException;
 }

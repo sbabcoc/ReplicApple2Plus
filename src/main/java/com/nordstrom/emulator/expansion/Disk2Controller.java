@@ -267,6 +267,7 @@ public final class Disk2Controller implements SlotCard {
                     stream.nextBit();
                 } else {
                     stream.writeBit(writtenBit);
+                    image.markDirty(); // exactly where a real write happens -- see DiskImage.markDirty's own Javadoc
                 }
             }
             lssPhaseCounter = (lssPhaseCounter + 1) % LSS_TICKS_PER_BIT_CELL;
@@ -436,6 +437,25 @@ public final class Disk2Controller implements SlotCard {
         return List.of(drives[0], drives[1]);
     }
 
+    /**
+     * Persists any unpersisted writes on whichever of this controller's
+     * two drives currently has a disk loaded -- for callers (application
+     * exit, Reboot) that need to be sure nothing is left unsaved at a
+     * point where the normal triggers (a track change, an eject) won't
+     * necessarily have already run. A no-op per drive if nothing is
+     * actually dirty, or if no disk is loaded there at all.
+     *
+     * @throws IOException if either drive's writes exist but can't be persisted
+     */
+    public void persist() throws IOException {
+        for (Drive drive : drives) {
+            DiskImage image = drive.diskImage();
+            if (image != null) {
+                image.persist();
+            }
+        }
+    }
+
     /** Package-visible for tests -- direct access to drive {@code n} (0 or 1) as a concrete {@link Drive}. */
     Drive drive(int n) {
         return drives[n];
@@ -517,6 +537,24 @@ public final class Disk2Controller implements SlotCard {
                 return null;
             }
             if (currentTrackStream == null || streamedQuarterTrack != quarterTrack) {
+                // About to leave this track -- persist whatever was written
+                // to it (or any other track) before fetching the new one.
+                // persist() itself is a no-op when nothing is actually
+                // dirty, so this costs nothing extra during ordinary
+                // reading, which seeks across tracks constantly with no
+                // writes involved at all. Caught, not propagated: this
+                // runs on the emulation thread's own tick(), which has no
+                // checked-exception path to the rest of the application,
+                // and the in-memory state (what the rest of this session
+                // sees) is already correct regardless of whether this
+                // particular file write succeeds.
+                if (currentTrackStream != null) {
+                    try {
+                        diskImage.persist();
+                    } catch (IOException e) {
+                        System.err.println("Could not persist disk write to " + currentImage + ": " + e.getMessage());
+                    }
+                }
                 currentTrackStream = diskImage.trackAt(quarterTrack);
                 streamedQuarterTrack = quarterTrack;
             }
@@ -530,18 +568,49 @@ public final class Disk2Controller implements SlotCard {
                 throw new IOException("Disk image not found: " + imagePath);
             }
             String name = imagePath.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-            if (name.endsWith(".dsk") || name.endsWith(".do")) {
-                diskImage = DskDiskImage.load(imagePath);
-            } else {
-                diskImage = WozDiskImage.load(imagePath);
-            }
+            DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
+                ? DskDiskImage.load(imagePath)
+                : WozDiskImage.load(imagePath);
+            insertLoadedImage(image, imagePath);
+        }
+
+        @Override
+        public void insertNewBlankDisk(Path path) throws IOException {
+            // Deliberately NOT insert(path) after creating the file
+            // separately -- that would re-load it from disk via
+            // WozDiskImage.load(), which has no way to know any of its
+            // tracks are still virgin (see WozDiskImage.createBlank's own
+            // Javadoc on that exact limitation), defeating genuine
+            // per-read randomization before the disk has even been used
+            // once. Keeping createBlank's own returned instance, with its
+            // real in-memory virgin tracking intact, is the whole point.
+            WozDiskImage image = WozDiskImage.createBlank(path);
+            insertLoadedImage(image, path);
+        }
+
+        /** Shared by {@link #insert} and {@link #insertNewBlankDisk} once each has its own, already-built {@link DiskImage}. */
+        private void insertLoadedImage(DiskImage image, Path imagePath) {
+            diskImage = image;
             currentImage = imagePath;
             currentTrackStream = null;
             streamedQuarterTrack = -1; // force a fresh stream even if the head hasn't moved
         }
 
         @Override
-        public void eject() {
+        public void eject() throws IOException {
+            if (diskImage != null) {
+                // Deliberately lets this propagate, rather than catching
+                // and logging the way currentTrackStream()'s own persist()
+                // call does: a failure here must NOT silently clear
+                // diskImage below, since that would drop the only
+                // reference to the in-memory state holding the unpersisted
+                // write -- the next insert() of this same path would then
+                // load the file fresh from disk, permanently losing a
+                // write that still existed only in memory. Not ejecting
+                // at all until this succeeds keeps both the reference and
+                // the chance to retry.
+                diskImage.persist();
+            }
             currentImage = null;
             diskImage = null;
         }

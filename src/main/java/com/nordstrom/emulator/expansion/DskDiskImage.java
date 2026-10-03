@@ -32,8 +32,19 @@ import java.nio.file.Path;
  * use a different, +2 skew), and no copy-protection-specific
  * variations (nonstandard sync gaps, altered checksums, nibble
  * counts other than 256). A .dsk file has no write-protect flag at
- * all, unlike WOZ -- {@link #isWriteProtected()} always returns
- * {@code false}.
+ * all, unlike WOZ -- confirmed directly against the format's own
+ * documentation (fileformats.archiveteam.org's DSK entry: "the bytes
+ * are stored in these files in their raw form, with no headers or
+ * separators added"), not assumed. So write-protect here is the host
+ * disk image file's own read-only state -- the same approach Virtual
+ * ][ uses for exactly this format, per its own documentation ("you
+ * can select the disk image file in the Finder and set its 'Locked'
+ * property"). This is a genuine analogy to a real 5.25" floppy's
+ * write-protect notch, not just a convenient workaround: a real
+ * drive can't write through a covered notch regardless of what any
+ * software believes about the disk, and a real floppy's notch state
+ * persists with the physical medium itself, exactly as a host file's
+ * permission bit does here.
  */
 public final class DskDiskImage implements DiskImage {
 
@@ -67,9 +78,11 @@ public final class DskDiskImage implements DiskImage {
     private static final int SYNC_BYTES_PER_GAP = 10;
 
     private final byte[] diskData;
+    private final Path path;
 
-    private DskDiskImage(byte[] diskData) {
+    private DskDiskImage(byte[] diskData, Path path) {
         this.diskData = diskData;
+        this.path = path;
     }
 
     /**
@@ -87,15 +100,51 @@ public final class DskDiskImage implements DiskImage {
                 + " bytes, expected exactly " + EXPECTED_FILE_SIZE
                 + " (35 tracks x 16 sectors x 256 bytes) for a standard DOS-order disk image");
         }
-        return new DskDiskImage(data);
+        return new DskDiskImage(data, path);
     }
 
     /**
-     * @return always {@code false} -- the DSK format has no write-protect flag at all
+     * @return true if the host disk image file is not writable -- see this class's own Javadoc for why
      */
     @Override
     public boolean isWriteProtected() {
-        return false;
+        return !Files.isWritable(path);
+    }
+
+    /**
+     * Sets or clears the host disk image file's own writable
+     * attribute -- see this class's own Javadoc for why this is the
+     * right analog to a real floppy's write-protect notch for a
+     * format with no internal metadata capacity at all.
+     *
+     * @param protect true to make the host file read-only, false to make it writable
+     * @throws IOException if the file's permission can't be changed (e.g. this process doesn't own it)
+     */
+    @Override
+    public void setWriteProtected(boolean protect) throws IOException {
+        boolean succeeded = path.toFile().setWritable(!protect);
+        if (!succeeded) {
+            throw new IOException("Could not change the write permission on " + path
+                + " -- this process may not have permission to change it");
+        }
+    }
+
+    /**
+     * A no-op: this format doesn't support writing to disk at all yet
+     * (see this project's own TODO) -- {@code trackAt} synthesizes a
+     * fresh bitstream from {@code diskData} on every call with no
+     * persistent backing array to have changed in the first place, so
+     * there is nothing here for a write ever to have modified.
+     */
+    @Override
+    public void persist() {
+        // Intentionally empty -- see this method's own Javadoc.
+    }
+
+    /** A no-op, for the same reason {@link #persist} is -- see its own Javadoc. */
+    @Override
+    public void markDirty() {
+        // Intentionally empty.
     }
 
     /**

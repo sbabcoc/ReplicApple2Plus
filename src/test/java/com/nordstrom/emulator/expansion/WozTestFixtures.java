@@ -37,6 +37,19 @@ final class WozTestFixtures {
      * @return the path of the file just written
      */
     static Path buildSyntheticWozFile(Path dir, boolean writeProtected) throws IOException {
+        return buildSyntheticWozFile(dir, writeProtected, null);
+    }
+
+    /**
+     * Same as {@link #buildSyntheticWozFile(Path, boolean)}, with an
+     * additional META chunk after TRKS when {@code metaContent} is
+     * non-null -- for confirming that content survives a write/persist
+     * round-trip completely untouched, the same as a real META chunk
+     * (disk title, author, and similar) must.
+     *
+     * @param metaContent arbitrary UTF-8 text for the META chunk's body, or null to omit the chunk entirely
+     */
+    static Path buildSyntheticWozFile(Path dir, boolean writeProtected, String metaContent) throws IOException {
         int blockSize = 512;
 
         byte[] track0Bytes = packBits(TRACK_0_BITS);
@@ -75,7 +88,9 @@ final class WozTestFixtures {
         byte[] infoChunk = chunk("INFO", info);
         byte[] tmapChunk = chunk("TMAP", tmap);
         byte[] trksChunk = chunk("TRKS", trksData);
-        byte[] body = concat(infoChunk, tmapChunk, trksChunk);
+        byte[] body = (metaContent == null)
+            ? concat(infoChunk, tmapChunk, trksChunk)
+            : concat(infoChunk, tmapChunk, trksChunk, chunk("META", metaContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 
         CRC32 crc = new CRC32();
         crc.update(body);
