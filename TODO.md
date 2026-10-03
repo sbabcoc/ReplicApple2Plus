@@ -250,3 +250,59 @@ don't work with VideoTerm active -- substitute `PRINT CHR$(12)`;
 ignored since they only affect the standard Apple display) -- relevant
 for deciding how much software-compatibility behavior to model versus
 just the hardware registers.
+
+## Disk write support (prerequisite for blank/formatted disk creation)
+
+Confirmed directly, not assumed: **ReplicApple2Plus does not currently
+support writing to disk at all.** The write-mode *protocol* is modeled
+correctly -- `Disk2Controller.writeIoSwitch` latches the write-data
+register exactly when real software would (a write to $C08D while Q6=1,
+Q7=1), and WOZ write-protect sensing is correctly read and honored. But
+`TrackBitStream`'s entire public API is `nextBit()`/`bitCount()`/
+`position()`/`seekTo()` -- read-only. The latched write-data byte is
+only ever read back into the LSS's own internal latch
+(`Disk2LogicSequencer`'s `case 0xB`); nothing takes it and encodes it
+into a track's bit stream. Practically: a write-protected disk
+correctly refuses a write, but writing to a non-protected disk silently
+succeeds from the CPU's perspective while persisting nothing -- DOS
+3.3's `SAVE` would appear to work and lose the file.
+
+Needed before writes do anything real:
+- A write path on `TrackBitStream` itself -- something like
+  `writeBit(int bit)` that overwrites the bit at the current head
+  position and advances, mirroring how `nextBit()` already does the
+  read side.
+- `Disk2LogicSequencer` actually calling it, timed to the real hardware
+  rate (one bit shifted out roughly every 4 CPU cycles, matching the
+  existing read-side LSS timing already modeled in
+  `Disk2Controller`'s tick ratio comments) -- not just latching the
+  byte and discarding it.
+- A decision, not yet made: does a write persist back to the host
+  `.woz`/`.dsk` file on disk, matching how a write to a real floppy
+  immediately, physically persists to the magnetic media (more
+  hardware-faithful, but means deciding when to flush -- every write,
+  or on eject/exit) -- or stay in-memory for the session only, discarded
+  unless something explicit saves it? This project's own stated
+  hardware-fidelity goal points toward the former, but it's a real
+  design question, not a given.
+- WOZ and DSK likely need different answers for "blank" image creation
+  specifically. A blank `.dsk` is straightforward (143,360 zero bytes;
+  `DskDiskImage` would encode that as blank, unformatted sector data,
+  which is exactly the right starting state for `INIT` to then format).
+  A blank `.woz` is harder to get right: a real, newly-manufactured
+  unformatted floppy's magnetic surface is random noise, not silence,
+  until formatted -- WOZ's own format (chunk-based, with TMAP/TRKS
+  structures) would need either synthesized noise tracks or an empty
+  but structurally valid file, and which of those is actually correct
+  isn't yet researched the way VideoTerm/Saturn were.
+
+## Blank, formattable disk image creation
+
+Depends on the write-support work above to be meaningful -- filed
+separately since the two are genuinely different pieces of work (file
+creation vs. emulated drive mechanics), but creating a blank disk a
+real `INIT` command couldn't actually format would be a half-finished,
+misleading feature. A host-side menu action ("File > New Disk" or
+similar) that writes a fresh, blank image of the chosen format to a
+path the user picks, then (optionally) inserts it into a drive the same
+way `DiskMenu`'s existing insert action does.

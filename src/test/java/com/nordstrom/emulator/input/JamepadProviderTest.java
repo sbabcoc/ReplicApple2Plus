@@ -136,4 +136,54 @@ class JamepadProviderTest {
             provider.close();
         }
     }
+
+    /**
+     * The regression test for a real failure: a second {@code create()}
+     * call -- Reboot restarting the pad poller, say -- used to build a
+     * brand new loader and re-extract and reload the native library
+     * every time. On macOS this produced a real, visible symptom: objc
+     * runtime warnings that classes like {@code SDLApplication} were
+     * "implemented in both" two different temp .dylib paths, with "may
+     * cause spurious casting failures and mysterious crashes." Native
+     * code cannot be unloaded once loaded into a process, so the fix is
+     * to load it at most once per JVM, ever, and reuse the same loader
+     * afterwards -- this confirms that reuse actually happens, via the
+     * package-private {@code cachedLoader} field, rather than just
+     * confirming two providers can each be created without crashing
+     * (which a flawed, still-reloading implementation would also pass).
+     */
+    @Test
+    void aSecondCreateCallReusesTheSameLoaderRatherThanReloadingTheNativeLibrary() throws Exception {
+        assumeTrue(jamepadPresent(), "Jamepad jar not on the class path");
+        assumeTrue(NativeLibraryChooser.choose(System.getProperty("os.name"), System.getProperty("os.arch")).isPresent(),
+            "no native library for this platform");
+
+        java.lang.reflect.Field cachedLoaderField = JamepadProvider.class.getDeclaredField("cachedLoader");
+        cachedLoaderField.setAccessible(true);
+
+        ByteArrayOutputStream log = new ByteArrayOutputStream();
+        PadProvider first = JamepadProvider.create(JamepadProvider.class.getClassLoader(), new PrintStream(log, true));
+        assertNotNull(first, "first create() should start; the log said: " + log);
+        first.close();
+
+        // Snapshot BEFORE the second create() call -- comparing two reads
+        // taken after both providers already exist would prove nothing,
+        // since nothing happens between them to tell the two calls apart.
+        Object loaderAfterFirst = cachedLoaderField.get(null);
+        assertNotNull(loaderAfterFirst, "the shared loader should exist after a successful create() call");
+
+        PadProvider second = JamepadProvider.create(JamepadProvider.class.getClassLoader(), new PrintStream(log, true));
+        assertNotNull(second, "second create() should also start; the log said: " + log);
+        try {
+            // The real assertion: creating a SECOND provider must not have
+            // replaced the cached loader with a new one. If it had, that
+            // would mean the native library was loaded a second time --
+            // exactly the bug this test exists to catch.
+            Object loaderAfterSecond = cachedLoaderField.get(null);
+            assertEquals(loaderAfterFirst, loaderAfterSecond,
+                "a second create() call must reuse the same cached loader, not build a new one");
+        } finally {
+            second.close();
+        }
+    }
 }

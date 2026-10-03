@@ -60,7 +60,6 @@ public final class JamepadProvider implements PadProvider {
         + "put jamepad-2.30.0.0.jar (com.badlogicgames.jamepad:jamepad) in the directory given with --plugins, "
         + "or add it to the class path.";
 
-    private final URLClassLoader jamepadLoader;
     private final Object manager;
     private final Method update;
     private final Method getNumControllers;
@@ -80,9 +79,8 @@ public final class JamepadProvider implements PadProvider {
     private int lastCount = -1;
     private String description = NONE_CONNECTED;
 
-    private JamepadProvider(URLClassLoader jamepadLoader, Object manager, Class<?> managerClass, Class<?> stateClass)
+    private JamepadProvider(Object manager, Class<?> managerClass, Class<?> stateClass)
             throws ReflectiveOperationException {
-        this.jamepadLoader = jamepadLoader;
         this.manager = manager;
         this.update = managerClass.getMethod("update");
         this.getNumControllers = managerClass.getMethod("getNumControllers");
@@ -140,37 +138,70 @@ public final class JamepadProvider implements PadProvider {
             return null;
         }
 
-        JamepadLoader jamepadLoader = null;
-        boolean succeeded = false;
+        JamepadLoader jamepadLoader;
         try {
-            jamepadLoader = new JamepadLoader(jamepadRoot, loader, readHookBytes());
+            jamepadLoader = sharedLoader(jamepadRoot, loader, nativeName.get());
+        } catch (IOException | ReflectiveOperationException | LinkageError e) {
+            log.println("input: gamepad support failed to start: " + e);
+            return null;
+        }
+
+        try {
             Class<?> configClass = Class.forName(PACKAGE + "Configuration", true, jamepadLoader);
             Class<?> managerClass = Class.forName(PACKAGE + "ControllerManager", true, jamepadLoader);
             Class<?> stateClass = Class.forName(PACKAGE + "ControllerState", true, jamepadLoader);
 
-            loadNative(jamepadLoader, nativeName.get());
             Object configuration = configClass.getConstructor().newInstance();
             configClass.getField("loadNativeLibrary").setBoolean(configuration, false);
             Constructor<?> constructor = managerClass.getConstructor(configClass);
             Object manager = constructor.newInstance(configuration);
             initQuietly(manager, managerClass);
-            JamepadProvider provider = new JamepadProvider(jamepadLoader, manager, managerClass, stateClass);
-            succeeded = true;
-            return provider;
+            return new JamepadProvider(manager, managerClass, stateClass);
         } catch (InvocationTargetException e) {
             log.println("input: gamepad support failed to start: " + e.getCause());
-        } catch (IOException | ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError e) {
             log.println("input: gamepad support failed to start: " + e);
-        } finally {
-            if (!succeeded && jamepadLoader != null) {
-                try {
-                    jamepadLoader.close();
-                } catch (IOException ignored) {
-                    // nothing more to do for a loader that never became a provider
-                }
-            }
         }
         return null;
+    }
+
+    /**
+     * The one {@link JamepadLoader} this JVM process will ever have,
+     * created (and its native library loaded through it) only the first
+     * time this is called -- see {@link #sharedLoader} for why this must
+     * never be reassigned or closed once set.
+     */
+    private static volatile JamepadLoader cachedLoader;
+
+    /**
+     * Returns the one, process-lifetime {@link JamepadLoader}, creating
+     * it (and loading the native library through it) only the first time
+     * this is called; every later call reuses the same loader and its
+     * already-loaded library.
+     * <p>
+     * Confirmed directly as a real, not theoretical, problem: a second
+     * {@code create()} call -- Reboot restarting the pad poller, say --
+     * previously built a brand new loader and re-extracted and reloaded
+     * the native library every time. On macOS this produced, verbatim:
+     * {@code Class SDLApplication is implemented in both
+     * /.../jamepadNNN.dylib and /.../jamepadMMM.dylib. This may cause
+     * spurious casting failures and mysterious crashes.} -- for
+     * SDLApplication and a dozen other classes. Once native code is
+     * loaded into a process it cannot be unloaded, and on macOS the
+     * Objective-C runtime cannot re-register the same class a second
+     * time even from byte-identical content extracted to a new path.
+     * There is nothing to be gained from a second load, since the first
+     * one is permanent for the life of the process regardless -- so this
+     * loads the native library at most once, full stop.
+     */
+    private static synchronized JamepadLoader sharedLoader(URL jamepadRoot, ClassLoader parent, String nativeName)
+            throws IOException, ReflectiveOperationException {
+        if (cachedLoader == null) {
+            JamepadLoader candidate = new JamepadLoader(jamepadRoot, parent, readHookBytes());
+            loadNative(candidate, nativeName);
+            cachedLoader = candidate; // only assigned once loading has actually succeeded
+        }
+        return cachedLoader;
     }
 
     /**
@@ -354,10 +385,10 @@ public final class JamepadProvider implements PadProvider {
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             // shutting down anyway
         }
-        try {
-            jamepadLoader.close();
-        } catch (IOException ignored) {
-            // shutting down anyway
-        }
+        // jamepadLoader is deliberately NOT closed here. It is now the
+        // one, process-lifetime shared loader (see sharedLoader's own
+        // Javadoc) -- closing it would make it unusable for the next
+        // create() call, which expects to reuse it rather than build a
+        // fresh one. Only this instance's own SDL manager is torn down.
     }
 }
