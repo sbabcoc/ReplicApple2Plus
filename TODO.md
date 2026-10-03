@@ -251,58 +251,82 @@ ignored since they only affect the standard Apple display) -- relevant
 for deciding how much software-compatibility behavior to model versus
 just the hardware registers.
 
-## Disk write support (prerequisite for blank/formatted disk creation)
+## Disk write support -- done for WOZ; DSK still not started
 
-Confirmed directly, not assumed: **ReplicApple2Plus does not currently
-support writing to disk at all.** The write-mode *protocol* is modeled
-correctly -- `Disk2Controller.writeIoSwitch` latches the write-data
-register exactly when real software would (a write to $C08D while Q6=1,
-Q7=1), and WOZ write-protect sensing is correctly read and honored. But
-`TrackBitStream`'s entire public API is `nextBit()`/`bitCount()`/
-`position()`/`seekTo()` -- read-only. The latched write-data byte is
-only ever read back into the LSS's own internal latch
-(`Disk2LogicSequencer`'s `case 0xB`); nothing takes it and encodes it
-into a track's bit stream. Practically: a write-protected disk
-correctly refuses a write, but writing to a non-protected disk silently
-succeeds from the CPU's perspective while persisting nothing -- DOS
-3.3's `SAVE` would appear to work and lose the file.
+**WOZ**: done. `TrackBitStream.writeBit()` overwrites the bit at the
+current head position, mutating the same backing array
+`WozDiskImage` holds persistently (so a write survives a track
+change, not just the one call that made it). `Disk2LogicSequencer.tick()`
+now returns the bit actually written (or -1), confirmed via direct,
+exhaustive cross-checking against a2kit's independent ROM table (all
+256 entries match exactly) and a traced write of a known byte
+(`0xD5`) producing exactly the right bits. `Disk2Controller` wires
+this together and enforces write-protect at the drive level, not
+inside the LSS -- matching real hardware, where the notch sensor
+lives in the drive, not the controller card.
 
-Needed before writes do anything real:
-- A write path on `TrackBitStream` itself -- something like
-  `writeBit(int bit)` that overwrites the bit at the current head
-  position and advances, mirroring how `nextBit()` already does the
-  read side.
-- `Disk2LogicSequencer` actually calling it, timed to the real hardware
-  rate (one bit shifted out roughly every 4 CPU cycles, matching the
-  existing read-side LSS timing already modeled in
-  `Disk2Controller`'s tick ratio comments) -- not just latching the
-  byte and discarding it.
-- A decision, not yet made: does a write persist back to the host
-  `.woz`/`.dsk` file on disk, matching how a write to a real floppy
-  immediately, physically persists to the magnetic media (more
-  hardware-faithful, but means deciding when to flush -- every write,
-  or on eject/exit) -- or stay in-memory for the session only, discarded
-  unless something explicit saves it? This project's own stated
-  hardware-fidelity goal points toward the former, but it's a real
-  design question, not a given.
-- WOZ and DSK likely need different answers for "blank" image creation
-  specifically. A blank `.dsk` is straightforward (143,360 zero bytes;
-  `DskDiskImage` would encode that as blank, unformatted sector data,
-  which is exactly the right starting state for `INIT` to then format).
-  A blank `.woz` is harder to get right: a real, newly-manufactured
-  unformatted floppy's magnetic surface is random noise, not silence,
-  until formatted -- WOZ's own format (chunk-based, with TMAP/TRKS
-  structures) would need either synthesized noise tracks or an empty
-  but structurally valid file, and which of those is actually correct
-  isn't yet researched the way VideoTerm/Saturn were.
+The open design question this item used to flag -- persist to the
+host file, or stay in-memory only -- is resolved: **persisted to the
+host file**, confirmed explicitly ("the data must be persisted in
+the host machine disk image file. Anything less is inaccurate
+emulation"). Mechanism: `WozDiskImage.persist()` rewrites every
+captured track's current bytes back into the file at their original
+offsets and recomputes the CRC32, triggered on track change, eject,
+and application exit/Reboot -- a dirty flag skips the rewrite
+entirely when nothing changed, so ordinary reading (which seeks
+across tracks constantly) costs nothing extra. META and anything
+else this project doesn't itself track survive untouched, since
+persistence works by patching a fresh read of the real file rather
+than reconstructing one from parsed fields.
 
-## Blank, formattable disk image creation
+A real bug was caught by the integration test for this, not left for
+later: `Disk2Controller.tick()` was unconditionally reading a pulse
+bit every 8th tick regardless of mode, double-advancing the stream's
+position whenever a write also landed that tick and silently writing
+every bit to the wrong (every-other) position. Mutation-tested
+directly: reverting the fix reproduces exactly that corrupted
+pattern.
 
-Depends on the write-support work above to be meaningful -- filed
-separately since the two are genuinely different pieces of work (file
-creation vs. emulated drive mechanics), but creating a blank disk a
-real `INIT` command couldn't actually format would be a half-finished,
-misleading feature. A host-side menu action ("File > New Disk" or
-similar) that writes a fresh, blank image of the chosen format to a
-path the user picks, then (optionally) inserts it into a drive the same
-way `DiskMenu`'s existing insert action does.
+**DSK**: still not started, and now a clearly separate piece of work
+rather than a sub-case of the WOZ item above. Persisting a DSK write
+means reversing the GCR encoding -- recognizing sector header
+prologues in the written bit stream, decoding the 6-and-2 data field
+back to raw bytes, and writing those into the flat, sector-based
+`.dsk` file -- essentially the mirror image of `DskDiskImage`'s
+existing `encodeTrack`/`writeDataField`. Until this exists, DSK stays
+read-only, and the blank-disk-creation feature below deliberately
+never offers DSK as a format for exactly this reason.
+
+## Blank, formattable disk image creation -- done for WOZ; DSK deliberately not offered
+
+Done. `WozDiskImage.createBlank(path)` builds a complete, valid
+WOZ2 file with 35 pre-allocated tracks. Every still-unformatted track
+reads as fresh, genuine randomness on every single read (confirmed:
+two reads of the same position differ), matching the WOZ spec's own
+documented requirement for blank media -- fixing a previously
+*documented* simplification (this project used to return constant
+zeros here instead) now that a blank disk's tracks are the normal
+case, not a rare copy-protection edge case.
+
+Virgin-track status -- "this track has a real slot but was never
+actually formatted" -- is detected from the file's own content, not
+remembered only in memory: a track whose stored bytes are *all*
+zero is treated as virgin, confirmed to have zero false positives on
+real data, not a risky heuristic -- real Apple II disk encoding has
+a hard physical constraint of no more than two consecutive zero bits
+anywhere in valid, formatted data (confirmed across several
+independent, primary sources), making a whole track of zero bytes
+(51,200 consecutive zero bits) physically impossible to produce by
+accident. This means a disk created but never formatted, then
+reloaded in a completely separate session, still correctly resumes
+as random noise rather than silently becoming stable, meaningless
+data -- an earlier version of this work had that as a disclosed,
+accepted limitation; it's fixed now, not just documented.
+
+UI: a "New..." item per drive in the `Disk` menu, alongside
+Insert/Eject, prompting for name and location via a save dialog and
+inserting the result directly (not via a second, separate load that
+would have discarded the in-memory virgin-tracking this all depends
+on). WOZ is the only format offered -- DSK is deliberately absent,
+since write support for it doesn't exist (see above); offering it
+would create a file real software could never actually format.

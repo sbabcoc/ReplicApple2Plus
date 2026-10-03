@@ -102,6 +102,22 @@ independently reimplemented in original Java.
     Reset/Reboot toolbar controls. No MAME code is included; the
     documented behavioral distinction was independently reimplemented.
     https://docs.mamedev.org/
+  - Steve Chamberlin ("bigmessowires.com"), "Apple II Copy Protection" --
+    a second, separate article from the same author already credited
+    above, consulted specifically to confirm the "no more than two
+    consecutive zero bits" physical constraint on real Apple II disk
+    encoding, used to detect a never-formatted disk track from its own
+    stored content.
+    https://www.bigmessowires.com/2015/08/27/apple-ii-copy-protection/
+  - CiderPress2 project, "Nibble Image Files" documentation -- consulted
+    alongside the above for the same zero-bit-run constraint and its
+    history across Apple II disk controller revisions.
+    https://ciderpress2.com/formatdoc/Nibble-notes.html
+  - Eric Smith, posting to the comp.sys.apple2 mailing list (April 1999)
+    -- a primary, firsthand technical account of the P6/P6A PROM
+    revision and the zero-bit-run constraint it changed, consulted
+    alongside the above.
+    http://ana-3.lcs.mit.edu/~jnc/cctalk/1999-April/0686.html
 
 ------------------------------------------------------------------------
 MIT License
