@@ -3,18 +3,21 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.system.RemovableMediaDrive;
 
-import javax.swing.JCheckBoxMenuItem;
+import javax.swing.ButtonGroup;
 import javax.swing.JFileChooser;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.event.MenuEvent;
 import javax.swing.event.MenuListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
 import java.awt.EventQueue;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.prefs.Preferences;
 
 /**
  * Builds the "Disk" menu for runtime insert/eject on both of a
@@ -33,10 +36,10 @@ import java.util.concurrent.Executor;
  * either).
  * <p>
  * Each drive's own submenu title doubles as its status display --
- * "Drive 1: diskname.woz" or "Drive 1: diskname.woz [Protected]" or
- * "Drive 1 (empty)" -- visible without even opening the submenu, kept
+ * "Drive 1: diskname.woz [Writable]", "Drive 1: diskname.woz [Protected]",
+ * or "Drive 1 (empty)" -- visible without even opening the submenu, kept
  * current via a {@link MenuListener} on the top-level "Disk" menu that
- * refreshes both drives' titles and write-protect checkboxes each time
+ * refreshes both drives' titles and write-protect controls each time
  * the menu is opened. Swing menus don't update themselves
  * automatically when the underlying state changes elsewhere (an
  * insert from this same menu, say) -- refreshing on {@code
@@ -46,6 +49,75 @@ import java.util.concurrent.Executor;
 final class DiskMenu {
 
     private DiskMenu() {}
+
+    /**
+     * Where the last disk-image dialog (Insert or New) left off, so the
+     * next one opens there instead of the home folder. Stored with the
+     * JDK's own user preferences (on macOS, the
+     * {@code com.apple.java.util.prefs} plist under
+     * {@code ~/Library/Preferences}), so it carries across launches, not
+     * just within a session. Shared by both dialogs: a disk just created
+     * is usually inserted again later from the same place.
+     */
+    private static final Preferences PREFS = Preferences.userNodeForPackage(DiskMenu.class);
+    private static final String LAST_DIRECTORY_KEY = "lastDiskImageDirectory";
+
+    /**
+     * Folder of the disk image the configuration loaded at launch (drive
+     * 1's if it has one, otherwise drive 2's), used when nothing is
+     * remembered yet -- see {@link #chooserAtLastDirectory}. Captured
+     * once, by the first {@link #build}: that runs after the config's
+     * {@code driveN=} images are inserted, but every later build (one per
+     * reboot) sees whatever disks were inserted since, not the
+     * configuration's. Null if the configuration named no image.
+     */
+    private static java.io.File configuredImageDirectory;
+    private static boolean configuredImageDirectoryCaptured;
+
+    /** See {@link #configuredImageDirectory}. Only the first call has any effect. */
+    private static void captureConfiguredImageDirectory(List<RemovableMediaDrive> drives) {
+        if (configuredImageDirectoryCaptured) {
+            return;
+        }
+        configuredImageDirectoryCaptured = true;
+        for (RemovableMediaDrive drive : drives) {
+            java.nio.file.Path parent = drive.currentImagePath().map(java.nio.file.Path::getParent).orElse(null);
+            if (parent != null) {
+                configuredImageDirectory = parent.toAbsolutePath().toFile();
+                return;
+            }
+        }
+    }
+
+    /**
+     * A chooser that starts in the remembered directory; failing that
+     * (nothing remembered yet, or it no longer exists), in the folder of
+     * the disk image the configuration loaded; failing that, in the
+     * default (the home folder).
+     */
+    private static JFileChooser chooserAtLastDirectory() {
+        String last = PREFS.get(LAST_DIRECTORY_KEY, null);
+        java.io.File remembered = last == null ? null : new java.io.File(last);
+        if (remembered != null && remembered.isDirectory()) {
+            return new JFileChooser(remembered);
+        }
+        java.io.File configured = configuredImageDirectory;
+        return new JFileChooser(configured != null && configured.isDirectory() ? configured : null);
+    }
+
+    /**
+     * Remembers wherever {@code chooser} was left -- after a cancel as
+     * well as a confirm, since navigating somewhere and backing out
+     * usually still means "this is where my disks are." The backing
+     * store write is asynchronous and best-effort by design; a failure
+     * there costs only this convenience, never a disk operation.
+     */
+    private static void rememberDirectory(JFileChooser chooser) {
+        java.io.File dir = chooser.getCurrentDirectory();
+        if (dir != null) {
+            PREFS.put(LAST_DIRECTORY_KEY, dir.getAbsolutePath());
+        }
+    }
 
     /**
      * Builds a "Disk" menu wired to {@code disk}'s two drives.
@@ -59,6 +131,7 @@ final class DiskMenu {
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
     static JMenu build(Disk2Controller disk, Component parent, Executor emulationThread) {
+        captureConfiguredImageDirectory(disk.removableDrives());
         JMenu menu = new JMenu("Disk");
         RemovableMediaDrive drive1 = disk.removableDrives().get(0);
         RemovableMediaDrive drive2 = disk.removableDrives().get(1);
@@ -86,25 +159,33 @@ final class DiskMenu {
     }
 
     /** One drive's submenu, plus the pieces {@link #refresh} needs to keep it current. */
-    private record DriveMenu(JMenu menu, RemovableMediaDrive drive, String label, JCheckBoxMenuItem writeProtect) {
+    private record DriveMenu(JMenu menu, RemovableMediaDrive drive, String label,
+                             ButtonGroup protection, JRadioButtonMenuItem writable, JRadioButtonMenuItem writeProtected) {
 
         /**
-         * Updates this drive's submenu title and write-protect checkbox
+         * Updates this drive's submenu title and write-protect controls
          * to match its actual current state. Safe to call anytime --
          * reads {@code drive}'s own current state fresh each time,
          * never caching anything stale.
+         * <p>
+         * The title names the protection state either way, never only
+         * when protected: a state shown solely by something's absence is
+         * easy to misread -- a protected disk was once mistaken for a
+         * writable one under the earlier single-checkbox design.
          */
         void refresh() {
             boolean present = drive.isPresent();
+            writable.setEnabled(present);
+            writeProtected.setEnabled(present);
             if (!present) {
                 menu.setText(label + " (empty)");
-            } else {
-                String name = drive.currentImagePath().orElseThrow().getFileName().toString();
-                boolean protectedNow = drive.isWriteProtected();
-                menu.setText(label + ": " + name + (protectedNow ? " [Protected]" : ""));
+                protection.clearSelection(); // neither state applies to an empty drive
+                return;
             }
-            writeProtect.setEnabled(present);
-            writeProtect.setSelected(present && drive.isWriteProtected());
+            String name = drive.currentImagePath().orElseThrow().getFileName().toString();
+            boolean protectedNow = drive.isWriteProtected();
+            menu.setText(label + ": " + name + (protectedNow ? " [Protected]" : " [Writable]"));
+            (protectedNow ? writeProtected : writable).setSelected(true);
         }
     }
 
@@ -117,8 +198,15 @@ final class DiskMenu {
                                              Executor emulationThread) {
         JMenu driveMenu = new JMenu(label);
 
-        JCheckBoxMenuItem writeProtect = new JCheckBoxMenuItem("Write-Protected");
-        driveMenu.add(writeProtect);
+        // A radio pair rather than one checkbox, so both states are always
+        // named: "Writable" gives "Protected" its context.
+        JRadioButtonMenuItem writable = new JRadioButtonMenuItem("Writable");
+        JRadioButtonMenuItem writeProtected = new JRadioButtonMenuItem("Protected");
+        ButtonGroup protection = new ButtonGroup();
+        protection.add(writable);
+        protection.add(writeProtected);
+        driveMenu.add(writable);
+        driveMenu.add(writeProtected);
         driveMenu.addSeparator();
 
         JMenuItem newBlank = new JMenuItem("New...");
@@ -139,31 +227,38 @@ final class DiskMenu {
         }));
         driveMenu.add(eject);
 
-        DriveMenu result = new DriveMenu(driveMenu, drive, label, writeProtect);
+        DriveMenu result = new DriveMenu(driveMenu, drive, label, protection, writable, writeProtected);
 
         // Posted to the emulation thread like insert/eject, since this also
-        // touches drive state the running machine reads. If it fails (e.g.
+        // touches drive state the running machine reads. Choosing the item
+        // that's already selected still fires an action event, so the
+        // drive's actual state is compared first -- otherwise that would
+        // rewrite the host file for no change. If the change fails (e.g.
         // this process can't change the host file's permission), the
-        // checkbox's own visual state is reverted on the event thread --
-        // its click already flipped it before this listener ran, so a
-        // failure needs to visibly undo that, not just report an error
-        // while leaving the checkbox showing a state that was never
-        // actually reached.
-        writeProtect.addActionListener(event -> {
-            boolean requested = writeProtect.isSelected();
+        // selection is put back on the event thread: the click already
+        // moved it before this listener ran, so a failure needs to visibly
+        // undo that, not just report an error while showing a state that
+        // was never actually reached.
+        java.awt.event.ActionListener onProtectionChoice = event -> {
+            boolean requested = writeProtected.isSelected();
             emulationThread.execute(() -> {
+                if (!drive.isPresent() || drive.isWriteProtected() == requested) {
+                    return;
+                }
                 try {
                     drive.setWriteProtected(requested);
                 } catch (IOException | IllegalStateException e) {
                     EventQueue.invokeLater(() -> {
-                        writeProtect.setSelected(!requested);
+                        (requested ? writable : writeProtected).setSelected(true);
                         JOptionPane.showMessageDialog(parent,
                             "Could not change write-protect state:\n" + e.getMessage(),
                             "Disk Error", JOptionPane.ERROR_MESSAGE);
                     });
                 }
             });
-        });
+        };
+        writable.addActionListener(onProtectionChoice);
+        writeProtected.addActionListener(onProtectionChoice);
 
         return result;
     }
@@ -184,10 +279,11 @@ final class DiskMenu {
      *                        emulation is not running yet (the startup prompt)
      */
     static void promptAndInsert(RemovableMediaDrive drive, Component parent, Executor emulationThread) {
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = chooserAtLastDirectory();
         chooser.setFileFilter(new FileNameExtensionFilter(
             "Disk images (*.woz, *.dsk, *.do)", "woz", "dsk", "do"));
         int result = chooser.showOpenDialog(parent);
+        rememberDirectory(chooser);
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
         }
@@ -216,10 +312,11 @@ final class DiskMenu {
      *                        state the running machine reads, the same as insert/eject
      */
     private static void promptAndCreateBlank(RemovableMediaDrive drive, Component parent, Executor emulationThread) {
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = chooserAtLastDirectory();
         chooser.setFileFilter(new FileNameExtensionFilter("WOZ disk images (*.woz)", "woz"));
         chooser.setSelectedFile(new java.io.File("untitled.woz"));
         int result = chooser.showSaveDialog(parent);
+        rememberDirectory(chooser);
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
         }

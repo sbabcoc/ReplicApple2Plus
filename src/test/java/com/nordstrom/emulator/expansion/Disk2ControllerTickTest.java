@@ -161,6 +161,27 @@ class Disk2ControllerTickTest {
     }
 
     /**
+     * Track position of the first bit of a byte written by
+     * {@link #writeKnownByteToTrack0} on a freshly-constructed controller.
+     * The disk keeps advancing one bit cell per 8 LSS ticks in every
+     * mode, so position 0 is the cell during which Q7 went high (no
+     * write-line transition yet, so a 0), and the byte's 8 bits follow
+     * from here: the 4-cycle LOAD window is one cell, which writes the
+     * latch's MSB, then SHIFT-FOR-WRITE writes the remaining 7.
+     */
+    private static final int FIRST_WRITTEN_BIT = 1;
+
+    /** Reads {@code count} bits starting at {@code position}. */
+    private static String bitsAt(TrackBitStream track, int position, int count) {
+        track.seekTo(position);
+        StringBuilder bits = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            bits.append(track.nextBit());
+        }
+        return bits.toString();
+    }
+
+    /**
      * Drives a real byte through the real soft switches end to end --
      * LOAD mode (Q6=1,Q7=1, the real {@code STA $C08D,X} equivalent),
      * then WRITE/SHIFT mode (Q6=0,Q7=1) -- and confirms it actually
@@ -194,7 +215,7 @@ class Disk2ControllerTickTest {
         // LOAD mode: Q6=1, Q7=1 -- real software's STA $C08D,X equivalent
         controller.writeIoSwitch(0xF, 0); // Q7 high
         controller.writeIoSwitch(0xD, byteToWrite); // Q6 high, and this value becomes the write-data register
-        controller.tick(8); // a handful of CPU cycles -- plenty for the LD action to fire (confirmed to need only ~2 LSS ticks)
+        controller.tick(4); // DOS's own LOAD window (the 4-cycle ORA $C08C,X) -- exactly one bit cell
 
         // Switch to actual WRITE/SHIFT mode: Q6=0, Q7=1
         controller.writeIoSwitch(0xC, 0); // Q6 low
@@ -214,17 +235,8 @@ class Disk2ControllerTickTest {
         // later concern (see the project's own TODO) -- not tested here.
         TrackBitStream track = controller.drive(0).diskImage().trackAt(0);
 
-        // The bits were written starting wherever track 0's read position
-        // happened to be left after the LOAD-mode ticks above (which
-        // never read the stream at all, since write modes skip that --
-        // see Disk2Controller.tick's own comment) -- so they start at
-        // position 0, the stream's untouched starting point.
-        track.seekTo(0);
-        StringBuilder actual = new StringBuilder();
-        for (int i = 0; i < 8; i++) {
-            actual.append(track.nextBit());
-        }
-        assertEquals("11010101", actual.toString(),
+        // See FIRST_WRITTEN_BIT for why the byte starts at position 1.
+        assertEquals("11010101", bitsAt(track, FIRST_WRITTEN_BIT, 8),
             "the byte written through the real soft switches should land as consecutive bits starting at position 0, "
             + "not skip every other position the way the double-advance bug caused");
     }
@@ -267,7 +279,7 @@ class Disk2ControllerTickTest {
     private static void writeKnownByteToTrack0(Disk2Controller controller, int byteToWrite) {
         controller.writeIoSwitch(0xF, 0); // Q7 high
         controller.writeIoSwitch(0xD, byteToWrite); // Q6 high, loads the write-data register
-        controller.tick(8);
+        controller.tick(4); // DOS's own LOAD window -- exactly one bit cell
         controller.writeIoSwitch(0xC, 0); // Q6 low -- shift-for-write mode
         controller.tick(32);
         controller.writeIoSwitch(0xE, 0); // Q7 low -- back to read mode, so a track step below behaves normally
@@ -300,12 +312,7 @@ class Disk2ControllerTickTest {
         controller.drive(0).currentTrackStream(); // actually triggers the track-change persist
 
         WozDiskImage afterStep = WozDiskImage.load(wozFile);
-        TrackBitStream afterTrack = afterStep.trackAt(0);
-        StringBuilder afterBits = new StringBuilder();
-        for (int i = 0; i < 8; i++) {
-            afterBits.append(afterTrack.nextBit());
-        }
-        assertEquals("11010101", afterBits.toString(),
+        assertEquals("11010101", bitsAt(afterStep.trackAt(0), FIRST_WRITTEN_BIT, 8),
             "moving the head away from the written track should have persisted it to the host file");
     }
 
@@ -323,12 +330,8 @@ class Disk2ControllerTickTest {
         controller.drive(0).eject();
 
         WozDiskImage reloaded = WozDiskImage.load(wozFile);
-        TrackBitStream track = reloaded.trackAt(0);
-        StringBuilder bits = new StringBuilder();
-        for (int i = 0; i < 8; i++) {
-            bits.append(track.nextBit());
-        }
-        assertEquals("11111111", bits.toString(), "ejecting should have persisted the pending write first");
+        assertEquals("11111111", bitsAt(reloaded.trackAt(0), FIRST_WRITTEN_BIT, 8),
+            "ejecting should have persisted the pending write first");
     }
 
     @Test
@@ -395,22 +398,89 @@ class Disk2ControllerTickTest {
 
         writeKnownByteToTrack0(controller, 0xD5);
 
-        TrackBitStream track = controller.drive(0).diskImage().trackAt(0);
-        track.seekTo(0);
-        StringBuilder bits = new StringBuilder();
-        for (int i = 0; i < 8; i++) {
-            bits.append(track.nextBit());
-        }
-        assertEquals("11010101", bits.toString());
+        String bits = bitsAt(controller.drive(0).diskImage().trackAt(0), FIRST_WRITTEN_BIT, 8);
+        assertEquals("11010101", bits);
 
         // And a second read must be stable now -- no longer random,
         // confirming the track actually, permanently left weak-bit mode.
-        TrackBitStream trackAgain = controller.drive(0).diskImage().trackAt(0);
-        trackAgain.seekTo(0);
-        StringBuilder bitsAgain = new StringBuilder();
-        for (int i = 0; i < 8; i++) {
-            bitsAgain.append(trackAgain.nextBit());
+        assertEquals(bits, bitsAt(controller.drive(0).diskImage().trackAt(0), FIRST_WRITTEN_BIT, 8));
+    }
+
+    /**
+     * The diagnosed INIT HELLO,D2 failure, end to end through the real
+     * soft switches: writes a sector-style byte run with DOS 3.3's own
+     * write-loop shape (STA $C08D,X loads the byte, ORA $C08C,X four
+     * cycles later returns to SHIFT-FOR-WRITE, 32 cycles per byte) and
+     * confirms the track receives every byte as exactly 8 consecutive
+     * bits. Before the fix, the disk only advanced on LSS shift actions,
+     * so the one cell per byte spent in LD was neither written nor
+     * skipped -- every byte landed as 7 bits with bit 0 lost, which is
+     * exactly what the post-write READ log showed (written 96 96 96...
+     * read back as 97 B9 E5 CB).
+     */
+    @Test
+    void consecutiveBytesWrittenWithDosLoopTimingLandAsEightBitsEach(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        controller.drive(0).insertNewBlankDisk(tempDir.resolve("blank.woz"));
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+
+        int[] bytes = {0xD5, 0xAA, 0xAD, 0x96, 0x96, 0x96, 0x96, 0xDE, 0xAA, 0xEB};
+        controller.writeIoSwitch(0xF, 0); // Q7 high
+        for (int value : bytes) {
+            controller.writeIoSwitch(0xD, value); // STA $C08D,X -- LOAD mode, byte into the write-data register
+            controller.tick(4);                   // ORA $C08C,X
+            controller.writeIoSwitch(0xC, 0);     // ...whose access drops Q6: SHIFT-FOR-WRITE
+            controller.tick(28);                  // rest of the 32-cycle byte period
         }
-        assertEquals(bits.toString(), bitsAgain.toString());
+        // Real DOS keeps writing after the last byte; give the final byte's
+        // last bit its cell (the run is offset one cell by FIRST_WRITTEN_BIT).
+        controller.tick(4);
+        controller.writeIoSwitch(0xE, 0); // Q7 low
+
+        StringBuilder expected = new StringBuilder();
+        for (int value : bytes) {
+            expected.append(String.format("%8s", Integer.toBinaryString(value)).replace(' ', '0'));
+        }
+        assertEquals(expected.toString(),
+            bitsAt(controller.drive(0).diskImage().trackAt(0), FIRST_WRITTEN_BIT, 8 * bytes.length),
+            "every byte must land as exactly 8 consecutive bits, MSB first -- none dropped at the reload");
+    }
+
+    @Test
+    void theSameImageCannotBeInBothDrivesAtOnce(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        controller.drive(0).insert(wozFile);
+
+        IOException e = assertThrows(IOException.class, () -> controller.drive(1).insert(wozFile));
+        assertTrue(e.getMessage().contains("drive 1"), "the error should say where the disk already is: " + e.getMessage());
+        assertFalse(controller.drive(1).isPresent(), "the refused drive must stay empty");
+        assertEquals(wozFile, controller.drive(0).currentImagePath().orElse(null), "the drive already holding it is untouched");
+    }
+
+    @Test
+    void theSameImageReachedByADifferentPathIsStillRefused(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        Files.createDirectory(tempDir.resolve("sub"));
+        Path roundabout = tempDir.resolve("sub").resolve("..").resolve(wozFile.getFileName());
+        Path symlink = Files.createSymbolicLink(tempDir.resolve("alias.woz"), wozFile);
+        controller.drive(1).insert(wozFile);
+
+        assertThrows(IOException.class, () -> controller.drive(0).insert(roundabout));
+        assertThrows(IOException.class, () -> controller.drive(0).insert(symlink));
+        assertFalse(controller.drive(0).isPresent());
+    }
+
+    @Test
+    void anImageEjectedFromOneDriveCanThenGoInTheOther(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        controller.drive(0).insert(wozFile);
+        controller.drive(0).eject();
+
+        controller.drive(1).insert(wozFile);
+        assertTrue(controller.drive(1).isPresent());
     }
 }

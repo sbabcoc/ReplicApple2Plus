@@ -6,7 +6,6 @@ import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -157,103 +156,126 @@ class Disk2LogicSequencerTest {
         });
     }
 
+    /** LSS ticks per bit cell -- 8, matching {@code Disk2Controller}. */
+    private static final int TICKS_PER_CELL = 8;
+
     /**
-     * Writes a real byte through the real LOAD-then-SHIFT protocol
-     * (Q6=1,Q7=1 to load, then Q6=0,Q7=1 to shift it out) and confirms
-     * {@link Disk2LogicSequencer#tick}'s return value assembles back into
-     * the exact original byte, MSB first. This is the permanent record
-     * of the investigation that found the actual write mechanism:
-     * confirmed directly by tracing this same sequence against the real
-     * ROM data and cross-checking against a2kit's independent model
-     * (itself confirmed byte-for-byte identical to this project's own
-     * ROM table across all 256 entries) before trusting it -- not
-     * assumed from the mechanism's general description alone, which
-     * turned out to describe a different (and, for this ROM table,
-     * incorrect) detail than what's actually implemented here.
+     * Drives bytes through the real write protocol with DOS 3.3's own
+     * write-loop timing -- LOAD mode (Q6=1,Q7=1) for {@code loadTicks}
+     * LSS ticks, then SHIFT-FOR-WRITE (Q6=0,Q7=1) for the rest of each
+     * 64-tick (32-CPU-cycle) byte period -- and decodes
+     * {@link Disk2LogicSequencer#writeSignal} the way real hardware does:
+     * a bit cell containing a level change is a 1, one without is a 0.
+     * Cells are counted from the tick Q7 first goes high, which here is
+     * also the tick the first byte's LOAD window opens.
      *
-     * @param byteToWrite the byte to drive through the real write sequence
+     * @param bytes     the bytes to write, in order
+     * @param loadTicks LSS ticks spent in LOAD mode at the start of each byte period
+     * @return the decoded bitstream, one character per bit cell
      */
-    private static void assertByteWritesCorrectly(int byteToWrite) {
+    private static String writeWithDosTiming(int[] bytes, int loadTicks) {
         Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
-
-        // LOAD mode: Q6=1, Q7=1
-        sequencer.setQ6(true);
         sequencer.setQ7(true);
-        sequencer.setWriteDataRegister(byteToWrite);
-        for (int i = 0; i < 16 && sequencer.latch() != byteToWrite; i++) {
+        int writeLine = sequencer.writeSignal();
+        boolean flux = false;
+        int tick = 0;
+        StringBuilder cells = new StringBuilder();
+        for (int value : bytes) {
+            sequencer.setWriteDataRegister(value);
+            for (int t = 0; t < 8 * TICKS_PER_CELL; t++) {
+                sequencer.setQ6(t < loadTicks);
+                sequencer.tick(0);
+                if (sequencer.writeSignal() != writeLine) {
+                    writeLine = sequencer.writeSignal();
+                    flux = true;
+                }
+                if (++tick % TICKS_PER_CELL == 0) {
+                    cells.append(flux ? '1' : '0');
+                    flux = false;
+                }
+            }
+        }
+        return cells.toString();
+    }
+
+    private static String bits(int value) {
+        return String.format("%8s", Integer.toBinaryString(value)).replace(' ', '0');
+    }
+
+    /**
+     * The diagnosed INIT HELLO,D2 failure, pinned at the sequencer
+     * level: under DOS's real write-loop timing (a reload once every 32
+     * CPU cycles), every byte must reach the disk as exactly 8 bits.
+     * The previous model only produced a written bit on a shift action,
+     * and the cell during which the LSS performs LD instead of a shift
+     * produced none -- so every byte went out as 7 bits with bit 0 lost
+     * (96 96 96... read back as 97 B9 E5 CB).
+     * <p>
+     * Exercised across every LOAD-window length from 3 to 10 LSS ticks.
+     * DOS's real window is one 4- or 5-cycle instruction (8 to 10 ticks,
+     * depending on which side of the soft-switch access an
+     * instruction-granularity clock charges the cycles), so this covers
+     * it either way with margin below. Outside this range the protocol
+     * itself breaks, not the model: 1-2 ticks is too short for the LD
+     * action to fire at all, and 11+ ticks spans an extra cell boundary
+     * in LOAD mode, writing bit 7 twice -- neither happens with DOS.
+     */
+    @Test
+    void everyByteReachesTheDiskAsExactlyEightBitsUnderDosWriteTiming() {
+        int[] bytes = {0xFF, 0xD5, 0xAA, 0x96, 0x96, 0x96, 0x00, 0xDE, 0xAA, 0xEB, 0xFF};
+        StringBuilder expected = new StringBuilder();
+        for (int value : bytes) {
+            expected.append(bits(value));
+        }
+        for (int loadTicks = 3; loadTicks <= 10; loadTicks++) {
+            assertEquals(expected.toString(), writeWithDosTiming(bytes, loadTicks),
+                "bytes must go out as exactly 8 bits each, MSB first (load window " + loadTicks + " ticks)");
+        }
+    }
+
+    /**
+     * Direct contradiction of the old model's "load mode never writes"
+     * rule: real hardware keeps driving the write line in BOTH Q7=1
+     * modes, so a cell spent entirely in LOAD mode with the latch's MSB
+     * set still puts a 1 on the disk.
+     */
+    @Test
+    void loadModeStillDrivesTheWriteLine() {
+        Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
+        sequencer.setWriteDataRegister(0x80);
+        sequencer.setQ6(true);
+        sequencer.setQ7(true); // LOAD mode, held throughout
+        int writeLine = sequencer.writeSignal();
+        int transitions = 0;
+        for (int t = 0; t < 10 * TICKS_PER_CELL; t++) {
             sequencer.tick(0);
-        }
-        assertEquals(byteToWrite, sequencer.latch(), "the byte should be loaded into the latch within a few ticks");
-
-        // Switch to actual WRITE/SHIFT mode: Q6=0, Q7=1
-        sequencer.setQ6(false);
-
-        StringBuilder writtenBits = new StringBuilder();
-        for (int i = 0; i < 128 && writtenBits.length() < 8; i++) {
-            int bit = sequencer.tick(0);
-            if (bit != -1) {
-                writtenBits.append(bit);
+            if (sequencer.writeSignal() != writeLine) {
+                writeLine = sequencer.writeSignal();
+                transitions++;
             }
         }
-
-        String expected = String.format("%8s", Integer.toBinaryString(byteToWrite)).replace(' ', '0');
-        assertEquals(expected, writtenBits.toString(),
-            "the bits reported as written should reassemble into the original byte, MSB first");
+        assertTrue(transitions >= 9,
+            "a latch with its MSB set should produce a transition in (nearly) every cell even while held in LOAD mode, saw "
+            + transitions + " in 10 cells");
     }
 
     @Test
-    void writingKnownByteD5ThroughTheRealLoadThenShiftProtocolProducesTheCorrectBits() {
-        assertByteWritesCorrectly(0xD5); // 11010101 -- the famous address-prologue byte
-    }
-
-    @Test
-    void writingAllOnesByteProducesAllOnes() {
-        assertByteWritesCorrectly(0xFF);
-    }
-
-    @Test
-    void writingAllZerosByteStillProducesEightBitsOfOutput() {
-        // Zero is the hardest case to get right by accident: a bug that
-        // silently never reports a written bit at all would also "pass"
-        // a test that only checked the bit VALUES, not that exactly 8
-        // bits were reported as written in the first place.
-        assertByteWritesCorrectly(0x00);
-    }
-
-    @Test
-    void writtenBitIsMinusOneDuringReadModeEvenWhenAShiftOccurs() {
-        // SL0/SL1 actions also occur during normal reading -- that's how
-        // incoming bits get assembled into the latch. Confirms tick()
-        // doesn't report a "written" bit during read mode just because
-        // the same shift actions happen to fire there too.
+    void anAllZerosLatchNeverMovesTheWriteLine() {
+        // Zero is the case a broken model can "pass" by accident -- e.g.
+        // one that never writes anything at all. Paired with the test
+        // above, this confirms transitions really track the latch's MSB.
         Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
+        sequencer.setWriteDataRegister(0x00);
+        sequencer.setQ7(true);
+        sequencer.setQ6(true);
+        for (int t = 0; t < 4; t++) {
+            sequencer.tick(0); // let the LD action fire
+        }
         sequencer.setQ6(false);
-        sequencer.setQ7(false); // normal read mode
-
-        boolean sawAWrittenBitDuringReadMode = false;
-        for (int i = 0; i < 200; i++) {
-            if (sequencer.tick(1) != -1) {
-                sawAWrittenBitDuringReadMode = true;
-            }
-        }
-        assertFalse(sawAWrittenBitDuringReadMode, "read mode should never report a written bit, even though it shifts the latch too");
-    }
-
-    @Test
-    void writtenBitIsMinusOneDuringLoadModeAndDuringWriteProtectSenseMode() {
-        Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
-        sequencer.setWriteDataRegister(0xAA);
-
-        sequencer.setQ6(true);
-        sequencer.setQ7(true); // LOAD mode
-        for (int i = 0; i < 50; i++) {
-            assertEquals(-1, sequencer.tick(0), "LOAD mode should never report a written bit");
-        }
-
-        sequencer.setQ6(true);
-        sequencer.setQ7(false); // SENSE mode
-        for (int i = 0; i < 50; i++) {
-            assertEquals(-1, sequencer.tick(0), "SENSE mode should never report a written bit");
+        int writeLine = sequencer.writeSignal();
+        for (int t = 0; t < 10 * TICKS_PER_CELL; t++) {
+            sequencer.tick(0);
+            assertEquals(writeLine, sequencer.writeSignal(), "shifting out zeros must never toggle the write line");
         }
     }
 }

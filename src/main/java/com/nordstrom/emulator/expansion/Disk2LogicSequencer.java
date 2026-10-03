@@ -90,25 +90,32 @@ final class Disk2LogicSequencer {
     }
 
     /**
-     * Advances the sequencer by one LSS cycle.
+     * The sequencer's write signal: bit 3 of the current state (the same
+     * bit that feeds back into ROM address bit 7). On real hardware this
+     * state bit drives the drive's write line directly while Q7 is high
+     * -- every change in its level is one flux transition on the disk,
+     * i.e. one "1" bit in a WOZ bitstream, and a bit cell with no change
+     * is a "0". This holds in BOTH Q7=1 modes (load and shift-for-write),
+     * which is what lets the bit cell during which software reloads the
+     * latch (STA $C08D,X ... ORA $C08C,X) still put a real bit on the
+     * disk. Confirmed against MAME's wozfdc.cpp, which models the write
+     * line exactly this way (toggling a flux change whenever this bit
+     * differs from the current write-line level, gated only by write
+     * mode, never by which latch action fired).
      * <p>
-     * Writing, confirmed directly (not assumed) by tracing a real
-     * write-byte sequence through this exact ROM table and cross-checking
-     * the result against a2kit's independent, already-trusted write-mode
-     * model -- itself confirmed byte-for-byte identical to this table
-     * across all 256 entries before trusting anything derived from it:
-     * software first loads the full byte into the latch via the LD
-     * action (Q6=1,Q7=1), then switches to Q6=0,Q7=1 ("shift for
-     * write"), where the only shift action this table ever uses is SL0
-     * (0x9) -- the real byte's bits were already loaded, so the 0s
-     * shifted in from the right are irrelevant filler, not the actual
-     * data. The bit that reaches the disk head at each shift is the
-     * latch's own high bit, sampled the instant <em>before</em> that
-     * shift -- confirmed to land reliably at the last of each 8-tick
-     * bit-cell (ticks 7, 15, 23, ... counting from when shift-for-write
-     * mode begins), the same cell duration already used for reading,
-     * by writing 0xD5 through this exact mechanism and getting back
-     * exactly "11010101".
+     * This class deliberately doesn't decide what a level change means
+     * or when the disk advances -- that's {@link Disk2Controller#tick}'s
+     * concern, the same "what happens per tick" vs "how often" split
+     * described in this class's own Javadoc.
+     *
+     * @return the current write-line level, 0 or 1
+     */
+    int writeSignal() {
+        return (state >> 3) & 1;
+    }
+
+    /**
+     * Advances the sequencer by one LSS cycle.
      *
      * @param pulseBit the current bit from the disk bitstream (0 or 1) --
      *                 the caller's responsibility to supply, including
@@ -116,13 +123,8 @@ final class Disk2LogicSequencer {
      *                 table itself while in either write mode, but still
      *                 required so the address computation stays
      *                 well-defined
-     * @return the bit written to the disk this tick (0 or 1), or -1 if
-     *         no bit was written this tick (every tick outside Q6=0,Q7=1
-     *         "shift for write" mode, and most ticks even within it --
-     *         only the one tick per bit-cell where an actual shift
-     *         occurs produces a written bit)
      */
-    int tick(int pulseBit) {
+    void tick(int pulseBit) {
         int s0 = state & 1;
         int s1 = (state >> 1) & 1;
         int s2 = (state >> 2) & 1;
@@ -139,11 +141,6 @@ final class Disk2LogicSequencer {
         int nextState = (output >> 4) & 0xF;
         int action = output & 0xF;
 
-        int writtenBit = -1;
-        if (!q6 && q7 && (action == 0x9 || action == 0xD)) {
-            writtenBit = highBit; // the latch's high bit BEFORE this shift is what's shifted out
-        }
-
         switch (action) {
             case 0x0 -> latch = 0;
             case 0x8 -> { /* NOP: latch unchanged */ }
@@ -158,6 +155,5 @@ final class Disk2LogicSequencer {
         }
 
         state = nextState;
-        return writtenBit;
     }
 }

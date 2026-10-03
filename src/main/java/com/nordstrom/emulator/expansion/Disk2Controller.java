@@ -105,9 +105,19 @@ public final class Disk2Controller implements SlotCard {
     private boolean q7;
     private final Disk2LogicSequencer logicSequencer = new Disk2LogicSequencer();
     private int lssPhaseCounter; // 0 to LSS_TICKS_PER_BIT_CELL-1, cycling
+    /** Current level of the drive's write line -- see {@link Disk2LogicSequencer#writeSignal}. */
+    private boolean writeLineActive;
+    /** Whether the write line changed level during the bit cell now in progress (i.e. that cell gets a 1). */
+    private boolean fluxInCurrentCell;
 
     private final DiskBootRom bootRom = new DiskBootRom();
-    private final Drive[] drives = { new Drive(), new Drive() };
+    private final Drive[] drives = { new Drive(1), new Drive(2) };
+    {
+        // Each drive knows its sibling so insert() can refuse an image the
+        // other drive already holds -- see Drive#insert.
+        drives[0].sibling = drives[1];
+        drives[1].sibling = drives[0];
+    }
 
     @Override
     public String getShortName() {
@@ -231,43 +241,47 @@ public final class Disk2Controller implements SlotCard {
         int totalTicks = cycles * LSS_TICKS_PER_CPU_CYCLE;
         for (int i = 0; i < totalTicks; i++) {
             int pulseBit = 0;
-            // Confirmed directly as a real bug caught before delivery, not
-            // a theoretical concern: reading the pulse bit here
-            // unconditionally, regardless of mode, would advance the
-            // stream's position a SECOND time whenever a write also
-            // occurs this same tick (see the write-handling block below,
-            // which already advances position via writeBit/nextBit) --
-            // landing every write at the wrong bit position, skipping one
-            // bit for every one actually written. The ROM table's own
-            // write-mode entries document "pulse does not affect" their
-            // output for both Q7=1 modes (load and shift-for-write), so
-            // reading it from the stream at all while writing is both
-            // unnecessary and actively harmful here -- skipped entirely
-            // in that case, with 0 passed to the address computation,
-            // which the table ignores regardless of its value in those
-            // modes anyway.
-            if (lssPhaseCounter == 0 && stream != null && !q7) {
-                pulseBit = stream.nextBit();
+            if (lssPhaseCounter == 0) {
+                // Bit-cell boundary: the disk advances exactly one bit
+                // cell here, in every mode -- it keeps spinning under the
+                // head regardless of what the controller is doing. In
+                // read mode the cell's bit feeds the LSS; in either Q7=1
+                // mode the cell just ended receives a 1 if the write line
+                // changed level during it, else a 0 (see
+                // Disk2LogicSequencer#writeSignal). Diagnosed failure this
+                // fixes (INIT HELLO,D2 I/O ERROR): advancing only when a
+                // shift action fired skipped the one cell per byte where
+                // the LSS performs LD instead of a shift, so every byte
+                // reached the track as 7 bits (bit 0 lost) -- confirmed
+                // bit-for-bit against the post-write READ log, where
+                // written 96 96 96... read back as 97 B9 E5 CB.
+                if (stream != null) {
+                    if (!q7) {
+                        pulseBit = stream.nextBit();
+                    } else if (writeProtected) {
+                        // Real hardware's write-protect notch sensor lives in
+                        // the drive, not the controller card: the LSS still
+                        // drives its write line, the drive just ignores it.
+                        // The head still moves over the disk as usual, so
+                        // position still advances.
+                        stream.nextBit();
+                    } else {
+                        stream.writeBit(fluxInCurrentCell ? 1 : 0);
+                        image.markDirty(); // exactly where a real write happens -- see DiskImage.markDirty's own Javadoc
+                    }
+                }
+                fluxInCurrentCell = false;
             }
-            int writtenBit = logicSequencer.tick(pulseBit);
-            if (writtenBit != -1 && stream != null) {
-                // Real hardware's write-protect notch sensor lives in the
-                // drive, not the controller card -- confirmed directly:
-                // the ROM table's shift actions (what produces writtenBit)
-                // never check write-protect at all, only the separate
-                // SENSE action does. So enforcement belongs here, at the
-                // drive/stream level, not inside the LSS itself. A
-                // write-protected disk still advances position the same
-                // as real hardware (the head keeps moving under a
-                // protected disk exactly as it does under an unprotected
-                // one) -- nextBit() does that advancing without
-                // modifying anything, reused here rather than duplicating
-                // the same position-wrap logic a second way.
-                if (writeProtected) {
-                    stream.nextBit();
-                } else {
-                    stream.writeBit(writtenBit);
-                    image.markDirty(); // exactly where a real write happens -- see DiskImage.markDirty's own Javadoc
+            logicSequencer.tick(pulseBit);
+            if (q7) {
+                // Mirrors MAME's wozfdc: while in write mode, any
+                // difference between the sequencer's write signal and the
+                // write line's current level flips the line -- one flux
+                // transition. Outside write mode the line simply holds.
+                boolean writeSignal = logicSequencer.writeSignal() != 0;
+                if (writeSignal != writeLineActive) {
+                    writeLineActive = writeSignal;
+                    fluxInCurrentCell = true;
                 }
             }
             lssPhaseCounter = (lssPhaseCounter + 1) % LSS_TICKS_PER_BIT_CELL;
@@ -489,11 +503,20 @@ public final class Disk2Controller implements SlotCard {
         /** Real WOZ range: 0-159 quarter-tracks (up to 40 tracks). Clamped, matching the real head hitting a mechanical stop. */
         private static final int MAX_QUARTER_TRACK = 159;
 
+        /** 1 or 2, as software and the user see it -- for error messages. */
+        private final int number;
+        /** The controller's other drive -- set once, right after construction. */
+        private Drive sibling;
         private Path currentImage;
         private DiskImage diskImage;
+
         private int quarterTrack;
         private TrackBitStream currentTrackStream;
         private int streamedQuarterTrack = -1; // sentinel: no stream cached yet
+
+        Drive(int number) {
+            this.number = number;
+        }
 
         /**
          * Moves the head by one quarter-track, clamped to the real
@@ -567,6 +590,17 @@ public final class Disk2Controller implements SlotCard {
             if (!Files.exists(imagePath)) {
                 throw new IOException("Disk image not found: " + imagePath);
             }
+            // A physical diskette can only be in one drive at a time. Beyond
+            // realism, two drives holding the same file would each keep
+            // their own in-memory DiskImage and persist() over each other,
+            // silently losing whichever drive's writes landed first.
+            // Files.isSameFile catches the same file reached by a different
+            // path (symlinks, hard links, "..", case on a case-insensitive
+            // volume), not just identical path strings.
+            if (sibling != null && sibling.currentImage != null && isSameFile(imagePath, sibling.currentImage)) {
+                throw new IOException("That disk is already in drive " + sibling.number
+                    + " -- eject it there first: " + imagePath);
+            }
             String name = imagePath.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
             DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
                 ? DskDiskImage.load(imagePath)
@@ -586,6 +620,20 @@ public final class Disk2Controller implements SlotCard {
             // real in-memory virgin tracking intact, is the whole point.
             WozDiskImage image = WozDiskImage.createBlank(path);
             insertLoadedImage(image, path);
+        }
+
+        /**
+         * {@link Files#isSameFile}, treating a sibling image that can no
+         * longer be found on the host (deleted or moved since insertion)
+         * as a different file rather than an error -- the new image itself
+         * was already confirmed to exist.
+         */
+        private static boolean isSameFile(Path a, Path b) throws IOException {
+            try {
+                return Files.isSameFile(a, b);
+            } catch (java.nio.file.NoSuchFileException e) {
+                return false;
+            }
         }
 
         /** Shared by {@link #insert} and {@link #insertNewBlankDisk} once each has its own, already-built {@link DiskImage}. */
