@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -15,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Locks in {@link DskDiskImage}'s real 6-and-2 GCR encoding, its
@@ -256,5 +258,78 @@ class DskDiskImageTest {
             throw new AssertionError("checksum verification failed: " + checksum);
         }
         return result;
+    }
+
+    /**
+     * True if this process can write to a file even after its own
+     * write permission bit is cleared -- see the identical helper in
+     * {@code WozDiskImageTest} for the full explanation (confirmed
+     * directly: true for root, which this sandbox runs as).
+     */
+    private static boolean currentProcessBypassesFilePermissions(Path tempDir) throws IOException {
+        Path probe = tempDir.resolve("permission-probe.tmp");
+        Files.writeString(probe, "x");
+        probe.toFile().setWritable(false);
+        boolean bypassed;
+        try {
+            Files.writeString(probe, "y");
+            bypassed = true;
+        } catch (IOException e) {
+            bypassed = false;
+        }
+        probe.toFile().setWritable(true);
+        Files.deleteIfExists(probe);
+        return bypassed;
+    }
+
+    @Test
+    void isWriteProtectedReflectsTheHostFilesOwnPermission(@TempDir Path tempDir) throws IOException {
+        assumeFalse(currentProcessBypassesFilePermissions(tempDir),
+            "this process bypasses file permissions (likely running as root) -- host-file-based write-protect can't be meaningfully tested here");
+
+        Path dsk = buildSyntheticDsk(tempDir, 0, 0, new byte[256]);
+        DskDiskImage image = DskDiskImage.load(dsk);
+        assertFalse(image.isWriteProtected(), "a freshly-created temp file should be writable by default");
+
+        dsk.toFile().setWritable(false);
+        assertTrue(image.isWriteProtected(), "read-only on the host file should be reported as write-protected");
+
+        dsk.toFile().setWritable(true);
+        assertFalse(image.isWriteProtected(), "restoring host write access should clear write-protect again");
+    }
+
+    /**
+     * True if {@code path}'s filesystem supports POSIX permission bits
+     * at all -- false on Windows. See the identical helper in
+     * {@code WozDiskImageTest} for the full explanation: write-protect
+     * itself works cross-platform via {@link Files#isWritable}/
+     * {@code File.setWritable}; only this specific, more granular check
+     * of the raw permission bit needs this guard.
+     */
+    private static boolean isPosixFilesystem(Path path) throws IOException {
+        return Files.getFileStore(path).supportsFileAttributeView(java.nio.file.attribute.PosixFileAttributeView.class);
+    }
+
+    @Test
+    void setWriteProtectedChangesTheHostFilesPermissionBit(@TempDir Path tempDir) throws IOException {
+        // Checks the raw POSIX permission bit directly, which is
+        // root-independent, rather than Files.isWritable/isWriteProtected,
+        // which reflect *effective* access and are true for root
+        // regardless of the bit (confirmed directly in this sandbox).
+        Path dsk = buildSyntheticDsk(tempDir, 0, 0, new byte[256]);
+        DskDiskImage image = DskDiskImage.load(dsk);
+
+        image.setWriteProtected(true);
+        if (isPosixFilesystem(dsk)) {
+            assertFalse(Files.getPosixFilePermissions(dsk).contains(PosixFilePermission.OWNER_WRITE),
+                "the owner-write permission bit should be cleared");
+        }
+
+        image.setWriteProtected(false);
+        if (isPosixFilesystem(dsk)) {
+            assertTrue(Files.getPosixFilePermissions(dsk).contains(PosixFilePermission.OWNER_WRITE),
+                "the owner-write permission bit should be restored");
+        }
+        assertFalse(image.isWriteProtected(), "restoring write access should clear write-protect even under a privileged process");
     }
 }

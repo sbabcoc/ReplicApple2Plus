@@ -42,6 +42,33 @@ public final class TrackBitStream {
     }
 
     /**
+     * Overwrites the bit at the current position and advances, wrapping
+     * to 0 after the last bit -- the write-side mirror of {@link #nextBit},
+     * mutating the same backing array in place rather than returning a
+     * new one. For a {@link WozDiskImage} track, that backing array is
+     * the same one held persistently inside the image for the life of
+     * the session (confirmed directly: {@code trackAt} wraps a fresh
+     * {@link TrackBitStream} around it on every call, but the array
+     * itself is never copied), so a write here is visible to every
+     * later read of this track, including after the head moves away
+     * and back -- not just within this one {@code TrackBitStream}
+     * instance's own lifetime.
+     *
+     * @param bit 0 or 1 -- the bit to write at the current position
+     */
+    public void writeBit(int bit) {
+        int byteIndex = position / 8;
+        int bitIndexInByte = 7 - (position % 8);
+        int mask = 1 << bitIndexInByte;
+        if (bit != 0) {
+            data[byteIndex] = (byte) (data[byteIndex] | mask);
+        } else {
+            data[byteIndex] = (byte) (data[byteIndex] & ~mask);
+        }
+        position = (position + 1) % bitCount;
+    }
+
+    /**
      * @return the total number of bits in this track
      */
     public int bitCount() {

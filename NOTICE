@@ -74,13 +74,41 @@ independently reimplemented in original Java.
   - The Apple II Documentation Project. https://www.apple2.org.za/
   - applelogic.org -- Apple II hardware reverse-engineering and preserved
     ROM/PROM images. http://www.applelogic.org/
+  - Jim Sather, "Understanding the Apple II" -- hardware reference for
+    6502 bus timing, the Disk II controller's logic state sequencer, and
+    related soft-switch behavior. No text from the book is reproduced;
+    its documented timings, state tables, and quirks were independently
+    reimplemented in original Java.
+  - Virtual ][ (Gerard Putter) -- a commercial, closed-source emulator
+    used purely as a black-box behavioral reference: specific timing and
+    soft-switch quirks were confirmed by breakpoint-based tracing of its
+    own running behavior, then independently reimplemented here. No code,
+    binaries, or disassembly from Virtual ][ are included or were
+    examined. https://www.virtualii.com/
+  - fileformats.archiveteam.org -- the DSK/DO/PO raw sector-image format
+    entry, used to confirm that format's lack of any header or metadata
+    capacity. https://fileformats.archiveteam.org/
+  - Steve Chamberlin ("bigmessowires.com"), "The Amazing Disk II
+    Controller Card" -- general-audience explanation of the Disk II
+    controller's hardware design, consulted while researching how
+    writing to disk works at the hardware level.
+    https://www.bigmessowires.com/2021/11/12/the-amazing-disk-ii-controller-card/
+  - mikedaley/web-a2e wiki, "Disk System Internals" -- another project's
+    own documentation of its Disk II controller model, consulted
+    alongside the sources above for the same research.
+    https://github.com/mikedaley/web-a2e/wiki/Disk-System-Internals
+  - MAME's own documentation of its soft-reset (F3) versus hard-reset
+    (Shift+F3) distinction, consulted when designing this project's own
+    Reset/Reboot toolbar controls. No MAME code is included; the
+    documented behavioral distinction was independently reimplemented.
+    https://docs.mamedev.org/
 
 ------------------------------------------------------------------------
 MIT License
 ------------------------------------------------------------------------
 
-src/main/java/com/nordstrom/emulator/disk/DiskBootRom.java
-src/main/java/com/nordstrom/emulator/disk/DiskLogicSequencerRom.java
+src/main/java/com/nordstrom/emulator/expansion/DiskBootRom.java
+src/main/java/com/nordstrom/emulator/expansion/DiskLogicSequencerRom.java
 
 These files embed PROM data transcribed from reference byte arrays in
 Joao Ricardo Pagotto's Apple-Disk-II-PROM-Verify project (MIT licensed):
@@ -90,3 +118,37 @@ Joao Ricardo Pagotto's Apple-Disk-II-PROM-Verify project (MIT licensed):
 The transcribed data was independently cross-checked against MAME's
 published checksums for the same PROMs before being trusted; see the
 class-level Javadoc in each file for details.
+
+src/main/java/com/nordstrom/emulator/expansion/DskDiskImage.java
+src/main/java/com/nordstrom/emulator/expansion/DiskLogicSequencerRom.java
+src/main/java/com/nordstrom/emulator/expansion/Disk2LogicSequencer.java
+
+dfgordon/a2kit (MIT licensed) was used in three ways across these files:
+
+    https://github.com/dfgordon/a2kit
+
+  1. DskDiskImage's 64-entry 6-and-2 GCR translate table (TRANSLATE_62)
+     is ported directly from a2kit's own FWD_62 table -- itself, per
+     a2kit's own documentation, a port of the original (C++) CiderPress,
+     which is BSD licensed. CiderPress's own source was never directly
+     consulted or examined by this project; a2kit's MIT-licensed port of
+     it is the only source actually used here, and is what this project
+     is attributing.
+  2. DiskLogicSequencerRom's address-bit wiring -- previously documented
+     incorrectly in this project, per that file's own Javadoc -- was
+     corrected by an exhaustive search for the one mapping, among
+     roughly 10.3 million candidates, that reproduces a2kit's own,
+     independently-sourced LSS state machine (woz_state_machine.rs)
+     exactly. No code from that file is included; its documented ROM
+     table was used only as a correctness target.
+  3. Disk2LogicSequencer's write-mode behavior (which bit reaches the
+     disk head, and when) was verified by cross-checking this project's
+     own ROM table against a2kit's complete, independently-sourced table
+     for every one of its 256 entries (a programmatic, exhaustive
+     comparison, not a sampling) before trusting any conclusion drawn
+     from it, then confirming the resulting mechanism by simulation
+     against a known byte pattern. No code from a2kit is included here;
+     its table was used as a verification reference, the same as in (2).
+
+See each file's own class-level Javadoc for the specific details of how
+it was used.

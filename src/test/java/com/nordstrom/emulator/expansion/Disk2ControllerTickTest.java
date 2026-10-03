@@ -156,4 +156,107 @@ class Disk2ControllerTickTest {
             "a non-write-protected disk's sense mode should not be permanently stuck at 0xFF "
             + "the way a write-protected one correctly is");
     }
+
+    /**
+     * Drives a real byte through the real soft switches end to end --
+     * LOAD mode (Q6=1,Q7=1, the real {@code STA $C08D,X} equivalent),
+     * then WRITE/SHIFT mode (Q6=0,Q7=1) -- and confirms it actually
+     * lands in the track's real bit data, read back via a fresh
+     * {@link TrackBitStream} positioned at the same spot.
+     * <p>
+     * This caught a real bug before delivery, not a theoretical one:
+     * {@link Disk2Controller#tick} was unconditionally reading a pulse
+     * bit from the stream every 8th tick regardless of mode, which
+     * advanced the stream's position a second time on top of the
+     * write's own advance whenever a bit was also written that same
+     * tick -- silently writing every bit to the wrong (every-other)
+     * position instead of consecutive ones. A test this level of
+     * integration is exactly what catching that required: neither
+     * {@code Disk2LogicSequencerTest} (which only checks the bits
+     * {@code tick()} reports as written, never where they land in a
+     * real stream) nor a unit test of {@code TrackBitStream.writeBit}
+     * alone (which has no notion of "every 8 ticks" at all) could have
+     * found it on its own.
+     */
+    @Test
+    void writingARealByteThroughTheRealSoftSwitchesLandsInTheTrackData(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false); // NOT write-protected
+        controller.drive(0).insert(wozFile);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+
+        int byteToWrite = 0xD5; // 11010101
+
+        // LOAD mode: Q6=1, Q7=1 -- real software's STA $C08D,X equivalent
+        controller.writeIoSwitch(0xF, 0); // Q7 high
+        controller.writeIoSwitch(0xD, byteToWrite); // Q6 high, and this value becomes the write-data register
+        controller.tick(8); // a handful of CPU cycles -- plenty for the LD action to fire (confirmed to need only ~2 LSS ticks)
+
+        // Switch to actual WRITE/SHIFT mode: Q6=0, Q7=1
+        controller.writeIoSwitch(0xC, 0); // Q6 low
+
+        // 32 CPU cycles = 64 LSS ticks = 8 bit-cells = one full byte's worth of shift-out time.
+        controller.tick(32);
+
+        // Re-reads via a FRESH TrackBitStream from the SAME, LIVE
+        // WozDiskImage instance the write actually went through
+        // (controller.drive(0).diskImage(), not a separate load() of the
+        // file) -- confirms the write landed in that image's own
+        // persistent backing array (see WozDiskImage.trackAt's own
+        // Javadoc on why a fresh wrapper object still sees it), not just
+        // something visible through the one TrackBitStream instance
+        // Disk2Controller happened to be holding onto during the write
+        // itself. Persisting this back to the host FILE is a separate,
+        // later concern (see the project's own TODO) -- not tested here.
+        TrackBitStream track = controller.drive(0).diskImage().trackAt(0);
+
+        // The bits were written starting wherever track 0's read position
+        // happened to be left after the LOAD-mode ticks above (which
+        // never read the stream at all, since write modes skip that --
+        // see Disk2Controller.tick's own comment) -- so they start at
+        // position 0, the stream's untouched starting point.
+        track.seekTo(0);
+        StringBuilder actual = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            actual.append(track.nextBit());
+        }
+        assertEquals("11010101", actual.toString(),
+            "the byte written through the real soft switches should land as consecutive bits starting at position 0, "
+            + "not skip every other position the way the double-advance bug caused");
+    }
+
+    @Test
+    void writingToAWriteProtectedDiskDoesNotActuallyChangeTheTrackData(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, true); // WRITE-PROTECTED
+        controller.drive(0).insert(wozFile);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+
+        // Capture the track's original bits before attempting to write.
+        TrackBitStream before = controller.drive(0).diskImage().trackAt(0);
+        before.seekTo(0);
+        StringBuilder original = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            original.append(before.nextBit());
+        }
+
+        int byteToWrite = (original.charAt(0) == '1') ? 0x00 : 0xFF; // deliberately different from whatever is already there
+        controller.writeIoSwitch(0xF, 0);
+        controller.writeIoSwitch(0xD, byteToWrite);
+        controller.tick(8);
+        controller.writeIoSwitch(0xC, 0);
+        controller.tick(32);
+
+        TrackBitStream after = controller.drive(0).diskImage().trackAt(0);
+        after.seekTo(0);
+        StringBuilder actual = new StringBuilder();
+        for (int i = 0; i < 8; i++) {
+            actual.append(after.nextBit());
+        }
+        assertEquals(original.toString(), actual.toString(),
+            "a write-protected disk's track data must be completely unchanged by a write attempt, "
+            + "matching how a real write-protect notch physically prevents the write at the drive");
+    }
 }

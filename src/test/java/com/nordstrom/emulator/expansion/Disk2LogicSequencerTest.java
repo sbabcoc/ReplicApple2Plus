@@ -6,6 +6,7 @@ import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -154,5 +155,105 @@ class Disk2LogicSequencerTest {
                 }
             }
         });
+    }
+
+    /**
+     * Writes a real byte through the real LOAD-then-SHIFT protocol
+     * (Q6=1,Q7=1 to load, then Q6=0,Q7=1 to shift it out) and confirms
+     * {@link Disk2LogicSequencer#tick}'s return value assembles back into
+     * the exact original byte, MSB first. This is the permanent record
+     * of the investigation that found the actual write mechanism:
+     * confirmed directly by tracing this same sequence against the real
+     * ROM data and cross-checking against a2kit's independent model
+     * (itself confirmed byte-for-byte identical to this project's own
+     * ROM table across all 256 entries) before trusting it -- not
+     * assumed from the mechanism's general description alone, which
+     * turned out to describe a different (and, for this ROM table,
+     * incorrect) detail than what's actually implemented here.
+     *
+     * @param byteToWrite the byte to drive through the real write sequence
+     */
+    private static void assertByteWritesCorrectly(int byteToWrite) {
+        Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
+
+        // LOAD mode: Q6=1, Q7=1
+        sequencer.setQ6(true);
+        sequencer.setQ7(true);
+        sequencer.setWriteDataRegister(byteToWrite);
+        for (int i = 0; i < 16 && sequencer.latch() != byteToWrite; i++) {
+            sequencer.tick(0);
+        }
+        assertEquals(byteToWrite, sequencer.latch(), "the byte should be loaded into the latch within a few ticks");
+
+        // Switch to actual WRITE/SHIFT mode: Q6=0, Q7=1
+        sequencer.setQ6(false);
+
+        StringBuilder writtenBits = new StringBuilder();
+        for (int i = 0; i < 128 && writtenBits.length() < 8; i++) {
+            int bit = sequencer.tick(0);
+            if (bit != -1) {
+                writtenBits.append(bit);
+            }
+        }
+
+        String expected = String.format("%8s", Integer.toBinaryString(byteToWrite)).replace(' ', '0');
+        assertEquals(expected, writtenBits.toString(),
+            "the bits reported as written should reassemble into the original byte, MSB first");
+    }
+
+    @Test
+    void writingKnownByteD5ThroughTheRealLoadThenShiftProtocolProducesTheCorrectBits() {
+        assertByteWritesCorrectly(0xD5); // 11010101 -- the famous address-prologue byte
+    }
+
+    @Test
+    void writingAllOnesByteProducesAllOnes() {
+        assertByteWritesCorrectly(0xFF);
+    }
+
+    @Test
+    void writingAllZerosByteStillProducesEightBitsOfOutput() {
+        // Zero is the hardest case to get right by accident: a bug that
+        // silently never reports a written bit at all would also "pass"
+        // a test that only checked the bit VALUES, not that exactly 8
+        // bits were reported as written in the first place.
+        assertByteWritesCorrectly(0x00);
+    }
+
+    @Test
+    void writtenBitIsMinusOneDuringReadModeEvenWhenAShiftOccurs() {
+        // SL0/SL1 actions also occur during normal reading -- that's how
+        // incoming bits get assembled into the latch. Confirms tick()
+        // doesn't report a "written" bit during read mode just because
+        // the same shift actions happen to fire there too.
+        Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
+        sequencer.setQ6(false);
+        sequencer.setQ7(false); // normal read mode
+
+        boolean sawAWrittenBitDuringReadMode = false;
+        for (int i = 0; i < 200; i++) {
+            if (sequencer.tick(1) != -1) {
+                sawAWrittenBitDuringReadMode = true;
+            }
+        }
+        assertFalse(sawAWrittenBitDuringReadMode, "read mode should never report a written bit, even though it shifts the latch too");
+    }
+
+    @Test
+    void writtenBitIsMinusOneDuringLoadModeAndDuringWriteProtectSenseMode() {
+        Disk2LogicSequencer sequencer = new Disk2LogicSequencer();
+        sequencer.setWriteDataRegister(0xAA);
+
+        sequencer.setQ6(true);
+        sequencer.setQ7(true); // LOAD mode
+        for (int i = 0; i < 50; i++) {
+            assertEquals(-1, sequencer.tick(0), "LOAD mode should never report a written bit");
+        }
+
+        sequencer.setQ6(true);
+        sequencer.setQ7(false); // SENSE mode
+        for (int i = 0; i < 50; i++) {
+            assertEquals(-1, sequencer.tick(0), "SENSE mode should never report a written bit");
+        }
     }
 }

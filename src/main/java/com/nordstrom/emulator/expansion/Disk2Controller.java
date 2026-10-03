@@ -225,15 +225,50 @@ public final class Disk2Controller implements SlotCard {
         Drive drive = drives[selectedDrive];
         TrackBitStream stream = drive.currentTrackStream();
         DiskImage image = drive.diskImage();
-        logicSequencer.setWriteProtected(image != null && image.isWriteProtected());
+        boolean writeProtected = image != null && image.isWriteProtected();
+        logicSequencer.setWriteProtected(writeProtected);
 
         int totalTicks = cycles * LSS_TICKS_PER_CPU_CYCLE;
         for (int i = 0; i < totalTicks; i++) {
             int pulseBit = 0;
-            if (lssPhaseCounter == 0 && stream != null) {
+            // Confirmed directly as a real bug caught before delivery, not
+            // a theoretical concern: reading the pulse bit here
+            // unconditionally, regardless of mode, would advance the
+            // stream's position a SECOND time whenever a write also
+            // occurs this same tick (see the write-handling block below,
+            // which already advances position via writeBit/nextBit) --
+            // landing every write at the wrong bit position, skipping one
+            // bit for every one actually written. The ROM table's own
+            // write-mode entries document "pulse does not affect" their
+            // output for both Q7=1 modes (load and shift-for-write), so
+            // reading it from the stream at all while writing is both
+            // unnecessary and actively harmful here -- skipped entirely
+            // in that case, with 0 passed to the address computation,
+            // which the table ignores regardless of its value in those
+            // modes anyway.
+            if (lssPhaseCounter == 0 && stream != null && !q7) {
                 pulseBit = stream.nextBit();
             }
-            logicSequencer.tick(pulseBit);
+            int writtenBit = logicSequencer.tick(pulseBit);
+            if (writtenBit != -1 && stream != null) {
+                // Real hardware's write-protect notch sensor lives in the
+                // drive, not the controller card -- confirmed directly:
+                // the ROM table's shift actions (what produces writtenBit)
+                // never check write-protect at all, only the separate
+                // SENSE action does. So enforcement belongs here, at the
+                // drive/stream level, not inside the LSS itself. A
+                // write-protected disk still advances position the same
+                // as real hardware (the head keeps moving under a
+                // protected disk exactly as it does under an unprotected
+                // one) -- nextBit() does that advancing without
+                // modifying anything, reused here rather than duplicating
+                // the same position-wrap logic a second way.
+                if (writeProtected) {
+                    stream.nextBit();
+                } else {
+                    stream.writeBit(writtenBit);
+                }
+            }
             lssPhaseCounter = (lssPhaseCounter + 1) % LSS_TICKS_PER_BIT_CELL;
         }
     }
@@ -524,6 +559,19 @@ public final class Disk2Controller implements SlotCard {
         @Override
         public Optional<Path> currentImagePath() {
             return Optional.ofNullable(currentImage);
+        }
+
+        @Override
+        public boolean isWriteProtected() {
+            return diskImage != null && diskImage.isWriteProtected();
+        }
+
+        @Override
+        public void setWriteProtected(boolean protect) throws IOException {
+            if (diskImage == null) {
+                throw new IllegalStateException("Cannot set write-protect state: no disk is loaded in this drive");
+            }
+            diskImage.setWriteProtected(protect);
         }
     }
 }
