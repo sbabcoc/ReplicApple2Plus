@@ -483,4 +483,38 @@ class Disk2ControllerTickTest {
         controller.drive(1).insert(wozFile);
         assertTrue(controller.drive(1).isPresent());
     }
+
+    /** Software's write-protect test, as DOS's RWTS does it: Q6 on, Q7 off, then read the latch (bit 7 set = protected). */
+    private static boolean senseNotch(Disk2Controller controller) {
+        controller.writeIoSwitch(0xD, 0); // LDA $C08D,X -- Q6 on
+        controller.writeIoSwitch(0xE, 0); // LDA $C08E,X -- Q7 off: sense mode
+        controller.tick(4);               // let the sequencer run its sense action
+        boolean protectedNow = (controller.readIoSwitch(0xE) & 0x80) != 0;
+        controller.writeIoSwitch(0xC, 0); // Q6 off: back to read mode
+        return protectedNow;
+    }
+
+    /**
+     * The write-protect sensor is read when software can observe it -- on
+     * entering sense or write mode -- not on every tick (a per-tick host
+     * filesystem check made DSK booting crawl under Termux/PRoot). So a
+     * protection change made while the disk sits in the drive must still be
+     * seen the next time software senses the notch, in both directions.
+     */
+    @Test
+    void aProtectionChangeIsSeenTheNextTimeSoftwareSensesTheNotch(@TempDir Path tempDir) throws IOException {
+        Disk2Controller controller = new Disk2Controller();
+        controller.drive(0).insert(WozTestFixtures.buildSyntheticWozFile(tempDir, false));
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // drive 1
+        controller.tick(1000);            // spinning in read mode
+
+        assertFalse(senseNotch(controller), "starts writable");
+        controller.drive(0).setWriteProtected(true);
+        controller.tick(1000);
+        assertTrue(senseNotch(controller), "protecting it mid-session must show on the next sense");
+        controller.drive(0).setWriteProtected(false);
+        controller.tick(1000);
+        assertFalse(senseNotch(controller), "and so must unprotecting it");
+    }
 }

@@ -103,6 +103,17 @@ public final class Disk2Controller implements SlotCard {
     private int selectedDrive; // 0 or 1
     private boolean q6;
     private boolean q7;
+    /**
+     * The selected drive's write-protect sensor, as last read -- see
+     * {@link #senseWriteProtect}. Cached rather than read on every tick:
+     * for a DSK (and an unprotected WOZ) the state comes from the host
+     * file's permission, a filesystem call, and making one after every
+     * CPU instruction while the motor ran was the entire reason DSK booting
+     * crawled under Termux/PRoot, which intercepts every system call --
+     * measured there at 24.1s for 15 emulated seconds, versus 0.9s without
+     * the per-tick call.
+     */
+    private boolean writeProtected;
     private final Disk2LogicSequencer logicSequencer = new Disk2LogicSequencer();
     private int lssPhaseCounter; // 0 to LSS_TICKS_PER_BIT_CELL-1, cycling
     /** Current level of the drive's write line -- see {@link Disk2LogicSequencer#writeSignal}. */
@@ -235,8 +246,6 @@ public final class Disk2Controller implements SlotCard {
         Drive drive = drives[selectedDrive];
         TrackBitStream stream = drive.currentTrackStream();
         DiskImage image = drive.diskImage();
-        boolean writeProtected = image != null && image.isWriteProtected();
-        logicSequencer.setWriteProtected(writeProtected);
 
         int totalTicks = cycles * LSS_TICKS_PER_CPU_CYCLE;
         for (int i = 0; i < totalTicks; i++) {
@@ -288,6 +297,27 @@ public final class Disk2Controller implements SlotCard {
         }
     }
 
+    /**
+     * Reads the selected drive's write-protect sensor into {@link #writeProtected}.
+     * Called at the moments software can actually observe it -- entering
+     * sense mode (Q6 on, Q7 off) to test the notch, entering write mode
+     * (Q7 on), where a protected disk refuses the write, and selecting a
+     * drive -- rather than on every tick, so ordinary reading never touches
+     * the host filesystem.
+     */
+    private void senseWriteProtect() {
+        DiskImage image = drives[selectedDrive].diskImage();
+        writeProtected = image != null && image.isWriteProtected();
+        logicSequencer.setWriteProtected(writeProtected);
+    }
+
+    private void selectDrive(int drive) {
+        if (selectedDrive != drive) {
+            selectedDrive = drive;
+            senseWriteProtect();
+        }
+    }
+
     private void applySwitch(int offset) {
         switch (offset) {
             case 0x0 -> turnOffPhase(0);
@@ -316,12 +346,33 @@ public final class Disk2Controller implements SlotCard {
                 motorOn = true;
                 motorOffCountdownCycles = 0;
             }
-            case 0xA -> selectedDrive = 0;
-            case 0xB -> selectedDrive = 1;
+            case 0xA -> selectDrive(0);
+            case 0xB -> selectDrive(1);
             case 0xC -> { q6 = false; logicSequencer.setQ6(false); }
-            case 0xD -> { q6 = true; logicSequencer.setQ6(true); }
-            case 0xE -> { q7 = false; logicSequencer.setQ7(false); }
-            case 0xF -> { q7 = true; logicSequencer.setQ7(true); }
+            case 0xD -> {
+                boolean enteringSense = !q6 && !q7;
+                q6 = true;
+                logicSequencer.setQ6(true);
+                if (enteringSense) {
+                    senseWriteProtect();
+                }
+            }
+            case 0xE -> {
+                boolean enteringSense = q7 && q6;
+                q7 = false;
+                logicSequencer.setQ7(false);
+                if (enteringSense) {
+                    senseWriteProtect();
+                }
+            }
+            case 0xF -> {
+                boolean enteringWrite = !q7;
+                q7 = true;
+                logicSequencer.setQ7(true);
+                if (enteringWrite) {
+                    senseWriteProtect();
+                }
+            }
             default -> throw new IllegalArgumentException("offset " + offset + " is outside 0-15");
         }
     }
