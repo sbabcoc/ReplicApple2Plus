@@ -37,7 +37,8 @@ public interface RemovableMediaDrive {
     void insert(Path imagePath) throws IOException;
 
     /**
-     * Creates a new, blank WOZ disk image file at {@code path} and
+     * Creates a new, blank disk image file at {@code path} -- WOZ, or DSK
+     * for a {@code .dsk}/{@code .do} name -- and
      * inserts it into this drive directly, replacing whatever (if
      * anything) was previously loaded -- the same as {@link #insert}, but
      * for media that doesn't exist yet rather than an existing file.
@@ -48,9 +49,8 @@ public interface RemovableMediaDrive {
      * software actually formats it, and that "still unformatted" state
      * is tracked only in memory -- going through a second, separate load
      * from the file this just wrote would immediately and silently lose
-     * it. DSK images aren't offered here: this project's DSK write
-     * support doesn't exist yet, so a blank DSK file would be a format
-     * nothing could actually write to.
+     * it. A blank DSK is an empty file, the convention Virtual ][ also
+     * uses, since a .dsk file can't otherwise represent unformatted media.
      *
      * @param path where to write the new file -- must not already exist
      * @throws IOException if the file can't be created

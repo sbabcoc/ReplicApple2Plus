@@ -618,7 +618,11 @@ public final class Disk2Controller implements SlotCard {
             // per-read randomization before the disk has even been used
             // once. Keeping createBlank's own returned instance, with its
             // real in-memory virgin tracking intact, is the whole point.
-            WozDiskImage image = WozDiskImage.createBlank(path);
+            // Format by extension, matching insert()'s own dispatch.
+            String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+            DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
+                ? DskDiskImage.createBlank(path)
+                : WozDiskImage.createBlank(path);
             insertLoadedImage(image, path);
         }
 

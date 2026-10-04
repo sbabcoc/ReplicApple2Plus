@@ -311,18 +311,80 @@ final class DiskMenu {
      * @param emulationThread runs the actual creation -- this also touches drive
      *                        state the running machine reads, the same as insert/eject
      */
+    /**
+     * {@code name} with its disk-image extension ({@code .woz}, {@code .dsk}
+     * or {@code .do}, any case) replaced by {@code extension}, or with
+     * {@code extension} appended if it has none; a blank name becomes
+     * {@code untitled} plus the extension.
+     */
+    static String withDiskExtension(String name, String extension) {
+        String base = name == null ? "" : name.trim();
+        String lower = base.toLowerCase(java.util.Locale.ROOT);
+        for (String known : new String[] {".woz", ".dsk", ".do"}) {
+            if (lower.endsWith(known)) {
+                base = base.substring(0, base.length() - known.length());
+                break;
+            }
+        }
+        return (base.isEmpty() ? "untitled" : base) + extension;
+    }
+
+    /**
+     * What's currently in a save dialog's name field. {@link JFileChooser}
+     * has no API for this -- {@code getSelectedFile()} isn't updated by
+     * typing until the dialog is confirmed -- so this reads the dialog's
+     * own text field, the only one a save dialog has, falling back to the
+     * selected file if no text field is found.
+     */
+    private static String typedFileName(JFileChooser chooser) {
+        javax.swing.JTextField field = findTextField(chooser);
+        if (field != null) {
+            return field.getText();
+        }
+        java.io.File selected = chooser.getSelectedFile();
+        return selected == null ? "" : selected.getName();
+    }
+
+    private static javax.swing.JTextField findTextField(java.awt.Container container) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof javax.swing.JTextField field) {
+                return field;
+            }
+            if (child instanceof java.awt.Container nested) {
+                javax.swing.JTextField found = findTextField(nested);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     private static void promptAndCreateBlank(RemovableMediaDrive drive, Component parent, Executor emulationThread) {
         JFileChooser chooser = chooserAtLastDirectory();
-        chooser.setFileFilter(new FileNameExtensionFilter("WOZ disk images (*.woz)", "woz"));
+        FileNameExtensionFilter woz = new FileNameExtensionFilter("WOZ disk images (*.woz)", "woz");
+        FileNameExtensionFilter dsk = new FileNameExtensionFilter("DSK disk images (*.dsk, *.do)", "dsk", "do");
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.addChoosableFileFilter(woz);
+        chooser.addChoosableFileFilter(dsk);
+        chooser.setFileFilter(woz);
         chooser.setSelectedFile(new java.io.File("untitled.woz"));
+        // Switching the type swaps the name's extension to match, keeping whatever name was typed.
+        chooser.addPropertyChangeListener(JFileChooser.FILE_FILTER_CHANGED_PROPERTY, event -> {
+            String extension = (event.getNewValue() == dsk) ? ".dsk" : ".woz";
+            chooser.setSelectedFile(new java.io.File(withDiskExtension(typedFileName(chooser), extension)));
+        });
         int result = chooser.showSaveDialog(parent);
         rememberDirectory(chooser);
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
         }
+        // A typed extension decides the format; with none, the selected filter does.
         java.io.File chosen = chooser.getSelectedFile();
-        if (!chosen.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".woz")) {
-            chosen = new java.io.File(chosen.getParentFile(), chosen.getName() + ".woz");
+        String lower = chosen.getName().toLowerCase(java.util.Locale.ROOT);
+        if (!lower.endsWith(".woz") && !lower.endsWith(".dsk") && !lower.endsWith(".do")) {
+            String extension = (chooser.getFileFilter() == dsk) ? ".dsk" : ".woz";
+            chosen = new java.io.File(chosen.getParentFile(), chosen.getName() + extension);
         }
         java.nio.file.Path path = chosen.toPath();
         emulationThread.execute(() -> {

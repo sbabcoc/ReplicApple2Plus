@@ -256,19 +256,22 @@ its own content. Copy Screen Text will need a VideoTerm counterpart to
 from the CRTC's R12/R13 start address, which scrolling depends on --
 rather than the motherboard text pages.
 
-## Disk write support -- done for WOZ; DSK still not started
+## Disk write support -- done for WOZ and DSK
 
 **WOZ**: done. `TrackBitStream.writeBit()` overwrites the bit at the
 current head position, mutating the same backing array
 `WozDiskImage` holds persistently (so a write survives a track
-change, not just the one call that made it). `Disk2LogicSequencer.tick()`
-now returns the bit actually written (or -1), confirmed via direct,
-exhaustive cross-checking against a2kit's independent ROM table (all
-256 entries match exactly) and a traced write of a known byte
-(`0xD5`) producing exactly the right bits. `Disk2Controller` wires
-this together and enforces write-protect at the drive level, not
-inside the LSS -- matching real hardware, where the notch sensor
-lives in the drive, not the controller card.
+change, not just the one call that made it). What gets written is
+the sequencer's write line -- state bit 3, exposed as
+`Disk2LogicSequencer.writeSignal()` -- one flux transition (a 1 bit)
+per change in its level, in both Q7=1 modes, with the disk advancing
+one bit cell per 8 LSS ticks in every mode; this matches MAME's
+`wozfdc`. (The first version emitted a bit only on LSS shift actions,
+which skipped the cell where the LSS loads the next byte: every byte
+reached the disk as 7 bits, found via an `INIT` I/O error.)
+`Disk2Controller` wires this together and enforces write-protect at
+the drive level, not inside the LSS -- matching real hardware, where
+the notch sensor lives in the drive, not the controller card.
 
 The open design question this item used to flag -- persist to the
 host file, or stay in-memory only -- is resolved: **persisted to the
@@ -292,17 +295,37 @@ every bit to the wrong (every-other) position. Mutation-tested
 directly: reverting the fix reproduces exactly that corrupted
 pattern.
 
-**DSK**: still not started, and now a clearly separate piece of work
-rather than a sub-case of the WOZ item above. Persisting a DSK write
-means reversing the GCR encoding -- recognizing sector header
-prologues in the written bit stream, decoding the 6-and-2 data field
-back to raw bytes, and writing those into the flat, sector-based
-`.dsk` file -- essentially the mirror image of `DskDiskImage`'s
-existing `encodeTrack`/`writeDataField`. Until this exists, DSK stays
-read-only, and the blank-disk-creation feature below deliberately
-never offers DSK as a format for exactly this reason.
+**DSK**: done. Two changes to `DskDiskImage`, each tied to a failure
+found while building it:
 
-## Blank, formattable disk image creation -- done for WOZ; DSK deliberately not offered
+- **Tracks are kept, not re-synthesized.** `trackAt()` used to build a
+  fresh `TrackBitStream` on every call, so a write landed in a throwaway
+  array and was lost on the next head movement (even between
+  quarter-tracks of the same track). Each track is now encoded once, on
+  first access, and that stream is kept.
+- **Sync gaps are real 10-bit self-sync bytes** (`FF` plus two zero
+  bits), not plain 8-bit `FF`s. Found by the end-to-end write test: a
+  rewritten data field ends at an arbitrary bit offset relative to the
+  old bits after it, and without self-sync bits a reader never regains
+  byte framing, so the *next* sector's address field became unreadable
+  -- to the emulator's own reads as well as to persisting. Tracks are
+  now 49,764 bits rather than 49,104.
+
+`persist()` decodes only tracks whose bits changed since they were
+encoded: bits become disk bytes the way the controller's latch forms
+them, the track is read around twice so a field wrapping past its end
+is read whole, and each sector is accepted only if its address-field
+checksum, data checksum and `DE AA` epilog all check out -- the same
+checks DOS makes on every read. A written track's sector that fails
+those keeps its previous contents (never guessed at); every good sector
+is still saved, and `persist()` then throws naming the bad ones.
+
+Inherent to the format, not a gap in this work: a .dsk file holds only
+sector contents, so an `INIT`'s volume number and gap lengths aren't
+kept -- a reloaded track is re-synthesized with volume 254, as with any
+DSK image.
+
+## Blank, formattable disk image creation -- done for WOZ and DSK
 
 Done. `WozDiskImage.createBlank(path)` builds a complete, valid
 WOZ2 file with 35 pre-allocated tracks. Every still-unformatted track
@@ -332,6 +355,16 @@ UI: a "New..." item per drive in the `Disk` menu, alongside
 Insert/Eject, prompting for name and location via a save dialog and
 inserting the result directly (not via a second, separate load that
 would have discarded the in-memory virgin-tracking this all depends
-on). WOZ is the only format offered -- DSK is deliberately absent,
-since write support for it doesn't exist (see above); offering it
-would create a file real software could never actually format.
+on). The save dialog offers both WOZ and DSK; a typed extension decides
+the format, otherwise the selected filter does.
+
+**DSK blank media**: a .dsk file can't represent unformatted media, so a
+blank DSK is an *empty (0-byte) file* -- the same convention Virtual ][
+uses (confirmed from a blank DSK it created). `DskDiskImage.load`
+accepts a 0-byte file as an entirely unformatted disk whose tracks read
+as per-read random noise (51,200-bit tracks, matching WOZ's blank
+tracks), and `createBlank` makes one. The first persist after a write
+turns it into a normal 143,360-byte image; a track still never written
+at that point is stored as zeroed sectors, since the format can't record
+"unformatted" for one track among formatted ones. `INIT` writes every
+track, so normal use loses nothing to that.

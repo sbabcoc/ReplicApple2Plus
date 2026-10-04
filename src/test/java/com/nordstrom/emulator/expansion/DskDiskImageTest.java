@@ -226,9 +226,20 @@ class DskDiskImageTest {
         return result;
     }
 
+    /**
+     * Reads the next disk byte the way the controller's latch forms one:
+     * leading zero bits are skipped, and the byte is the first 1 bit plus
+     * the seven after it. Every valid disk byte has its high bit set, so
+     * this is exact -- and it's what lets a reader cross DskDiskImage's
+     * 10-bit self-sync gaps (FF plus two zero bits), which a reader taking
+     * raw 8-bit chunks would misframe.
+     */
     private static int readByte(TrackBitStream track) {
-        int b = 0;
-        for (int i = 0; i < 8; i++) {
+        int b;
+        do {
+            b = track.nextBit();
+        } while (b == 0);
+        for (int i = 0; i < 7; i++) {
             b = (b << 1) | track.nextBit();
         }
         return b;
