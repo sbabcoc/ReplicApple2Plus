@@ -1,0 +1,694 @@
+# Task Retrospective
+
+Completed work, kept for its reasoning and verification history -- the
+real-hardware context behind each decision, the sources checked, and
+the bugs caught along the way. Open work lives in [TODO.md](TODO.md);
+current behavior is summarized in [README.md](README.md) and specified
+in [HARDWARE-REFERENCE.md](HARDWARE-REFERENCE.md).
+
+These entries are a historical record: each was written when its work
+landed, and later work sometimes changed what it describes. Where an
+entry and the current code disagree, the code (and the README) are
+current.
+
+---
+
+## Completed tasks (moved from TODO.md)
+
+### Type-from-file keystroke injection -- done, as the Edit menu
+
+Built as an "Edit" menu rather than a CLI option (a command-line option
+is only processed at launch -- far too restrictive), and widened to the
+clipboard integration that was originally set aside: see `EditMenu.java`,
+`TypingFeeder.java` and `system/ScreenText.java`.
+
+- **Paste** and **Type File...** feed the same `TypingFeeder`; only the
+  text's source differs. **Stop Typing** discards whatever is left.
+- **Pacing** is gated on the keyboard strobe, not a fixed delay: the next
+  key loads only once software has cleared $C010 for the previous one.
+  That retired the "live-paste timing races" concern from the original
+  scope note -- injection is lossless at whatever pace the running
+  software reads the keyboard.
+- **Line endings**: `\r\n`, `\n` and lone `\r` each become one Return.
+  Everything else goes through `KeyboardMapper.mapTypedCharacter`, so
+  injected text folds to uppercase exactly like typed text -- which also
+  retired the "case-folding ambiguity" concern.
+- **Copy Screen Text** copies the whole displayed text (trailing spaces
+  and trailing blank rows trimmed), using the same per-scan-line modes
+  `ScreenPanel` paints from: all 24 rows in text mode, only the text rows
+  in mixed mode, nothing in full-screen graphics. Mouse-selection copy
+  remains a possible later addition.
+- **Copy Screen Image** copies exactly what the window shows, at its
+  on-screen size, by having `ScreenPanel` paint itself into an offscreen
+  image -- the same `paint` call Swing makes, so it can't drift from the
+  display.
+- Deliberately no keyboard shortcuts -- menu items only.
+
+### Reset and Reboot toolbar buttons -- both done
+
+Both built, wired, and verified -- see `ToolbarControls.java` and
+`Apple2Plus.java`. Kept here as a reference for the real-hardware
+context and the design reasoning behind each, in case that matters
+again later (e.g. if VideoTerm or the Saturn card ever need similar
+toolbar controls).
+
+**What was actually built**: a toolbar (not a menu -- deliberate,
+see below), with a "Reset" `JButton` whose `MouseListener` calls
+`cpu.raiseReset()` on press and `cpu.lowerReset()` on release, each
+posted onto the emulation thread via the same `Executor` pattern
+`KeyboardInputListener`/`DiskMenu` already use. Verified directly with
+a real `Cpu6502` and a real built button (not just compiled): pressing
+freezes the CPU (`step()` returns 0 while held), and releasing fires
+the actual reset sequence -- PC lands exactly at the reset vector, SP
+decrements by exactly 3, confirmed by reading the real post-reset
+values. One genuine mistake caught and fixed along the way: a first
+test attempt checked only `getMouseListeners()[0]`, which turned out
+to be Swing's own internal `BasicButtonListener` installed before mine
+-- not a bug in the button itself, but a reminder that
+`addMouseListener` appends, it doesn't replace, and real event
+dispatch calls every registered listener, not just the first.
+
+**Why press/release, not a single click action**: `Cpu6502` already
+had a complete, hardware-faithful RESET line --
+`raiseReset()`/`lowerReset()`, with `step()` a no-op while the line is
+held. This isn't incidental complexity: RESET is a real,
+level-triggered line, and the actual reset sequence fires only on the
+*release* edge, so the API maps directly onto a physical press and
+release. This is also why toolbar beat menu as more than a style
+preference: a `JMenuItem`'s `actionPerformed` fires once per completed
+click, with no natural way to get separate press/release events; a
+toolbar `JButton`'s `MouseListener` gives both halves directly.
+
+**Real hardware wiring, confirmed, and still relevant if this area
+gets touched again**: on a genuine Apple II/II+, RESET bypasses the
+keyboard encoder entirely -- wired directly to the 6502's hardware
+RESET pin, never touching the ASCII-producing path every other key
+uses (confirmed across several sources, including a repair thread
+where a fully dead encoder chip still left RESET working, precisely
+because its circuit has no dependency on the encoder). This project
+models an Apple II **Plus**, where Ctrl-Reset (not bare RESET) is the
+historically correct behavior -- the original Apple II shipped with no
+Control interlock, and a widely-adopted mod added one after enough
+people bumped it by accident. None of this ended up mattering for the
+toolbar button itself (keyboard-triggered RESET was explicitly ruled
+out of scope), but it's why the button goes straight to
+`raiseReset()`/`lowerReset()` with zero dependency on `KeyboardMapper`,
+rather than being modeled as a keyboard special case that happens to
+have no key bound to it.
+
+**Reboot**: done. No press/release split, unlike Reset -- a plain
+`ActionListener` click, since there's no real hardware line this
+corresponds to (a power switch is a single discrete event, not
+something with a meaningful "hold" duration).
+
+Settled on, after checking MAME's own documented soft-reset/hard-reset
+distinction as a reference point (confirmed directly against
+docs.mamedev.org, not taken on secondhand faith): a hard reset in MAME
+"tears down the emulation session and starts another session with the
+same system and options" -- confirmed via a MAMETesters bug thread that
+this does NOT wipe NVRAM or swap out the loaded ROM. Adapted to this
+project: Reboot recreates `MotherboardBus`/`Cpu6502`/the slot cards
+from scratch (everything volatile resets -- RAM, CPU state, soft
+switches), while preserving whatever disk image is currently inserted,
+read via `RemovableMediaDrive.currentImagePath()` from the outgoing
+`Disk2Controller` and re-inserted into the fresh one via `insert(Path)`
+-- matching how a real Apple II power-cycle doesn't eject a floppy
+either.
+
+The implementation (`Apple2Plus.buildMachine` + a `Machine` record
+holding everything reboot-sensitive: disk, bus, screen, loop, pad
+poller, toolbar) also rebuilds the screen, keyboard listener, disk
+menu, and toolbar in place in the same, reused `JFrame` -- none of
+those are safe to leave pointing at the old, torn-down machine. Not
+preserved across a reboot, by design: the pad poller's underlying
+controller *connection* (SDL/Jamepad or the network socket) briefly
+restarts, since `PadPoller`'s `InputMapper` is fixed at construction
+with no way to swap it -- an acceptable, brief reconnection cost for a
+deliberate, infrequent action, not something worth redesigning
+`PadPoller`'s API around.
+
+Verified two ways, not just compiled: a focused test built a real
+`Disk2Controller` with a real synthetic WOZ image (via the existing
+`WozTestFixtures`), called `buildMachine` a second time as a reboot
+would, and confirmed the new `Disk2Controller` is a genuinely different
+instance with the same media still present. Separately, a full
+end-to-end test launched the actual application under Xvfb and clicked
+the real Reboot button -- which caught a real bug before delivery: the
+reboot lambda initially passed `null` instead of itself when rebuilding
+(a lambda can't refer to the local variable it's being assigned to;
+fixed with a one-element array holder), which silently left the rebuilt
+toolbar with no REBOOT button at all. After the fix, the same test
+confirmed a genuinely new Reset button exists post-reboot and still
+works correctly (no stale references to the torn-down CPU).
+
+### Disk write support -- done for WOZ and DSK
+
+**WOZ**: done. `TrackBitStream.writeBit()` overwrites the bit at the
+current head position, mutating the same backing array
+`WozDiskImage` holds persistently (so a write survives a track
+change, not just the one call that made it). What gets written is
+the sequencer's write line -- state bit 3, exposed as
+`Disk2LogicSequencer.writeSignal()` -- one flux transition (a 1 bit)
+per change in its level, in both Q7=1 modes, with the disk advancing
+one bit cell per 8 LSS ticks in every mode; this matches MAME's
+`wozfdc`. (The first version emitted a bit only on LSS shift actions,
+which skipped the cell where the LSS loads the next byte: every byte
+reached the disk as 7 bits, found via an `INIT` I/O error.)
+`Disk2Controller` wires this together and enforces write-protect at
+the drive level, not inside the LSS -- matching real hardware, where
+the notch sensor lives in the drive, not the controller card.
+
+The open design question this item used to flag -- persist to the
+host file, or stay in-memory only -- is resolved: **persisted to the
+host file**, confirmed explicitly ("the data must be persisted in
+the host machine disk image file. Anything less is inaccurate
+emulation"). Mechanism: `WozDiskImage.persist()` rewrites every
+captured track's current bytes back into the file at their original
+offsets and recomputes the CRC32, triggered on track change, eject,
+and application exit/Reboot -- a dirty flag skips the rewrite
+entirely when nothing changed, so ordinary reading (which seeks
+across tracks constantly) costs nothing extra. META and anything
+else this project doesn't itself track survive untouched, since
+persistence works by patching a fresh read of the real file rather
+than reconstructing one from parsed fields.
+
+A real bug was caught by the integration test for this, not left for
+later: `Disk2Controller.tick()` was unconditionally reading a pulse
+bit every 8th tick regardless of mode, double-advancing the stream's
+position whenever a write also landed that tick and silently writing
+every bit to the wrong (every-other) position. Mutation-tested
+directly: reverting the fix reproduces exactly that corrupted
+pattern.
+
+**DSK**: done. Two changes to `DskDiskImage`, each tied to a failure
+found while building it:
+
+- **Tracks are kept, not re-synthesized.** `trackAt()` used to build a
+  fresh `TrackBitStream` on every call, so a write landed in a throwaway
+  array and was lost on the next head movement (even between
+  quarter-tracks of the same track). Each track is now encoded once, on
+  first access, and that stream is kept.
+- **Sync gaps are real 10-bit self-sync bytes** (`FF` plus two zero
+  bits), not plain 8-bit `FF`s. Found by the end-to-end write test: a
+  rewritten data field ends at an arbitrary bit offset relative to the
+  old bits after it, and without self-sync bits a reader never regains
+  byte framing, so the *next* sector's address field became unreadable
+  -- to the emulator's own reads as well as to persisting. Tracks are
+  now 49,764 bits rather than 49,104.
+
+`persist()` decodes only tracks whose bits changed since they were
+encoded: bits become disk bytes the way the controller's latch forms
+them, the track is read around twice so a field wrapping past its end
+is read whole, and each sector is accepted only if its address-field
+checksum, data checksum and `DE AA` epilog all check out -- the same
+checks DOS makes on every read. A written track's sector that fails
+those keeps its previous contents (never guessed at); every good sector
+is still saved, and `persist()` then throws naming the bad ones.
+
+Inherent to the format, not a gap in this work: a .dsk file holds only
+sector contents, so an `INIT`'s volume number and gap lengths aren't
+kept -- a reloaded track is re-synthesized with volume 254, as with any
+DSK image.
+
+### Blank, formattable disk image creation -- done for WOZ and DSK
+
+Done. `WozDiskImage.createBlank(path)` builds a complete, valid
+WOZ2 file with 35 pre-allocated tracks. Every still-unformatted track
+reads as fresh, genuine randomness on every single read (confirmed:
+two reads of the same position differ), matching the WOZ spec's own
+documented requirement for blank media -- fixing a previously
+*documented* simplification (this project used to return constant
+zeros here instead) now that a blank disk's tracks are the normal
+case, not a rare copy-protection edge case.
+
+Virgin-track status -- "this track has a real slot but was never
+actually formatted" -- is detected from the file's own content, not
+remembered only in memory: a track whose stored bytes are *all*
+zero is treated as virgin, confirmed to have zero false positives on
+real data, not a risky heuristic -- real Apple II disk encoding has
+a hard physical constraint of no more than two consecutive zero bits
+anywhere in valid, formatted data (confirmed across several
+independent, primary sources), making a whole track of zero bytes
+(51,200 consecutive zero bits) physically impossible to produce by
+accident. This means a disk created but never formatted, then
+reloaded in a completely separate session, still correctly resumes
+as random noise rather than silently becoming stable, meaningless
+data -- an earlier version of this work had that as a disclosed,
+accepted limitation; it's fixed now, not just documented.
+
+UI: a "New..." item per drive in the `Disk` menu, alongside
+Insert/Eject, prompting for name and location via a save dialog and
+inserting the result directly (not via a second, separate load that
+would have discarded the in-memory virgin-tracking this all depends
+on). The save dialog offers both WOZ and DSK; a typed extension decides
+the format, otherwise the selected filter does.
+
+**DSK blank media**: a .dsk file can't represent unformatted media, so a
+blank DSK is an *empty (0-byte) file* -- the same convention Virtual ][
+uses (confirmed from a blank DSK it created). `DskDiskImage.load`
+accepts a 0-byte file as an entirely unformatted disk whose tracks read
+as per-read random noise (51,200-bit tracks, matching WOZ's blank
+tracks), and `createBlank` makes one. The first persist after a write
+turns it into a normal 143,360-byte image; a track still never written
+at that point is stored as zeroed sectors, since the format can't record
+"unformatted" for one track among formatted ones. `INIT` writes every
+track, so normal use loses nothing to that.
+
+---
+
+## Component development history (moved from README.md)
+
+The README's original per-component write-ups, recorded as each piece
+was built and verified. Several statements here were later superseded --
+for example, disks are now writable (WOZ and DSK), a DSK track keeps
+its bit position across head movement (WOZ tracks still restart at bit
+0), DSK write-protect follows the host file's permission, unmapped WOZ
+quarter-tracks read as random weak bits, the speaker drives real audio,
+and lo-res/hi-res graphics are rendered.
+
+#### What's implemented
+
+**CPU core** — every documented NMOS 6502 opcode and addressing mode,
+cycle-accurate timing (including the conditional page-boundary-crossing
+penalty), every stable illegal/undocumented opcode, decimal (BCD) mode with
+its NMOS-specific flag quirks, `JAM`/`KIL` as a genuine halt state, and
+`IRQ`/`NMI`/`RESET` modeled as physically distinct signals with correct
+polarity, wire-OR semantics, and the one-instruction interrupt-polling lag
+that makes real `SEI`/`CLI` timing work. See [Verification](#verification)
+for how this is checked, not just asserted.
+
+**Memory bus** — `AddressSpace` is a generic, hardware-agnostic
+address-range dispatcher: registered `(start, end, handler)` ranges, routed
+by direct block-table indexing (not a linear scan), with alignment and
+overlap validation and a hard 8-bit-wide guarantee on every value that
+crosses it (matching the real, physical data bus, which cannot represent
+more than 8 bits in either direction — reads are masked exactly like writes
+already are, and a handler violating that contract is caught by an
+assertion, not modeled as an emulated condition). It has no knowledge of
+what a "slot" or "video switch" is. `MotherboardBus` is the Apple II+-specific
+wiring on top of it — a list of registrations, not branching logic mixed
+into the dispatch mechanics. Swapping a placeholder for a real
+implementation means changing one registration line; nothing else needs to
+change.
+
+**Peripheral architecture** — `SlotCard` is the contract every peripheral
+implements: a public no-arg constructor plus a `configure(Properties)`
+lifecycle method (deliberately not a constructor argument, so
+`META-INF/services/...SlotCard` is a genuine, ordinary Java SPI file that
+real `ServiceLoader` can use directly — proven by `ServiceLoaderSpiTest`,
+not just claimed). A card declares its own short config-file name and
+recognized parameters as real methods on the class itself, not as
+comments in a separate file that could drift out of sync with the code —
+and if a card's own declared parameters and what it actually reads ever
+disagree, that's caught automatically rather than silently tolerated.
+Around this: `PluginLoader` builds a classloader from a directory of
+external `.jar` files (the actual mechanism that lets a new peripheral be
+added without recompiling this project), `Install` is a minimal
+installer any peripheral jar can use as its own `Main-Class`,
+`CardCatalog` lists every available card and what it needs, and
+`SlotConfigTemplate` generates a one-time, safe-to-paste starting point
+for a slot configuration file (explicitly not a live or auto-synced
+catalog — regenerate it, don't trust it to stay current).
+
+**Real, wired-in peripherals:**
+- **`Disk2Controller`** — genuinely complete now, not a partial slice.
+  The boot ROM and all 16 soft switches (phase stepper, motor, drive
+  select, Q6/Q7 mode latches) are fully implemented. Phase-stepper
+  head positioning is real: the actual electromagnet-sequencing
+  algorithm (a step occurs only when the currently-on phase turns off
+  while exactly one neighbor is on, confirmed against two independent
+  sources for both the algorithm and the direction convention),
+  clamped at the real 0-159 quarter-track range, per-drive
+  independent. `RemovableMediaDrive.insert` genuinely parses a real
+  WOZ2 disk image (`WozDiskImage`, see below). `Disk2LogicSequencer`
+  (see below) is fully wired in: Q6/Q7 changes reach it, `tick`
+  advances it at the real hardware ratio (the LSS runs at 2x CPU clock
+  rate -- confirmed independently -- sampling one real bitstream bit
+  every 8 LSS ticks, matching the real 4-CPU-cycle-per-bit data rate),
+  and reading the Q6/Q7 data latch (offsets $C-$F) returns the actual
+  sequencer output instead of throwing. A real bug caught while wiring
+  this: `WozDiskImage.trackAt` returns a fresh `TrackBitStream` on
+  every call, which would have silently reset the read position to 0
+  on every single tick -- fixed by caching the stream in `Drive`,
+  refreshed only on an actual head move or disk swap. Verified
+  end-to-end, not just per-piece: 66 checkpoints of an inserted,
+  real synthetic WOZ file's known bit pattern flowing through
+  `tick()` match a Python reference implementing the identical timing
+  exactly, under variable, realistic cycle-delivery chunk sizes (not a
+  fixed, convenient tick size) -- plus separate confirmation that
+  motor-off genuinely halts all ticking, that switching drives reads
+  the correct drive's own track, and that a write-protected disk's
+  sense mode correctly yields `0xFF`. Two named, deliberate
+  simplifications remain: track changes reset to bit 0 rather than
+  preserving relative rotational position (the WOZ spec's own
+  recommendation, relevant to a small number of copy-protection
+  schemes, not ordinary reading), and a documented DOS 3.2 `INIT`
+  sub-instruction timing quirk (the LSS completing a cycle *within* a
+  single CPU instruction) that this project's instruction-boundary
+  cycle granularity can't represent. Now wired into `Apple2Plus` --
+  see below for why slot 6 is populated conditionally, not always.
+- **`Disk2LogicSequencer`** — the actual state machine that converts a
+  disk bitstream pulse into shift-register (nibble) data, driven by
+  `DiskLogicSequencerRom`'s 256-byte table. A genuinely important
+  correction surfaced while building this: that ROM class's own,
+  previously-documented address-bit wiring
+  (`{state:4}{Q7,Q6:2}{latchMSB:1}{sense:1}`) had never actually been
+  verified against a working reference, and turned out to be wrong.
+  The real mapping was found by exhaustively searching all 8-bit
+  permutations and single-bit inversions (roughly 10.3 million
+  candidates) for the one that exactly reproduces a2kit's independent,
+  real-world Rust LSS implementation -- a unique match, not a guess:
+  MSB to LSB, `state[3], state[2], state[0], ~pulse, Q7, Q6, latch[7],
+  state[1]`. Confirmed two ways before trusting it: the underlying ROM
+  byte *values* are an exact multiset match against a2kit's decoded
+  table (genuinely the same ROM, differently addressed), and a
+  2000-pulse randomized trajectory comparison plus separate checks of
+  all four Q6/Q7 modes (including write-protect sense correctly
+  yielding `0xFF`) match a parallel Python reference implementing the
+  same corrected formula exactly, tick for tick. That was this class's
+  own standalone verification; `Disk2Controller`'s entry above
+  describes the separate, later end-to-end pass once it was actually
+  wired in.
+- **`WozDiskImage`** — parses a real WOZ2 disk image file: header, INFO,
+  TMAP, and TRKS chunks, exposing genuine bit-level per-quarter-track
+  access via `TrackBitStream`. Deliberately scoped to 5.25-inch disks
+  only -- the only kind a real Disk II drive reads -- so 3.5-inch
+  disks' different TMAP layout and the optional FLUX/WRIT chunks aren't
+  implemented at all. Handles two easy-to-miss real details precisely:
+  the bitstream is genuinely bit-level (a track's bit count is almost
+  never a multiple of 8, confirmed by testing against hand-constructed
+  24-bit and 11-bit patterns, not just byte-aligned ones), and bit order
+  within each stored byte is high to low, per the spec's own wording.
+  CRC32 verification reuses `java.util.zip.CRC32` (the same standard
+  algorithm `RomChecksum` already uses elsewhere in this project, not a
+  hand-ported version of the spec's own C table) -- confirmed
+  independently against the official CRC-32 test vector
+  (`CRC32("123456789") = 0xCBF43926`), not just checked for
+  self-consistency against this project's own test file. Unmapped
+  (0xFF) quarter-tracks return the spec's own recommended 51,200-bit
+  length but filled with zeros rather than the spec's randomized
+  "weak bits" -- a real, stated simplification, not a hidden one.
+  Verified against a hand-constructed, spec-compliant synthetic WOZ
+  file (a real WOZ test corpus exists but is hosted outside this
+  environment's network access) covering exact bit round-tripping,
+  wraparound at a track's true bit count, `seekTo`, corruption
+  detection, and bad-header detection.
+- **`TrackBitStream`** — extracted out of `WozDiskImage` into its own
+  top-level class specifically so `DskDiskImage` (below) can produce
+  the identical type -- `Disk2LogicSequencer` reads either through the
+  exact same interface, genuinely unaware of which format the bits
+  came from.
+- **`DiskImage`** — the small interface (`isWriteProtected`,
+  `trackAt`) both `WozDiskImage` and `DskDiskImage` implement, letting
+  `Disk2Controller.Drive` hold either without knowing which.
+- **`DskDiskImage`** — reads a DOS-order sector image (.dsk/.do, 35
+  tracks x 16 sectors x 256 bytes) and synthesizes the real,
+  historical 6-and-2 GCR bitstream each track would actually carry on
+  physical media -- address fields, data fields, checksums, and the
+  64-entry 6-and-2 translate table, ported directly from a2kit's own
+  verified Rust implementation (itself a port of CiderPress's C++),
+  not reimplemented from a written description. Applies the real,
+  documented DOS 3.3 sector skew (`0,7,14,6,13,5,12,4,11,3,10,2,9,1,8,15`
+  -- physical position to logical sector) when placing each sector's
+  data, and writes each physical position's own address field with
+  its own physical sector number, since the skew only ever affects
+  which data lands where, never how the address fields are numbered.
+  `Drive.insert` dispatches to this class instead of `WozDiskImage` by
+  file extension (`.dsk`/`.do` versus everything else). Deliberately
+  scoped to standard 16-sector DOS 3.3 media only -- no 13-sector DOS
+  3.2/3.1 support, no ProDOS-order (`.po`, a different +2 skew), and no
+  copy-protection-specific variations. A .dsk file has no
+  write-protect flag at all, so `isWriteProtected` always returns
+  `false`. Verified two ways: encoding known sector data (random,
+  all-zero, all-ones) and decoding it back with a reference decoder
+  independently ported from a2kit's own `decode_sector_62_256` and
+  `decode_44` confirms an exact round trip -- the strongest check
+  available without a real, legally-sourced DOS 3.3 image, since
+  encoder and decoder are independently-implemented halves of the same
+  real algorithm rather than the same code checking itself; and
+  driving a real `.dsk`-backed `Drive` through `Disk2Controller`'s own
+  `tick()` end to end shows the LSS genuinely finding synced,
+  full-byte latch values from the synthesized stream, not just that
+  the encoder's output looks plausible in isolation. A dedicated test
+  also confirms the full 16-sector skew lands correctly, not just that
+  one sector round-trips: every logical sector's data is independently
+  verified to appear at its real, documented physical position.
+- **`VideoSoftSwitches`** — the `$C050`-`$C05F` video mode switches
+  (text/graphics, full/mixed, page1/page2, lo/hi-res, and the four
+  annunciators) are a complete implementation; there is no equivalent
+  deferred half, since none of these addresses expose data real software
+  reads back.
+- **`SpeakerToggle`** — the `$C030`-`$C03F` speaker toggle is a complete
+  implementation: a single flip-flop, any access anywhere in the
+  16-byte window flips it (unlike `VideoSoftSwitches`' eight distinct
+  per-offset flags, there's only one flag here, since there's only one
+  speaker). Real audio synthesis -- turning access timing into an
+  actual waveform -- has nothing to consume it yet.
+- **`KeyboardRegister`** — `$C000` (last key pressed) and `$C010`-`$C01F`
+  (clear the strobe) are a complete, verified implementation, including
+  the easy-to-miss detail that the key's ASCII value persists after the
+  strobe clears (only bit 7 changes). Deliberately doesn't model live
+  "any key down" status on `$C010`'s own return value -- that's real
+  IIe-and-later behavior, but multiple sources (including a filed
+  hardware-behavior bug report against a well-known emulator) treat it
+  as inconsistent to nonexistent on the original II/II+ this project
+  targets. Deliberately doesn't model autorepeat either -- a
+  timing-dependent behavior with no honest way to model it without a
+  driving clock behind it. Has no dependency on any UI toolkit at all;
+  `keyPressed(int)` is how a real input source, whatever it ends up
+  being, feeds this class -- reachable via `MotherboardBus.keyboardRegister()`.
+- **`VideoScanner`** computes which memory address the video circuitry
+  is fetching at any point in the frame -- the specific piece
+  floating-bus emulation needs, not a full pixel renderer. A faithful
+  port of AppleWin's own `VideoGetScannerAddress` bit-level counter
+  model (citing Jim Sather's *Understanding the Apple IIe*), not a
+  row/column approximation -- reproducing a mature emulator's verified
+  logic directly proved more trustworthy here than re-deriving it
+  independently, especially the real hardware's genuine vertical
+  counter stutter (8 bits reaching 262 lines by repeating its own last
+  6 states, not counting linearly). This single formula covers
+  horizontal blanking, vertical blanking, and mixed mode correctly with
+  no special-casing at all -- real hardware never stops addressing
+  memory just because nothing is currently visible, and neither does
+  this class; it never throws. Verified against the same text/lores and
+  hi-res reference points as before (row 0, 1, 8, 64), plus confirmed
+  to run exception-free across a complete 17,030-cycle frame in both
+  text and mixed modes. Ticked via `SystemClock.addCycleListener`, the
+  same mechanism `PaddleTimers` uses.
+- **`FloatingBus`** combines `VideoScanner`'s address with a real RAM
+  read at that address -- `VideoScanner` only answers "which address,"
+  this answers "what byte is actually there." Wired into every "empty
+  slot" or "nothing latched" fallback (`SlotIoHandler`,
+  `SlotZeroIoHandler`, `SlotRomHandler`, `ExpansionRomArbiter`), all of
+  which used to throw a named gap and now return a genuine,
+  scanner-driven value instead. A write to any of these same addresses
+  is a silent no-op, matching real hardware -- nothing is listening, so
+  nothing happens.
+- **`PaddleTimers`** — `$C064`-`$C067` (read) and `$C070`-`$C07F`
+  (trigger) model the real hardware faithfully: four independent RC
+  one-shot countdowns sharing one strobe line, each non-retriggerable
+  while still running. That non-retriggerable detail isn't a minor
+  nuance -- it's *why* real software reading a second paddle right
+  after a first gets a skewed value (both timers started from the same
+  strobe, so time spent polling the first eats into the second's
+  countdown), and this project's implementation reproduces that quirk
+  because the underlying structure is right, not because it's
+  special-cased. Ticked via `SystemClock.addCycleListener`, which
+  exists specifically because this needed it. The 0-255-to-cycles
+  conversion is calibrated to 2816 cycles full-scale -- not a generic
+  RC-formula guess (which would give a noticeably different ~3700 and
+  cause a full-scale read to wrap early), but the real, precisely
+  documented figure tied to the standard ROM `PREAD` routine's own
+  256-iteration, 11-cycle-per-iteration counting loop. Confirmed, not
+  just cited: assembling and running that actual historical ROM
+  routine (real disassembled bytes) against this implementation
+  produces an *exact* match between the position set and the value the
+  real routine computes, across the full 0-255 range.
+- **`LanguageCard`** — a genuine expansion card occupying slot 0 (real,
+  physical, and electrically special: no `$Cn00`-`$CnFF` ROM window,
+  but the only slot that can bank-switch `$D000`-`$FFFF`, via
+  `SlotCard`'s `wantsSlotZeroBanking` hook). The `$C080`-`$C08F` control
+  switches and the full `$D000`-`$FFFF` banked RAM path (two independent
+  4K banks plus a single 8K bank, the real two-consecutive-qualifying-
+  reads write-enable state machine) are fully implemented and real RAM
+  read/write works end-to-end. An empty slot 0 fails the same way an
+  empty slot 1-7 does, and `MotherboardBus` dispatches to whatever
+  actually occupies `slots[0]` rather than assuming any specific card
+  is there.
+- **`SystemRom`** — the Apple II+'s own motherboard ROM at
+  `$D000`-`$FFFF` (Applesoft BASIC and the Autostart Monitor), verified
+  chip-by-chip against MAME's own source. This is what shows through
+  when nothing overrides it -- an empty slot 0, or any slot-0 card
+  reporting it isn't intercepting a given address. `LanguageCard` itself
+  never references this class: it has no business knowing the Apple
+  II+'s own ROM contents just to say "not me" (see `SlotCard`'s
+  `readSlotZeroBank`) -- that fallback is `SlotZeroBankingHandler`'s
+  job, motherboard-level dispatch, not the card's.
+- **`CharacterRom`** — the Apple II+'s character generator ROM (Apple
+  part 341-0036, a repurposed general-purpose Signetics 2513 chargen
+  chip). Addressing (`code * 8 + row`) and the crucial masking detail
+  (the fetched byte's 8th bit is genuine noise from this chip's use in
+  other, unrelated systems, not part of the actual glyph) both
+  confirmed directly against MAME's own working source for the
+  original II/II+ code path specifically -- a different branch from how
+  IIe/IIgs handle the same chip. Deliberately does not apply
+  inverse/flash inversion itself -- that's a real display-mode decision
+  a future renderer makes, not a fact about ROM contents, the same
+  separation `VideoSoftSwitches` already keeps between reporting mode
+  state and deciding how to render it. Verified by literally printing
+  the resulting glyph as ASCII art and confirming it's a recognizable
+  letter, not just passing numeric assertions.
+- **`SystemClock`** drives the CPU with exact cycle accounting.
+  `addCycleListener` exists now because it has a real, concrete
+  consumer (`PaddleTimers`' RC countdowns) -- still deliberately no
+  real-time throttling (a genuinely separate concern from
+  cycle-accurate execution, left to whatever drives this class). It
+  does not attempt to interleave execution with
+  video at the sub-instruction, alternating-half-cycle level real
+  hardware uses to share RAM -- that would mean rewriting the CPU
+  core's opcode executors into per-cycle micro-steps for no
+  software-visible benefit, since that scheme exists purely so video
+  and CPU never electrically contend for the same RAM cell, which is
+  invisible to software either way. Verified to change nothing about
+  CPU behavior: driving the full Klaus2m5 functional test through
+  `SystemClock` traps at the identical address after the identical
+  step and cycle counts as driving the CPU directly.
+- **`Apple2Plus`, `ScreenPanel`, `KeyboardInputListener`, and `DiskMenu`**
+  together are the real application. `Apple2Plus` populates slots
+  through this project's own existing `SlotCardLoader`/INI mechanism
+  (`--config slots.ini`, plus an optional `--plugins DIR`) rather than
+  a parallel, application-specific one -- an earlier version of this
+  class accepted disk paths as direct command-line arguments, bypassing
+  a config system that already existed and already handled this
+  correctly; that version was replaced with this one rather than kept
+  alongside it. With no `--config` given, slots stay entirely empty and
+  boot behaves exactly as it did before disk support existed. A
+  `Disk2Controller`, wherever the config file places it (not assumed to
+  be slot 6, though that's the real, conventional choice), is found by
+  scanning the populated slots after loading, so its `tick` can be
+  registered with `SystemClock.addCycleListener`. Never populating a
+  disk slot with no disk actually configured is necessary, not a
+  simplification: confirmed directly by driving the real boot sequence,
+  a `Disk2Controller` present with no disk inserted causes the real,
+  unmodified `$FFFC` Autostart ROM to recognize the real Disk II boot
+  ROM signature and hang forever waiting for sync bytes an all-zero
+  pulse stream will never produce -- the "APPLE ][" banner prints, but
+  the `]` prompt never appears, confirmed by comparing against the
+  working no-card case side by side. `SlotCardLoader`'s own existing
+  behavior (an unconfigured slot stays `null`) already provides this
+  safety property without `Apple2Plus` needing anything special of its
+  own. A bad config file, unknown card type, or disk-load failure is
+  caught and reported clearly (exit code 1, no stack trace) rather than
+  crashing during Swing construction. When a `Disk2Controller` is
+  found, `DiskMenu` adds a "Disk" menu for swapping either drive's
+  media while the emulator runs -- calling the exact same
+  `RemovableMediaDrive.insert`/`eject` methods `configure` itself uses
+  at startup, matching `SlotCardLoader`'s own documented point that
+  boot-time loading and live swapping are the same operation, not two.
+  With no disk card present, the menu is simply not added, since
+  there's nothing it could operate on. When a `Disk2Controller` is
+  present with drive 1 (the boot drive) empty -- exactly the
+  configuration that would otherwise hang silently -- a dialog explains
+  why and prompts for a disk before emulation starts, reusing
+  `DiskMenu`'s own insert logic rather than a second copy of it.
+  Dismissing the prompt without choosing a file still starts emulation;
+  this is a courtesy, not an enforced requirement, and the same hang
+  remains possible -- but the user was actually given the chance to
+  avoid it. Confirmed directly, not just assumed: during the hang, the
+  CPU is genuinely still executing (a real software polling loop
+  waiting for sync bytes, not an actual freeze), and cycles continue
+  advancing normally after a disk is inserted mid-hang -- so the
+  prompt's own claim that a disk can still be inserted later from the
+  Disk menu, even after emulation has already started without one, is
+  verified, not just asserted. A full successful boot from that
+  mid-hang insert remains unconfirmed, though, since no real bootable
+  disk image was available to test with -- only a hand-constructed
+  synthetic one. `ScreenPanel` is pure Swing glue
+  around `TextScreenRenderer` -- it owns no rendering logic of its own,
+  just painting the boolean grid that class produces, scaled up 3x from
+  the real 280x192 display. Flash state belongs to `Apple2Plus`'s own
+  timer loop, not the panel, for the same real-time-vs-cycle-accurate
+  reason `SystemClock` excludes wall-clock pacing from itself.
+  `KeyboardInputListener` is equally thin around `KeyboardMapper` -- no
+  mapping logic lives in the listener itself. `Apple2Plus` decides
+  pacing (`SystemClock` deliberately has no opinion on that) and
+  catches a runtime exception from emulation cleanly, stopping rather
+  than crashing the Swing event thread. Not independently visually
+  verifiable in this environment (a genuinely headless sandbox) --
+  verified instead by confirming construction reaches real window
+  creation with no exception across six startup scenarios (no config,
+  a working disk config with the card in its conventional slot, the
+  same config with the card in a different slot entirely, a bad card
+  type, a missing config file, and an unrecognized flag), that the full
+  real `--config` pipeline (not a hand-built substitute) runs stably
+  for 10 million cycles (~10 seconds of real Apple II time) with a disk
+  actually ticking alongside the CPU, and that `DiskMenu`'s own
+  structure and its eject action are correct when exercised directly
+  (a real file-chooser or message dialog can't be automated in this
+  headless environment, so the insert path's own dialog interaction,
+  and the boot-disk prompt's execution specifically, remain genuinely
+  untested here -- both `JFrame` construction and any dialog shown
+  after it fail identically in this sandbox, since neither can reach a
+  real display).
+
+#### Deliberately not implemented
+
+- **Swappable ROM images.** `SystemRom` and `CharacterRom` both hardcode
+  one specific classpath resource and a fixed checksum against the
+  stock Apple II+ ROM contents -- appropriate for catching corruption
+  of the real thing, wrong for anyone wanting to load a real,
+  historically common hobbyist modification (an alternate F8 ROM, a
+  custom character set). Needs an external override path (config-file
+  driven, matching `SlotCardLoader`'s existing pattern) that skips the
+  stock checksum in favor of a basic size sanity check when a
+  substitution is actually requested.
+- **Lowercase keyboard input plus a matching display.** `KeyboardRegister`
+  already passes lowercase ASCII through today with no changes needed;
+  the real gap is display -- the stock `CharacterRom` has no lowercase
+  glyphs at all, and real hardware needed either an 80-column card or a
+  software "soft-70" hi-res-based rendering trick to show them. This
+  depends on real video rendering existing at all, not on any small
+  addition to what's already built.
+- **The genuinely chip-unstable illegal opcodes** (`ANE`/`XAA`, `LXA`,
+  `SHA`, `SHX`, `SHY`, `TAS`) throw `UnsupportedOperationException` rather
+  than encode a guess. Different real NMOS chips disagree with each other on
+  these — some behaviors are documented as temperature-dependent on a
+  *single* chip — so there is no canonical behavior to be faithful to.
+- **A multi-latch expansion-ROM bus conflict** (`$C800`-`$CFFF`, when more
+  than one card's expansion-ROM latch is set at once) throws rather than
+  fabricating a result. Real hardware has no motherboard-level arbitration
+  here at all — only a per-card latch — and more than one latch being set
+  is a genuine, historically-documented electrical failure mode, not
+  something with a single correct answer.
+- **`IntegerBasicFirmwareCard`** doesn't exist as a class at all yet,
+  though its ROM data does (`IntegerBasicFirmwareCardRom`, verified
+  against Apple's own 1981 Level II Service Manual and MAME's source) --
+  a genuinely different, simpler card from `LanguageCard`: a fixed,
+  non-bank-switched ROM set selected by a plain two-address toggle, not
+  bank-switched RAM. Also occupies slot 0, mutually exclusive with
+  `LanguageCard`.
+- **General/keyboard soft switches** (`$C020`-`$C02F`, `$C040`-`$C04F` --
+  the speaker toggle at `$C030`-`$C03F`, the keyboard register at
+  `$C000`-`$C01F`, and the paddle timers at `$C060`-`$C07F` are all
+  done, see above) hasn't been designed yet at all. `$C061`-`$C063`
+  (joystick/paddle pushbuttons) is its own separate, still-undesigned
+  gap even though it shares a 16-byte block with the now-working
+  paddle reads.
+- **Writing to disk, at any level.** `Disk2LogicSequencer` correctly
+  simulates write-mode nibble shifting into its in-memory latch (the
+  real `SL0`/`SL1`/`LD` actions), but nothing persists that data
+  anywhere -- `TrackBitStream` has no write method, and neither
+  `WozDiskImage` nor `DskDiskImage` can write a file. A WOZ file also
+  has no way to be write-protected *by this project*: the flag is only
+  ever read from a file some other tool already set, since there's no
+  writer here to set it. Building this for real means a `TrackBitStream`
+  write path, a WOZ file writer (chunks, recomputed CRC32), and either
+  a DSK sector-level writer (simpler, but loses any bit-level
+  fidelity the disk originally had) or the much harder inverse of
+  `DskDiskImage`'s own encoder -- decoding a real GCR bitstream back
+  into sectors, checksums and all.
+- **Blank, freshly-formatted disk creation.** Depends on the same
+  writer infrastructure as the item above, plus a real DOS 3.3/ProDOS
+  volume table of contents -- an empty WOZ or DSK shell with no
+  filesystem structure at all isn't a blank disk DOS or ProDOS could
+  actually use.
