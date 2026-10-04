@@ -62,6 +62,19 @@ class BishopScreenSplitIntegrationTest {
 
     private static final int ROUTINE_START = 0x300;
 
+    /**
+     * Where the routine's closing RTS returns to: a {@code JMP} to itself,
+     * so the stepping that waits for the split frame to be published just
+     * spins here. The routine is entered by setting {@code pc} directly, not
+     * by a {@code JSR}, so without a return address pushed by hand its RTS
+     * would pop whatever the stack page holds -- which with RAM's random
+     * power-up contents (see {@code PowerOnRam}) sends the CPU into random
+     * memory, where it can hit an unstable undocumented opcode or rewrite
+     * the video soft switches. With zeroed RAM that happened to be harmless,
+     * which is why this went unnoticed.
+     */
+    private static final int PARKING_LOOP = 0x320;
+
     @Test
     void recordsTheExpectedTextLoResTextSplit() {
         SlotCard[] slots = new SlotCard[8];
@@ -73,6 +86,13 @@ class BishopScreenSplitIntegrationTest {
             bus.write(0xC051, 0); // TEXT on -- matches the real machine already being in Applesoft's text mode
 
             Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // reset vector irrelevant -- overridden below
+            bus.write(PARKING_LOOP, 0x4C);                     // JMP PARKING_LOOP
+            bus.write(PARKING_LOOP + 1, PARKING_LOOP & 0xFF);
+            bus.write(PARKING_LOOP + 2, PARKING_LOOP >> 8);
+            // Push a return address the way JSR does (high byte first, minus 1 -- RTS adds it back),
+            // standing in for the real program's CALL 768.
+            cpu.push((PARKING_LOOP - 1) >> 8);
+            cpu.push((PARKING_LOOP - 1) & 0xFF);
             cpu.pc = ROUTINE_START;
             SystemClock clock = new SystemClock(cpu);
             clock.addCycleListener(bus.videoScanner()::tick);

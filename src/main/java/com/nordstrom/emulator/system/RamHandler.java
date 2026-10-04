@@ -18,9 +18,9 @@ final class RamHandler implements AddressRangeHandler {
 
     private final byte[] ram;
 
-    /** Allocates {@code size} bytes of RAM. */
+    /** Allocates {@code size} bytes of RAM, in DRAM's random power-up state -- see {@link PowerOnRam}. */
     RamHandler(int size) {
-        ram = new byte[size];
+        ram = PowerOnRam.allocate(size);
     }
 
     @Override

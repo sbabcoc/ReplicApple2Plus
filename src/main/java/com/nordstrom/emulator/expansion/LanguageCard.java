@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.PowerOnRam;
 import com.nordstrom.emulator.system.SlotCard;
 
 import java.util.OptionalInt;
@@ -58,9 +59,10 @@ public final class LanguageCard implements SlotCard {
     private boolean bank1;    // false = bank 2, true = bank 1 (only matters for $D000-$DFFF)
     private WriteState writeState = WriteState.PROTECTED_IDLE;
 
-    private final byte[] bank1Ram = new byte[0x1000]; // $D000-$DFFF, bank 1
-    private final byte[] bank2Ram = new byte[0x1000]; // $D000-$DFFF, bank 2
-    private final byte[] upperRam = new byte[0x2000]; // $E000-$FFFF, single bank
+    // DRAM on the real card, so it powers up random like the motherboard's -- see PowerOnRam.
+    private final byte[] bank1Ram = PowerOnRam.allocate(0x1000); // $D000-$DFFF, bank 1
+    private final byte[] bank2Ram = PowerOnRam.allocate(0x1000); // $D000-$DFFF, bank 2
+    private final byte[] upperRam = PowerOnRam.allocate(0x2000); // $E000-$FFFF, single bank
 
     @Override
     public String getShortName() {
