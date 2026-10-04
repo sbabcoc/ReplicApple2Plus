@@ -77,7 +77,7 @@ class PaddleTimersPreadIntegrationTest {
 
     /** Runs the real ROM PREAD on a channel; a null position leaves that channel unplugged. */
     private static int runPread(int channel, Integer position) {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             int[] program = PREAD_PROGRAM.clone();
             program[1] = channel; // LDX #channel
             for (int i = 0; i < program.length; i++) {

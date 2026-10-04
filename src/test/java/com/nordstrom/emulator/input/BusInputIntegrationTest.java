@@ -47,7 +47,7 @@ class BusInputIntegrationTest {
 
     @Test
     void buttonsReachTheirAbsoluteAddresses() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             InputMapper mapper = mapperFor(bus);
             mapper.apply(PadSnapshot.NEUTRAL);
             assertEquals(0x00, bus.read(0xC061));
@@ -66,7 +66,7 @@ class BusInputIntegrationTest {
 
     @Test
     void thePaddleTimeScalesWithTheStickAcrossItsWholeRange() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             InputMapper mapper = mapperFor(bus);
 
             mapper.apply(PadSnapshot.builder().axis(PadAxis.LEFT_X, -1f).build());
@@ -84,7 +84,7 @@ class BusInputIntegrationTest {
 
     @Test
     void aMachineWithNoPadTheTimersNeverTripLikeAnEmptyGamePort() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             for (int channel = 0; channel < 4; channel++) {
                 assertFalse(tripsWithin(bus, channel, 20_000), "channel " + channel + " untouched, nothing plugged in");
             }
@@ -97,7 +97,7 @@ class BusInputIntegrationTest {
 
     @Test
     void connectingAPadAtRestPlugsInACenteredJoystickAndDisconnectingItUnplugsItAgain() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             InputMapper mapper = mapperFor(bus);
             mapper.apply(PadSnapshot.ABSENT);
             assertFalse(tripsWithin(bus, 0, 20_000));
@@ -113,7 +113,7 @@ class BusInputIntegrationTest {
 
     @Test
     void aParticularPaddleLeftUnboundStaysUnpluggedWhileTheOthersWork() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             InputMapping oneJoystick = InputMapping.fromSections(com.nordstrom.emulator.system.IniFile.parse(java.util.List.of(
                 "[paddle2]", "axis =", "[paddle3]", "axis =")));
             new InputMapper(oneJoystick, new BusInputSink(bus, Runnable::run)).apply(PadSnapshot.NEUTRAL);
@@ -127,7 +127,7 @@ class BusInputIntegrationTest {
 
     @Test
     void theFourPaddlesAreIndependent() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             InputMapper mapper = mapperFor(bus);
             mapper.apply(PadSnapshot.builder().axis(PadAxis.RIGHT_Y, 1f).build());
             int rightY = cyclesUntilExpired(bus, 3);

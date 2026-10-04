@@ -68,7 +68,7 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
     private final PaddleTimers paddleTimers = new PaddleTimers();
     private final GameButtons gameButtons = new GameButtons();
     private final SpeakerToggle speakerToggle = new SpeakerToggle();
-    private final SpeakerOutput speakerOutput = new SpeakerOutput(speakerToggle);
+    private final SpeakerOutput speakerOutput;
     private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
     private final VideoScanner videoScanner = new VideoScanner(videoSoftSwitches);
     private final ScanlineModes scanlineModes = new ScanlineModes(videoSoftSwitches);
@@ -80,6 +80,29 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
      * @param slots the machine's populated slots, length 8, indices 0-7
      */
     public MotherboardBus(SlotCard[] slots) {
+        this(slots, true);
+    }
+
+    /**
+     * A bus whose speaker never opens the host's audio device -- for tests,
+     * which build many buses and never listen to them. Opening and closing a
+     * real audio line per bus is cheap on some hosts but slow on others:
+     * through Termux's PulseAudio bridge it made
+     * {@code PaddleTimersPreadIntegrationTest}, which builds about 70 buses,
+     * take a very long time, and stopping PulseAudio made it fast again.
+     * Everything else behaves exactly as with {@link #MotherboardBus(SlotCard[])};
+     * the speaker runs its existing no-device path, the same one the
+     * emulator falls back to on a host with no audio at all.
+     *
+     * @param slots the machine's populated slots, length 8, indices 0-7
+     * @return a new bus with a silent speaker
+     */
+    public static MotherboardBus withoutAudio(SlotCard[] slots) {
+        return new MotherboardBus(slots, false);
+    }
+
+    private MotherboardBus(SlotCard[] slots, boolean openAudioDevice) {
+        speakerOutput = openAudioDevice ? new SpeakerOutput(speakerToggle) : new SpeakerOutput(speakerToggle, null);
         if (slots.length != 8) {
             throw new IllegalArgumentException("slots must have length 8 (slots 0-7)");
         }

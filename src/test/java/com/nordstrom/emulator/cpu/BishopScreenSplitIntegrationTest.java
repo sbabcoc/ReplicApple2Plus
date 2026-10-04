@@ -78,7 +78,7 @@ class BishopScreenSplitIntegrationTest {
     @Test
     void recordsTheExpectedTextLoResTextSplit() {
         SlotCard[] slots = new SlotCard[8];
-        try (MotherboardBus bus = new MotherboardBus(slots)) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(slots)) {
             for (int i = 0; i < BISHOP_ROUTINE.length; i++) {
                 bus.write(ROUTINE_START + i, BISHOP_ROUTINE[i]);
             }

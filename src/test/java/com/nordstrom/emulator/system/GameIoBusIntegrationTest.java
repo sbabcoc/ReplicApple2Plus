@@ -17,7 +17,7 @@ class GameIoBusIntegrationTest {
 
     @Test
     void everyGameIoAndGeneralSwitchAddressIsReadableAndWritable() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             int[][] ranges = {
                 {0xC020, 0xC02F},  // cassette output toggle
                 {0xC040, 0xC04F},  // utility strobe
@@ -35,7 +35,7 @@ class GameIoBusIntegrationTest {
 
     @Test
     void aPushbuttonPressReachesTheCpuAtItsAbsoluteAddress() {
-        try (MotherboardBus bus = new MotherboardBus(new SlotCard[8])) {
+        try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
             assertEquals(0x00, bus.read(0xC061));
             bus.gameButtons().setPressed(0, true);
             assertEquals(0x80, bus.read(0xC061), "button 0 -> $C061");
