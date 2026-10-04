@@ -30,6 +30,19 @@ class NetworkPadProviderTest {
     private PadProvider provider;
     private ByteArrayOutputStream log;
 
+    /**
+     * A loopback UDP port the OS will actually grant, found by letting it
+     * assign one and then releasing it for the test to bind. Not fixed
+     * numbers: on Android (Termux/PRoot) the OS refused to bind 41009 with
+     * "Operation not permitted" -- reproducibly, and from Python as well as
+     * Java -- so any hard-coded port can be unusable on some host.
+     */
+    private static int freePort() throws Exception {
+        try (DatagramSocket probe = new DatagramSocket(0, InetAddress.getByName("127.0.0.1"))) {
+            return probe.getLocalPort();
+        }
+    }
+
     private void startProviderOn(int port) throws Exception {
         log = new ByteArrayOutputStream();
         provider = NetworkPadProvider.create(port, new PrintStream(log, true));
@@ -75,7 +88,7 @@ class NetworkPadProviderTest {
 
     @Test
     void aFullSnapshotPacketParsesCorrectly() throws Exception {
-        int port = 41001;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=-0.23 LEFT_Y=0.87 RIGHT_X=0.00 RIGHT_Y=1.00 BUTTONS=A,DPAD_UP");
 
@@ -91,7 +104,7 @@ class NetworkPadProviderTest {
 
     @Test
     void anAxisNotMentionedDefaultsToZero() throws Exception {
-        int port = 41002;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=1.00");
 
@@ -104,7 +117,7 @@ class NetworkPadProviderTest {
 
     @Test
     void emptyButtonsFieldMeansExplicitlyNothingPressed() throws Exception {
-        int port = 41003;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=0.50 BUTTONS=");
 
@@ -117,7 +130,7 @@ class NetworkPadProviderTest {
 
     @Test
     void theLiteralAbsentBodyReportsNoPad() throws Exception {
-        int port = 41004;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=1.00");
         pollUntilPresent(2000);
@@ -129,7 +142,7 @@ class NetworkPadProviderTest {
 
     @Test
     void aBadFieldIsSkippedButGoodFieldsInTheSamePacketStillApply() throws Exception {
-        int port = 41005;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=0.75 NOT_AN_AXIS=3 BUTTONS=A,NOT_A_BUTTON,B");
 
@@ -142,7 +155,7 @@ class NetworkPadProviderTest {
 
     @Test
     void aPacketWithNothingUsableIsDiscardedKeepingTheLastGoodState() throws Exception {
-        int port = 41006;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=0.42");
         PadSnapshot good = pollUntilPresent(2000);
@@ -156,7 +169,7 @@ class NetworkPadProviderTest {
 
     @Test
     void onlyTheMostRecentOfSeveralQueuedPacketsIsKept() throws Exception {
-        int port = 41007;
+        int port = freePort();
         startProviderOn(port);
         for (int i = 0; i <= 10; i++) {
             send(port, "LEFT_X=" + (i / 10.0));
@@ -168,7 +181,7 @@ class NetworkPadProviderTest {
 
     @Test
     void goingQuietForOverASecondReportsAbsent() throws Exception {
-        int port = 41008;
+        int port = freePort();
         startProviderOn(port);
         send(port, "LEFT_X=1.00");
         pollUntilPresent(2000);
@@ -179,14 +192,14 @@ class NetworkPadProviderTest {
 
     @Test
     void neverConnectingAtAllReadsAsAbsentFromTheStart() throws Exception {
-        int port = 41009;
+        int port = freePort();
         startProviderOn(port);
         assertEquals(PadSnapshot.ABSENT, provider.poll());
     }
 
     @Test
     void aSecondProviderCannotBindTheSamePortAndReturnsNullInsteadOfThrowing() throws Exception {
-        int port = 41010;
+        int port = freePort();
         startProviderOn(port);
         ByteArrayOutputStream secondLog = new ByteArrayOutputStream();
         PadProvider second = NetworkPadProvider.create(port, new PrintStream(secondLog, true));
@@ -196,7 +209,7 @@ class NetworkPadProviderTest {
 
     @Test
     void closeReleasesThePortForReuse() throws Exception {
-        int port = 41011;
+        int port = freePort();
         startProviderOn(port);
         provider.close();
         provider = null; // tearDown must not double-close
@@ -208,7 +221,7 @@ class NetworkPadProviderTest {
 
     @Test
     void descriptionReflectsConnectionState() throws Exception {
-        int port = 41012;
+        int port = freePort();
         startProviderOn(port);
         assertTrue(provider.description().contains("waiting"), provider.description());
 
