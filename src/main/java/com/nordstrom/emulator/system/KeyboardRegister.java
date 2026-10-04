@@ -76,8 +76,16 @@ public final class KeyboardRegister {
         strobe = false;
     }
 
-    /** Package-visible for tests. */
-    boolean isStrobeSet() {
+    /**
+     * Whether a key is waiting that software hasn't yet acknowledged by
+     * touching $C010. Public so injected typing (Paste, Type File...) can
+     * wait for it to clear before loading the next character: the real
+     * keyboard has a single-character latch and no buffer, so loading a
+     * new key while this is still set overwrites one software never saw.
+     *
+     * @return true if the strobe (bit 7 of $C000) is set
+     */
+    public boolean isStrobeSet() {
         return strobe;
     }
 }

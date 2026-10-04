@@ -172,7 +172,7 @@ public final class Apple2Plus {
      * @param toolbar the toolbar currently wired to this machine's CPU
      */
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
-                            PadPoller padPoller, JToolBar toolbar) {}
+                            PadPoller padPoller, JToolBar toolbar, TypingFeeder typing) {}
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
@@ -362,6 +362,8 @@ public final class Apple2Plus {
         if (disk != null) {
             clock.addCycleListener(disk::tick);
         }
+        TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
+        clock.addCycleListener(typing::tick);
         ScreenPanel screen = new ScreenPanel(bus, bus.scanlineModes());
 
         int[] ticksSinceFlash = {0}; // touched only by the emulation thread
@@ -392,7 +394,7 @@ public final class Apple2Plus {
 
         JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, loop, onReboot) : null;
 
-        return new Machine(disk, bus, screen, loop, padPoller, toolbar);
+        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing);
     }
 
     /**
@@ -442,13 +444,12 @@ public final class Apple2Plus {
         frame.getContentPane().add(next.screen());
         frame.getContentPane().add(next.toolbar(), BorderLayout.NORTH);
 
+        JMenuBar menuBar = new JMenuBar();
+        menuBar.add(EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()));
         if (next.disk() != null) {
-            JMenuBar menuBar = new JMenuBar();
             menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));
-            frame.setJMenuBar(menuBar);
-        } else {
-            frame.setJMenuBar(null);
         }
+        frame.setJMenuBar(menuBar);
 
         KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(), next.loop());
         frame.addKeyListener(keyboardInput);

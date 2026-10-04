@@ -2,39 +2,34 @@
 
 Tracked ideas not yet scheduled for implementation.
 
-## Type-from-file keystroke injection
+## Type-from-file keystroke injection -- done, as the Edit menu
 
-Feed a plain text file's contents into the emulator as simulated
-keystrokes, one character at a time, via the same
-`bus.keyboardRegister().keyPressed(...)` path already used internally
-for testing. Solves a real, concrete gap: there is currently no way to
-get more than a line or two of BASIC into the emulator without typing
-it by hand -- no clipboard support, and nothing like Virtual ][''s own
-AppleScript `type line "..."` automation.
+Built as an "Edit" menu rather than a CLI option (a command-line option
+is only processed at launch -- far too restrictive), and widened to the
+clipboard integration that was originally set aside: see `EditMenu.java`,
+`TypingFeeder.java` and `system/ScreenText.java`.
 
-Surfaced while trying to manually verify the Lo-Res renderer against
-Bob Bishop's "floating bus" demo program (Softalk, October 1982) --
-typing a 20+ line BASIC listing by hand at the emulator's own window is
-real, avoidable friction.
-
-**Scope note**: a general clipboard integration (paste-to-keystrokes,
-copy-from-screen) was considered and set aside as solving a broader
-problem than what's actually needed here -- see conversation history
-for the fuller design discussion (case-folding ambiguity on live
-clipboard paste, live-paste timing races, screen-copy selection
-semantics). A file-based loader sidesteps all of that: a `.bas` file is
-already in the correct case, and there's no "was this meant to be
-pasted" ambiguity to resolve.
-
-**Design questions still open, not yet decided:**
-- Trigger: `--type-file <path>` CLI option, a "Type File..." menu item,
-  or both? Leaning toward explicit trigger (a keypress or menu action)
-  rather than "start typing once booted," since "booted" isn't a clean,
-  reliably detectable signal for a general-purpose emulator.
-- Line-ending translation: each `\n` (or `\r\n`) in the file becomes a
-  single `\r` keystroke (Apple II's own Return), not a raw pass-through.
-- Pacing between characters: fixed delay, or configurable (matching the
-  spirit of Virtual ][''s own "keyboard delay" setting)?
+- **Paste** and **Type File...** feed the same `TypingFeeder`; only the
+  text's source differs. **Stop Typing** discards whatever is left.
+- **Pacing** is gated on the keyboard strobe, not a fixed delay: the next
+  key loads only once software has cleared $C010 for the previous one.
+  That retired the "live-paste timing races" concern from the original
+  scope note -- injection is lossless at whatever pace the running
+  software reads the keyboard.
+- **Line endings**: `\r\n`, `\n` and lone `\r` each become one Return.
+  Everything else goes through `KeyboardMapper.mapTypedCharacter`, so
+  injected text folds to uppercase exactly like typed text -- which also
+  retired the "case-folding ambiguity" concern.
+- **Copy Screen Text** copies the whole displayed text (trailing spaces
+  and trailing blank rows trimmed), using the same per-scan-line modes
+  `ScreenPanel` paints from: all 24 rows in text mode, only the text rows
+  in mixed mode, nothing in full-screen graphics. Mouse-selection copy
+  remains a possible later addition.
+- **Copy Screen Image** copies exactly what the window shows, at its
+  on-screen size, by having `ScreenPanel` paint itself into an offscreen
+  image -- the same `paint` call Swing makes, so it can't drift from the
+  display.
+- Deliberately no keyboard shortcuts -- menu items only.
 
 ## Reset and Reboot toolbar buttons -- both done
 
@@ -250,6 +245,16 @@ don't work with VideoTerm active -- substitute `PRINT CHR$(12)`;
 ignored since they only affect the standard Apple display) -- relevant
 for deciding how much software-compatibility behavior to model versus
 just the hardware registers.
+
+**Edit menu copying, once VideoTerm output exists**: Copy Screen Image
+should carry over as-is, since it snapshots whatever panel is showing --
+in the default single-window mode, whichever display the Soft Video
+Switch has selected (annunciator 0 plus text mode -- see
+`HARDWARE-REFERENCE.md`); in dual-window mode, each window should copy
+its own content. Copy Screen Text will need a VideoTerm counterpart to
+`system/ScreenText`, decoding the card's own 2KB on-board VRAM -- read
+from the CRTC's R12/R13 start address, which scrolling depends on --
+rather than the motherboard text pages.
 
 ## Disk write support -- done for WOZ; DSK still not started
 
