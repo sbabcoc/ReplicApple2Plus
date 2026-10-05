@@ -170,8 +170,7 @@ final class DiskMenu {
          * <p>
          * The title names the protection state either way, never only
          * when protected: a state shown solely by something's absence is
-         * easy to misread -- a protected disk was once mistaken for a
-         * writable one under the earlier single-checkbox design.
+         * easy to misread.
          */
         void refresh() {
             boolean present = drive.isPresent();

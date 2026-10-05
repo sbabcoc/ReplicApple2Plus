@@ -13,14 +13,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * faithful model.
  * <p>
  * This matters for real software, not just for accuracy's sake: programs
- * that read memory they never initialized behave differently on all-zero
- * RAM. Diagnosed case: Joust's random-number generator seeds itself from
- * $4D-$4F without ever setting them -- relying on whatever power-up left
- * there, or on the Monitor's KEYIN having churned $4E/$4F while waiting at
- * a prompt. With all-zero RAM and nothing run before it (booting the game
- * directly, or after Reboot), the seed stayed 00 00 00, the generator
- * returned the same value forever, and the game hung in a loop at $A32D
- * picking a random number that had to differ from the last one.
+ * that read memory they never initialized -- a random-number seed, for
+ * instance, which some games never set -- behave differently on all-zero
+ * RAM than on real hardware.
  */
 public final class PowerOnRam {
 

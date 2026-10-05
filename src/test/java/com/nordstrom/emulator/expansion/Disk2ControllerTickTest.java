@@ -407,16 +407,12 @@ class Disk2ControllerTickTest {
     }
 
     /**
-     * The diagnosed INIT HELLO,D2 failure, end to end through the real
-     * soft switches: writes a sector-style byte run with DOS 3.3's own
-     * write-loop shape (STA $C08D,X loads the byte, ORA $C08C,X four
-     * cycles later returns to SHIFT-FOR-WRITE, 32 cycles per byte) and
-     * confirms the track receives every byte as exactly 8 consecutive
-     * bits. Before the fix, the disk only advanced on LSS shift actions,
-     * so the one cell per byte spent in LD was neither written nor
-     * skipped -- every byte landed as 7 bits with bit 0 lost, which is
-     * exactly what the post-write READ log showed (written 96 96 96...
-     * read back as 97 B9 E5 CB).
+     * End to end through the real soft switches: writes a sector-style
+     * byte run with DOS 3.3's own write-loop shape (STA $C08D,X loads the
+     * byte, ORA $C08C,X four cycles later returns to SHIFT-FOR-WRITE, 32
+     * cycles per byte) and confirms the track receives every byte as
+     * exactly 8 consecutive bits -- including the cell spent in LOAD
+     * mode, which must still be written and still advance the disk.
      */
     @Test
     void consecutiveBytesWrittenWithDosLoopTimingLandAsEightBitsEach(@TempDir Path tempDir) throws IOException {
@@ -496,8 +492,8 @@ class Disk2ControllerTickTest {
 
     /**
      * The write-protect sensor is read when software can observe it -- on
-     * entering sense or write mode -- not on every tick (a per-tick host
-     * filesystem check made DSK booting crawl under Termux/PRoot). So a
+     * entering sense or write mode -- not on every tick, since it can
+     * cost a host filesystem call. So a
      * protection change made while the disk sits in the drive must still be
      * seen the next time software senses the notch, in both directions.
      */
@@ -516,5 +512,41 @@ class Disk2ControllerTickTest {
         controller.drive(0).setWriteProtected(false);
         controller.tick(1000);
         assertFalse(senseNotch(controller), "and so must unprotecting it");
+    }
+
+    /**
+     * A write still held in memory (no track change yet, so not persisted)
+     * must reach the image file before a different disk replaces it in the
+     * same drive -- the same guarantee eject() gives.
+     */
+    @Test
+    void insertingADifferentDiskSavesTheReplacedDisksPendingWrites(@TempDir Path tempDir) throws IOException {
+        Path first = WozTestFixtures.buildSyntheticWozFile(Files.createDirectory(tempDir.resolve("a")), false);
+        Path second = WozTestFixtures.buildSyntheticWozFile(Files.createDirectory(tempDir.resolve("b")), false);
+        Disk2Controller controller = new Disk2Controller();
+        controller.drive(0).insert(first);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+        controller.drive(0).currentTrackStream();
+        writeKnownByteToTrack0(controller, 0xD5); // written, still only in memory
+        controller.drive(0).insert(second);       // swap without ejecting
+
+        assertEquals("11010101", bitsAt(WozDiskImage.load(first).trackAt(0), FIRST_WRITTEN_BIT, 8),
+            "the replaced disk's pending write must have been saved to its file");
+    }
+
+    @Test
+    void reinsertingTheSameDiskKeepsItsPendingWrites(@TempDir Path tempDir) throws IOException {
+        Path wozFile = WozTestFixtures.buildSyntheticWozFile(tempDir, false);
+        Disk2Controller controller = new Disk2Controller();
+        controller.drive(0).insert(wozFile);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // select drive 1
+        controller.drive(0).currentTrackStream();
+        writeKnownByteToTrack0(controller, 0xD5);
+        controller.drive(0).insert(wozFile); // re-insert, e.g. picked again from the Disk menu
+
+        assertEquals("11010101", bitsAt(controller.drive(0).diskImage().trackAt(0), FIRST_WRITTEN_BIT, 8),
+            "re-inserting must not reload the file over a write that only existed in memory");
     }
 }

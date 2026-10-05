@@ -107,11 +107,9 @@ public final class Disk2Controller implements SlotCard {
      * The selected drive's write-protect sensor, as last read -- see
      * {@link #senseWriteProtect}. Cached rather than read on every tick:
      * for a DSK (and an unprotected WOZ) the state comes from the host
-     * file's permission, a filesystem call, and making one after every
-     * CPU instruction while the motor ran was the entire reason DSK booting
-     * crawled under Termux/PRoot, which intercepts every system call --
-     * measured there at 24.1s for 15 emulated seconds, versus 0.9s without
-     * the per-tick call.
+     * file's permission, a filesystem call -- far too costly to make after
+     * every CPU instruction, especially where system calls are expensive
+     * (Termux/PRoot intercepts each one).
      */
     private boolean writeProtected;
     private final Disk2LogicSequencer logicSequencer = new Disk2LogicSequencer();
@@ -257,13 +255,10 @@ public final class Disk2Controller implements SlotCard {
                 // read mode the cell's bit feeds the LSS; in either Q7=1
                 // mode the cell just ended receives a 1 if the write line
                 // changed level during it, else a 0 (see
-                // Disk2LogicSequencer#writeSignal). Diagnosed failure this
-                // fixes (INIT HELLO,D2 I/O ERROR): advancing only when a
-                // shift action fired skipped the one cell per byte where
-                // the LSS performs LD instead of a shift, so every byte
-                // reached the track as 7 bits (bit 0 lost) -- confirmed
-                // bit-for-bit against the post-write READ log, where
-                // written 96 96 96... read back as 97 B9 E5 CB.
+                // Disk2LogicSequencer#writeSignal). Tying the advance or the
+                // written bit to LSS shift actions instead would skip the
+                // one cell per byte where the LSS performs LD, putting
+                // every byte on the disk as 7 bits.
                 if (stream != null) {
                     if (!q7) {
                         pulseBit = stream.nextBit();
@@ -652,6 +647,7 @@ public final class Disk2Controller implements SlotCard {
                 throw new IOException("That disk is already in drive " + sibling.number
                     + " -- eject it there first: " + imagePath);
             }
+            persistBeforeReplacing(); // before loading, so re-inserting the same file reads the saved writes
             String name = imagePath.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
             DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
                 ? DskDiskImage.load(imagePath)
@@ -669,6 +665,7 @@ public final class Disk2Controller implements SlotCard {
             // per-read randomization before the disk has even been used
             // once. Keeping createBlank's own returned instance, with its
             // real in-memory virgin tracking intact, is the whole point.
+            persistBeforeReplacing();
             // Format by extension, matching insert()'s own dispatch.
             String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
             DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
@@ -692,6 +689,18 @@ public final class Disk2Controller implements SlotCard {
         }
 
         /** Shared by {@link #insert} and {@link #insertNewBlankDisk} once each has its own, already-built {@link DiskImage}. */
+        /**
+         * Saves the loaded disk's pending writes before something replaces
+         * it -- the same guarantee {@link #eject} gives, by the same rule:
+         * if saving fails, this throws and the current disk stays in place,
+         * keeping the only copy of those writes rather than dropping it.
+         */
+        private void persistBeforeReplacing() throws IOException {
+            if (diskImage != null) {
+                diskImage.persist();
+            }
+        }
+
         private void insertLoadedImage(DiskImage image, Path imagePath) {
             diskImage = image;
             currentImage = imagePath;

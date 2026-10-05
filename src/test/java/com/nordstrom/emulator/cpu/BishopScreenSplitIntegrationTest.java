@@ -70,8 +70,7 @@ class BishopScreenSplitIntegrationTest {
      * would pop whatever the stack page holds -- which with RAM's random
      * power-up contents (see {@code PowerOnRam}) sends the CPU into random
      * memory, where it can hit an unstable undocumented opcode or rewrite
-     * the video soft switches. With zeroed RAM that happened to be harmless,
-     * which is why this went unnoticed.
+     * the video soft switches.
      */
     private static final int PARKING_LOOP = 0x320;
 

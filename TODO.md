@@ -162,17 +162,6 @@ changing code.
   If `GR` shows colored blocks instead of text along the bottom, this is
   why. Copy Screen Text follows the displayed modes, so it inherits the
   same behavior.
-- **Swapping a disk without ejecting may drop unsaved writes.**
-  `Disk2Controller.Drive.insertLoadedImage` replaces the current image
-  without persisting it first, unlike `eject()`. Writes still in memory
-  (persistence happens on track change, eject or exit) could be lost by
-  inserting another disk -- or re-inserting the same one -- directly.
 - **Blank WOZ images leave INFO "optimal bit timing" at 0.**
   `WozDiskImage.buildBlankFileBytes` doesn't set INFO byte 39; the WOZ
   spec gives 32 (4 µs) for 5.25" disks. Not known to cause a problem.
-- **Recent code comments narrate diagnoses.** Comments added with the
-  disk write-line, write-protect sensing, power-on RAM and test-audio
-  fixes recount the failures and measurements that led to them, against
-  this project's "comments carry rationale, not narration" convention.
-  That history is in version control and TASK_RETRO.md; the comments
-  could be trimmed to the rationale alone.

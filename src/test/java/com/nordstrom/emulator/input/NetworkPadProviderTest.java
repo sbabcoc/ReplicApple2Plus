@@ -33,9 +33,8 @@ class NetworkPadProviderTest {
     /**
      * A loopback UDP port the OS will actually grant, found by letting it
      * assign one and then releasing it for the test to bind. Not fixed
-     * numbers: on Android (Termux/PRoot) the OS refused to bind 41009 with
-     * "Operation not permitted" -- reproducibly, and from Python as well as
-     * Java -- so any hard-coded port can be unusable on some host.
+     * numbers: a host can refuse a particular port outright (Android does,
+     * for some), so any hard-coded port can be unusable somewhere.
      */
     private static int freePort() throws Exception {
         try (DatagramSocket probe = new DatagramSocket(0, InetAddress.getByName("127.0.0.1"))) {

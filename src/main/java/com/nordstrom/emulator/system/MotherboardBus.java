@@ -86,11 +86,8 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
     /**
      * A bus whose speaker never opens the host's audio device -- for tests,
      * which build many buses and never listen to them. Opening and closing a
-     * real audio line per bus is cheap on some hosts but slow on others:
-     * through Termux's PulseAudio bridge it made
-     * {@code PaddleTimersPreadIntegrationTest}, which builds about 70 buses,
-     * take a very long time, and stopping PulseAudio made it fast again.
-     * Everything else behaves exactly as with {@link #MotherboardBus(SlotCard[])};
+     * real audio line per bus is cheap on some hosts but slow on others
+     * (through Termux's PulseAudio bridge, for one). Everything else behaves exactly as with {@link #MotherboardBus(SlotCard[])};
      * the speaker runs its existing no-device path, the same one the
      * emulator falls back to on a host with no audio at all.
      *

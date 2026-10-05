@@ -254,6 +254,147 @@ at that point is stored as zeroed sectors, since the format can't record
 "unformatted" for one track among formatted ones. `INIT` writes every
 track, so normal use loses nothing to that.
 
+### Disk swapping saves pending writes -- done
+
+`Drive.insert` and `Drive.insertNewBlankDisk` replaced the loaded image
+without persisting it, unlike `eject()`. A write still held in memory --
+persistence otherwise happens on track change, eject and exit -- was
+lost by inserting another disk directly, and re-inserting the same disk
+reloaded its file over the only copy. Confirmed with two tests that
+failed before the fix (a swap, and a re-insert). Both paths now call
+`persistBeforeReplacing()` first, with `eject()`'s rule: if saving
+fails, the call throws and the current disk stays loaded.
+
+Application exit was already covered: a shutdown hook (normal window
+close or SIGINT/SIGTERM) stops the emulation loop and then persists the
+disks of whichever machine is current, and Reboot persists the outgoing
+machine's disks the same way.
+
+### Disk write path: the write line, not shift actions -- done
+
+**Symptom**: `INIT HELLO,D2` failed with an I/O error on a blank WOZ
+disk. A diagnostic build logged every byte the controller loaded for
+writing and every byte read back afterward: the loaded bytes were
+correct, but a data field written as `96 96 96...` read back as `97 B9
+E5 CB` repeating. That pattern is exactly `96` (`10010110`) with its
+last bit dropped -- `1001011` repeating -- so every byte reached the
+track as 7 bits.
+
+**Cause**: `Disk2LogicSequencer` produced a written bit only on an LSS
+shift action with Q6 low, and the controller advanced the disk only
+when a bit was written. In the bit cell where DOS reloads the latch
+(`STA $C08D,X` ... `ORA $C08C,X`), the LSS performs LD instead of a
+shift, so that cell was neither written nor passed over. Replaying the
+project's own ROM table with DOS's loop timing reproduced it: 7.0 bits
+per byte for every 2-5 cycle LOAD window.
+
+**Fix**, modeled on MAME's `wozfdc`: the write line is the sequencer's
+state bit 3 (`writeSignal()`), and each change in its level is one flux
+transition, in both Q7=1 modes; the disk advances one bit cell per 8
+LSS ticks in every mode. The same replay then gave exactly 8 bits per
+byte for every LOAD window from 3 to 10 LSS ticks. Confirmed in use:
+`INIT`, `SAVE`, and booting from the written disk.
+
+### Random power-on RAM -- done
+
+**Symptom**: Joust (a DSK) froze just as play started, after the usual
+sequence -- `C` at the disk's menu, Space past the crack screen, Space
+at the title.
+
+**Cause**: at the start of play the game picks a random number from 1
+to 4 that differs from the previous one (loop at `$A32D`), retrying
+until it gets one. Its generator (`$AB22`) seeds from `$4D`-`$4F`,
+which the game never sets: it relies on power-up garbage, or on the
+Monitor's KEYIN having churned `$4E`/`$4F` while waiting at a prompt.
+The menu and title read the keyboard directly, so KEYIN never ran, and
+the emulator powered up with all-zero RAM -- the seed stayed `00 00
+00`, the generator returned the same value forever, and the loop never
+ended.
+
+**Evidence**: every commit from hi-res support onward froze identically
+from a cold start. Booting the System Master first and typing at the
+`]` prompt, then `PR#6` into Joust, worked (KEYIN had seeded the RNG);
+Reboot straight into Joust froze. Some seeds collapse to zero in this
+generator (`00 5A 00` did); `FF 00 00` (what AppleWin's default
+`FF FF 00 00` power-up pattern leaves there) and fully random seeds
+both played.
+
+**Fix**: RAM -- the motherboard's 48K and the Language Card's 16K --
+powers up random, as real DRAM does (`PowerOnRam`). Six random
+power-ons through the exact key sequence all played.
+
+**Side effect caught**: `BishopScreenSplitIntegrationTest` began failing
+17 of 20 runs. It enters Bob Bishop's routine by setting `pc` directly,
+so the routine's `RTS` popped whatever the stack page held -- harmless
+`$0000` with zeroed RAM, a jump into random memory with random RAM. The
+test now pushes a return address to a one-instruction parking loop, as
+`JSR` would; 40 of 40 runs pass.
+
+### Write-protect sensing off the per-tick path -- done
+
+**Symptom**: on the Debian/Termux/PRoot setup, DSK images appeared not
+to boot -- stuck at the "APPLE ][" banner -- while a WOZ System Master
+booted. Left long enough, a DSK did boot: it was running far below real
+time.
+
+**Cause**: `Disk2Controller.tick()` asked the disk image for its
+write-protect state after every CPU instruction while the motor ran.
+Since `d7170b5`, `DskDiskImage.isWriteProtected()` checks the host
+file's permission (`Files.isWritable`) -- a system call each time, and
+PRoot intercepts every system call. A protected WOZ answers from its
+INFO flag without touching the filesystem, which is why the System
+Master was unaffected.
+
+**Evidence**, timing a 15-emulated-second DSK boot under PRoot: `7f9f8d4`
+(before the change) 1.3 s; `d7170b5` 20.8 s; with the fix 0.9 s. (2.2 s
+natively, without PRoot.)
+
+**Fix**: the controller caches the sensor and reads it only when
+software can observe it -- entering sense mode (Q6 on, Q7 off), entering
+write mode (Q7 on), and selecting a drive. A test confirms a protection
+change while the disk sits in the drive is still seen at the next
+sense, in both directions.
+
+### Tests build buses without audio -- done
+
+**Symptom**: `PaddleTimersPreadIntegrationTest` took a very long time on
+Termux.
+
+**Cause**: every `MotherboardBus` opened a real audio line, and that
+test builds about 70 buses. Through Termux's PulseAudio bridge, each
+open and close was slow. Confirmed by stopping PulseAudio, which made
+the test fast.
+
+**Fix**: `MotherboardBus.withoutAudio(slots)` gives tests a bus whose
+speaker takes its existing no-device path; the four test classes that
+build buses use it, and a guard test checks it never opens a device.
+
+### Network controller tests use OS-assigned ports -- done
+
+**Symptom**: `NetworkPadProviderTest.neverConnectingAtAllReadsAsAbsentFromTheStart`
+failed on Termux/PRoot, reproducibly, while the other eleven tests in
+the class passed.
+
+**Cause**: binding UDP `127.0.0.1:41009` was refused with "Operation not
+permitted" (EPERM, not "address in use") -- by the OS itself: Python's
+bind of the same port failed the same way. The tests used fixed ports
+41001-41012.
+
+**Fix**: each test asks the OS for a free port, releases it, and uses
+that number. (Running the emulator there with `--network-input 41009`
+would fail for the same reason.)
+
+### Write-protect control: a named choice, not a checkbox -- done
+
+A disk image was left write-protected (set while checking how Virtual
+][ handles protection) and later read as writable: the single
+"Write-Protected" checkbox named only one state, and writable was shown
+only by a missing checkmark. Virtual ][ showing the disk as protected
+was correct -- the image's INFO flag was `01` and the host file was
+read-only, both set by that checkbox. Replaced with a Writable/Protected
+radio pair, and every drive title now names its state (`[Writable]` or
+`[Protected]`), so neither state is shown only by an absence.
+
 ---
 
 ## Component development history (moved from README.md)

@@ -203,13 +203,10 @@ class Disk2LogicSequencerTest {
     }
 
     /**
-     * The diagnosed INIT HELLO,D2 failure, pinned at the sequencer
-     * level: under DOS's real write-loop timing (a reload once every 32
-     * CPU cycles), every byte must reach the disk as exactly 8 bits.
-     * The previous model only produced a written bit on a shift action,
-     * and the cell during which the LSS performs LD instead of a shift
-     * produced none -- so every byte went out as 7 bits with bit 0 lost
-     * (96 96 96... read back as 97 B9 E5 CB).
+     * Under DOS's real write-loop timing (a reload once every 32 CPU
+     * cycles), every byte must reach the disk as exactly 8 bits --
+     * including the bit written during the cell in which the LSS
+     * performs LD instead of a shift.
      * <p>
      * Exercised across every LOAD-window length from 3 to 10 LSS ticks.
      * DOS's real window is one 4- or 5-cycle instruction (8 to 10 ticks,
@@ -234,9 +231,7 @@ class Disk2LogicSequencerTest {
     }
 
     /**
-     * Direct contradiction of the old model's "load mode never writes"
-     * rule: real hardware keeps driving the write line in BOTH Q7=1
-     * modes, so a cell spent entirely in LOAD mode with the latch's MSB
+     * Real hardware keeps driving the write line in BOTH Q7=1 modes, so a cell spent entirely in LOAD mode with the latch's MSB
      * set still puts a 1 on the disk.
      */
     @Test
