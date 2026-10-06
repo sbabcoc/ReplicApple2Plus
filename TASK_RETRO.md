@@ -395,6 +395,96 @@ read-only, both set by that checkbox. Replaced with a Writable/Protected
 radio pair, and every drive title now names its state (`[Writable]` or
 `[Protected]`), so neither state is shown only by an absence.
 
+### Videx VideoTerm 80-column card -- done
+
+Built from the primary-source spec in HARDWARE-REFERENCE.md section 3:
+`VideoTerm` (the card), `VideoTermRoms` (both ROMs, CRC-checked),
+`VideoTermRenderer` (drawing and text), `EightyColumnView` (display),
+plus `VideoSoftSwitches.softVideoSwitchSelects80Columns()`.
+
+**Two firmware facts settled from the ROM binary while building it**
+(now in HARDWARE-REFERENCE.md): the card's `$C300` page is the image's
+last 256 bytes (`BIT $FFCB` entry, Pascal 1.1 ID bytes), and the
+firmware stores each character with bit 7 taken from the character-set
+flag, so standard text always has bit 7 clear.
+
+**Decisions:**
+- The card models hardware only -- device select (CRTC index/data, VRAM
+  page on any access), the `$C300` page, firmware at `$C800`, the paged
+  2K VRAM window at `$CC00` -- and the real firmware does everything
+  else. VRAM powers up random, like the motherboard RAM.
+- The renderer follows the CRTC as programmed (R1/R6/R9 geometry, R12/R13
+  start address for scrolling with VRAM wraparound, R10/R11/R14/R15
+  cursor with steady/hidden/blink modes) rather than hard-coding 80 x 24.
+- ROMs load in `configure()`, never in the constructor:
+  `ServiceLoader` constructs every registered card just to list it, so a
+  missing VideoTerm ROM affects only setups that configure the card.
+- `display=switched` (default) applies the Soft Video Switch rule in the
+  main window; `display=separate` gives the 80 columns their own window
+  (opened beside the main one, kept across Reboot) with its own Edit menu
+  for copying, and leaves the main window always on the Apple's video.
+- The 640 x 216 dots are stretched to fill the window with
+  nearest-neighbor scaling, as a monitor fills its screen.
+- Copy Screen Text copies whichever screen is showing.
+
+**Verified:**
+- The real firmware and system ROM together, headless: cold boot,
+  `PR#3`, `PRINT`, `GR`, `TEXT` -- the CRTC holds the firmware's table, AN0
+  turns on, the 80-column text is right, and the Soft Video Switch
+  selection follows text/graphics (`VideoTermFirmwareIntegrationTest`).
+- The real application under a virtual display, both modes: switched
+  mode changes the main window to 80 columns after `PR#3` and back to
+  the Apple's video for `GR`; separate mode keeps the main window on the
+  Apple's video while the second window shows the session.
+- A rendered screen showing lowercase, true descenders, the `{ } | ~`
+  glyphs the stock II+ lacks, and the block cursor.
+- Card and renderer unit tests: paging, registers, ROM mapping,
+  configuration, glyphs, scrolling and wraparound, cursor modes and blink
+  timing, text decoding.
+
+### VideoTerm display mode on the toolbar -- done
+
+The `display=` setting alone was too static, so the mode became a
+runtime choice: **Soft Switch** and **Dual Monitor** toggle buttons
+(`DisplayModeButtons`), shown when a VideoTerm is configured, with
+`display=` in `slots.ini` now setting only the initial mode.
+
+- The 80-column view and its window exist whenever a card is present;
+  the mode just shows or hides the window, and `ScreenPanel` applies the
+  Soft Video Switch only in Soft Switch mode.
+- Closing the 80-column window selects Soft Switch, so the toolbar never
+  claims a window that isn't there.
+- The chosen mode carries across Reboot, as the inserted disks do.
+- The buttons aren't focusable, so clicking one leaves the keyboard with
+  the Apple.
+
+Verified with unit tests (initial selection, clicks, programmatic
+selection, focus) and in the running application: start in Soft Switch,
+`PR#3`, switch to Dual Monitor (second window opens, main window returns
+to the Apple's video, typing still reaches the Apple), close the second
+window (back to Soft Switch, 80 columns in the main window), then Dual
+Monitor plus Reboot (the second window and selection come back).
+
+### Lo-res mixed mode shows its text rows -- done
+
+**Symptom**: after `GR`, the four text rows at the bottom of the screen
+showed as gray lo-res bars -- the text page's `$A0` spaces drawn as
+color blocks -- instead of text. First spotted in a capture taken while
+testing the VideoTerm.
+
+**Cause**: `ScanlineModes.currentLineMode` switched mixed mode's bottom
+rows to text only when hi-res was on. The condition was carried over
+from `VideoScanner`'s address logic, where testing hi-res alone is right
+-- only hi-res fetches from different addresses on those lines, since
+lo-res already uses text-page addressing -- but what's *displayed* there
+is text over lo-res and hi-res alike.
+
+**Fix**: the display decision no longer tests hi-res; the address logic
+is unchanged. A new test reproduced the bug before the fix (scan line
+160 recorded as `LORES`) and guards hi-res mixed and full-screen modes;
+in the running application, `GR` with a plot, a line and a `PRINT` now
+shows the commands as text beneath the graphics.
+
 ---
 
 ## Component development history (moved from README.md)

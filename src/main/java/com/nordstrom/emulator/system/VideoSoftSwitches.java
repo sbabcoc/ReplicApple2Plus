@@ -132,4 +132,16 @@ public final class VideoSoftSwitches implements AddressRangeHandler {
     boolean isAnnunciatorOn(int n) {
         return annunciator[n];
     }
+
+    /**
+     * Whether Videx's Soft Video Switch would be passing an 80-column card's
+     * video to the monitor: annunciator 0 high and graphics off (the color
+     * killer high), both required -- either one low selects the Apple's own
+     * video. See HARDWARE-REFERENCE.md section 3.
+     *
+     * @return true when the 80-column display is selected
+     */
+    public boolean softVideoSwitchSelects80Columns() {
+        return annunciator[0] && text;
+    }
 }

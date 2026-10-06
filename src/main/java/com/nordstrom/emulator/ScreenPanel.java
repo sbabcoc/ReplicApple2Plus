@@ -3,6 +3,7 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.system.HiResRenderer;
 import com.nordstrom.emulator.system.LoResRenderer;
 import com.nordstrom.emulator.system.MotherboardBus;
+import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.system.ScanlineModes;
 import com.nordstrom.emulator.system.TextScreenRenderer;
 
@@ -48,11 +49,23 @@ final class ScreenPanel extends JPanel {
 
     private final MotherboardBus bus;
     private final ScanlineModes scanlineModes;
+    private final VideoTerm switchedVideoTerm;
     private boolean flashVisible = true;
 
     ScreenPanel(MotherboardBus bus, ScanlineModes scanlineModes) {
+        this(bus, scanlineModes, null);
+    }
+
+    /**
+     * @param switchedVideoTerm a VideoTerm whose output this panel shows in
+     *                          place of the Apple's own video whenever the
+     *                          card is in soft-switch mode and the Soft Video
+     *                          Switch would select it, or null for none
+     */
+    ScreenPanel(MotherboardBus bus, ScanlineModes scanlineModes, VideoTerm switchedVideoTerm) {
         this.bus = bus;
         this.scanlineModes = scanlineModes;
+        this.switchedVideoTerm = switchedVideoTerm;
         setPreferredSize(new Dimension(WIDTH, HEIGHT));
         setBackground(Color.BLACK);
     }
@@ -66,9 +79,25 @@ final class ScreenPanel extends JPanel {
         flashVisible = !flashVisible;
     }
 
+    /** @return the VideoTerm this panel switches to, or null if none */
+    VideoTerm switchedVideoTerm() {
+        return switchedVideoTerm;
+    }
+
+    /** @return true when this panel is currently showing the VideoTerm's 80 columns rather than the Apple's video */
+    boolean showingEightyColumns() {
+        return switchedVideoTerm != null
+            && switchedVideoTerm.display() == VideoTerm.Display.SWITCHED
+            && bus.videoSoftSwitches().softVideoSwitchSelects80Columns();
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
+        if (showingEightyColumns()) {
+            EightyColumnView.paint(g, switchedVideoTerm, getWidth(), getHeight());
+            return;
+        }
         boolean[][] textPixels = TextScreenRenderer.render(bus, bus.videoSoftSwitches(), flashVisible);
         Color[][] loResPixels = LoResRenderer.render(bus, bus.videoSoftSwitches());
         Color[][] hiResPixels = HiResRenderer.render(bus, bus.videoSoftSwitches());

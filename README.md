@@ -22,9 +22,9 @@ through the address-space design described below.
 **A working Apple II+.** It boots DOS 3.3 from WOZ and DSK disk images,
 reads and writes them, runs Applesoft BASIC and machine-language software, and
 displays text, lo-res and hi-res graphics with sound and game
-controllers. Two expansion cards are researched and specified but not
-yet built: the Videx VideoTerm 80-column card and the Saturn 128K RAM
-card -- see [TODO.md](TODO.md).
+controllers, and supports the Videx VideoTerm 80-column card. The Saturn
+128K RAM card is researched and specified but not yet built -- see
+[TODO.md](TODO.md).
 
 Companion documents:
 - [HARDWARE-REFERENCE.md](HARDWARE-REFERENCE.md) -- primary-source
@@ -50,8 +50,7 @@ Companion documents:
 **Display and sound**
 - Text (normal, inverse and flashing), lo-res, and hi-res graphics with
   NTSC artifact color; page 1/page 2 and mixed mode, tracked per scan
-  line so mid-frame mode changes render correctly. (Lo-res mixed mode
-  has an open question -- see TODO.md.)
+  line so mid-frame mode changes render correctly.
 - Speaker output to the host's audio device, which also paces emulation
   to real time (with no audio device, a timer paces it instead).
 
@@ -79,6 +78,15 @@ Companion documents:
 **Expansion**
 - Language Card in slot 0 (16K of bank-switched RAM, also random at
   power-on).
+- Videx VideoTerm 80-column card in slot 3, running its real firmware
+  2.4: 80 x 24 text with lowercase and true descenders, a blinking
+  block cursor, and the card's own character set. Two display modes,
+  switched at any time from the toolbar: **Soft Switch** models Videx's
+  Soft Video Switch -- the main window shows 80 columns when annunciator
+  0 is on and the machine is in text mode, and the Apple's video
+  otherwise; **Dual Monitor** gives the 80 columns a window of their own
+  beside an always-Apple main window. Closing that window returns to
+  Soft Switch, and the chosen mode carries across Reboot.
 - Peripherals are plug-ins: cards are discovered through Java's standard
   `ServiceLoader`, and new ones can be added from external jars without
   rebuilding the emulator.
@@ -88,8 +96,9 @@ Companion documents:
   File... -- pasted or typed text is fed to the keyboard at exactly the
   pace the running software reads it, so nothing is dropped. Stop Typing
   cancels.
-- Toolbar: Reset (a real press-and-release RESET line) and Reboot (a
-  power cycle that keeps the inserted disks).
+- Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
+  cycle that keeps the inserted disks), and -- with a VideoTerm
+  configured -- the Soft Switch / Dual Monitor display choice.
 
 ## Architecture
 
@@ -143,10 +152,9 @@ catalog — regenerate it, don't trust it to stay current).
   common modification (an alternate F8 ROM, a custom character set).
   Needs a config-driven override that skips the stock checksum when a
   substitution is actually requested.
-- **Lowercase display.** `KeyboardRegister` passes lowercase through, but
-  the stock character ROM has no lowercase glyphs; on real hardware that
-  took an 80-column card (planned: the VideoTerm, whose character ROM has
-  a full lowercase set) or a hi-res "soft-70" trick.
+- **Lowercase on the 40-column screen.** The stock character ROM has no
+  lowercase glyphs, and the II+ keyboard folds typing to uppercase. The
+  VideoTerm displays lowercase on its 80-column screen.
 - **The genuinely chip-unstable illegal opcodes** (`ANE`/`XAA`, `LXA`,
   `SHA`, `SHX`, `SHY`, `TAS`) throw `UnsupportedOperationException` rather
   than encode a guess -- real NMOS chips disagree with each other on
@@ -241,6 +249,14 @@ rather than silently serving bad data):
 | Character generator ROM (341-0036) | `src/main/resources/com/nordstrom/emulator/system/character-rom.rom` | `64F415C6` |
 | Integer BASIC Firmware Card ROM | `src/main/resources/com/nordstrom/emulator/expansion/integer-basic-firmware-card.rom` | chip-by-chip, see `IntegerBasicFirmwareCardRom`'s own Javadoc |
 
+Two more are needed only if a VideoTerm card is configured (they're
+loaded when the card is, so other setups never touch them):
+
+| File | Path | CRC32 |
+| --- | --- | --- |
+| VideoTerm firmware 2.4 (1024 bytes) | `src/main/resources/com/nordstrom/emulator/expansion/videx-videoterm-firmware-2_4.rom` | `4DDBE669` |
+| VideoTerm character generator (2048 bytes) | `src/main/resources/com/nordstrom/emulator/expansion/videx-videoterm-charset-normal.rom` | `87F89F08` |
+
 The System ROM and Integer BASIC Firmware Card ROM are each assembled
 from five separate 2KB/4KB chip dumps concatenated in address order --
 see each class's own Javadoc for the exact per-chip CRC32/SHA1 pairs
@@ -283,11 +299,20 @@ with the images to insert at startup:
 [0]
 type=languageCard
 
+[3]
+type=videoterm
+display=switched
+
 [6]
 type=disk2
 drive1=path/to/disk1.woz
 drive2=path/to/disk2.dsk
 ```
+
+`[3]` is optional: it adds the VideoTerm (`PR#3` activates it).
+`display` sets the mode it starts in -- `switched` (Soft Switch, the
+default) or `separate` (Dual Monitor); the toolbar changes it while
+running.
 
 `drive1` and `drive2` are both optional. If drive 1 is empty at startup,
 the emulator offers to insert a boot disk first -- otherwise the
@@ -349,7 +374,7 @@ directory, skipping the installer format).
   architecture (`SlotCard`, plug-in loading, slot configuration).
 - `.../expansion/` -- expansion cards and their ROMs: `Disk2Controller`
   with its logic sequencer and disk image formats (`WozDiskImage`,
-  `DskDiskImage`), and `LanguageCard`.
+  `DskDiskImage`), `LanguageCard`, and `VideoTerm` with its renderer.
 - `.../input/` -- game controller input: providers (Jamepad, network),
   polling, and mapping onto the paddles and buttons.
 - `android-bridge/` -- PadBridge, the Android companion app that forwards

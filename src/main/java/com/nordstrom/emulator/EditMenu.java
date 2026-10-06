@@ -1,5 +1,6 @@
 package com.nordstrom.emulator;
 
+import com.nordstrom.emulator.expansion.VideoTermRenderer;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.ScanlineModes;
 import com.nordstrom.emulator.system.ScreenText;
@@ -53,23 +54,31 @@ final class EditMenu {
      * Builds the menu.
      *
      * @param bus             the machine whose screen memory Copy Screen Text reads
-     * @param screen          the display component Copy Screen Image snapshots
+     * @param screen          the display Copy Screen Image snapshots, and whose
+     *                        current content (the Apple's video, or 80 columns
+     *                        when its Soft Video Switch selects them) Copy Screen
+     *                        Text copies
      * @param feeder          types Paste and Type File... text into {@code bus}'s keyboard
      * @param parent          the component to anchor dialogs to (typically the main frame)
      * @param emulationThread runs everything that touches machine state -- reading
      *                        screen memory and queueing or cancelling typing
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
-    static JMenu build(MotherboardBus bus, Component screen, TypingFeeder feeder, Component parent,
+    static JMenu build(MotherboardBus bus, ScreenPanel screen, TypingFeeder feeder, Component parent,
                        Executor emulationThread) {
         JMenu menu = new JMenu("Edit");
 
         JMenuItem copyText = new JMenuItem("Copy Screen Text");
-        copyText.addActionListener(event -> emulationThread.execute(() -> {
-            // Screen memory belongs to the emulation thread; the clipboard to the event thread.
-            String text = ScreenText.capture(bus, bus.scanlineModes().completedFrame());
-            EventQueue.invokeLater(() -> setClipboard(new StringSelection(text), parent));
-        }));
+        copyText.addActionListener(event -> {
+            boolean eightyColumns = screen.showingEightyColumns(); // what's on screen now, decided here on the event thread
+            emulationThread.execute(() -> {
+                // Screen memory belongs to the emulation thread; the clipboard to the event thread.
+                String text = eightyColumns
+                    ? VideoTermRenderer.text(screen.switchedVideoTerm())
+                    : ScreenText.capture(bus, bus.scanlineModes().completedFrame());
+                EventQueue.invokeLater(() -> setClipboard(new StringSelection(text), parent));
+            });
+        });
         menu.add(copyText);
 
         JMenuItem copyImage = new JMenuItem("Copy Screen Image");
@@ -98,7 +107,7 @@ final class EditMenu {
         menu.addMenuListener(new MenuListener() {
             @Override
             public void menuSelected(MenuEvent e) {
-                copyText.setEnabled(anyTextRow(bus.scanlineModes().completedFrame()));
+                copyText.setEnabled(screen.showingEightyColumns() || anyTextRow(bus.scanlineModes().completedFrame()));
                 paste.setEnabled(clipboardHasText());
                 stopTyping.setEnabled(feeder.isTyping());
             }
@@ -110,6 +119,29 @@ final class EditMenu {
             public void menuCanceled(MenuEvent e) { /* nothing to do */ }
         });
 
+        return menu;
+    }
+
+    /**
+     * Builds the Edit menu for a separate 80-column window: copying only,
+     * since typing goes to the one keyboard either window feeds.
+     *
+     * @param view            the 80-column window's display
+     * @param parent          the component to anchor dialogs to
+     * @param emulationThread runs everything that reads the card's memory
+     * @return the built menu
+     */
+    static JMenu buildForEightyColumnWindow(EightyColumnView view, Component parent, Executor emulationThread) {
+        JMenu menu = new JMenu("Edit");
+        JMenuItem copyText = new JMenuItem("Copy Screen Text");
+        copyText.addActionListener(event -> emulationThread.execute(() -> {
+            String text = VideoTermRenderer.text(view.card());
+            EventQueue.invokeLater(() -> setClipboard(new StringSelection(text), parent));
+        }));
+        menu.add(copyText);
+        JMenuItem copyImage = new JMenuItem("Copy Screen Image");
+        copyImage.addActionListener(event -> setClipboard(new ImageSelection(snapshot(view)), parent));
+        menu.add(copyImage);
         return menu;
     }
 

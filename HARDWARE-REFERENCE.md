@@ -225,7 +225,7 @@ nuance as the standard card.)
 
 ---
 
-## 3. Videx VideoTerm 80-Column Card (Researched, Not Yet Implemented)
+## 3. Videx VideoTerm 80-Column Card (Implemented)
 
 Primary source: the actual Videx VideoTerm Installation and Operation
 Manual, Third Edition (January 1982), read in full — including the
@@ -236,6 +236,18 @@ Firmware 2.4 ROM** (`Videx Videoterm ROM 2.4.bin`, 1024 bytes, CRC32
 `4DDBE669`), used to verify specific addresses byte-for-byte rather than
 relying on the manual's printed (and OCR'd) listing alone. Where the two
 disagreed, the ROM binary is authoritative.
+
+Two further primary sources, added later:
+- **The card's character generator ROM** (2048 bytes, CRC32 `87F89F08`)
+  -- layout below, derived directly from the bytes.
+- **Videx's own Soft Video Switch schematic** (drawing SVS-000, "Soft
+  Video Switch", dated 24 Oct 81, drawn by J. Bailey, (c) Videx 1981) --
+  the authoritative account of 40/80-column switching, below.
+
+| ROM | Size | CRC32 | Notes |
+|---|---|---|---|
+| Firmware 2.4 | 1024 bytes, `$C800`-`$CBFF` | `4DDBE669` | Same image the earlier byte-for-byte spot checks used |
+| Character generator, normal set | 2048 bytes | `87F89F08` | 128 glyphs x 16 scan lines |
 
 **Firmware note**: as of Firmware 2.4 (the version documented in this
 manual's own errata), the card **must** be in slot 3 — slot
@@ -292,6 +304,67 @@ R10 bits 5-6 (cursor blink): bit6=0 → no blink (bit5 then selects
 displayed/not); bit6=1, bit5=0 → 1/16-field-rate blink; bit6=1, bit5=1 →
 1/32-field-rate blink.
 
+### CRTC initialization values — read from the firmware ROM binary
+
+`SETUP` programs R0-R15 in a loop at `$C819`-`$C828` -- for X = 0 to
+15, write X to `$C0B0`, then the byte at `$C8A1,X` to `$C0B1`:
+
+```
+$C819: A2 00      LDX #$00
+$C81B: 8A         TXA
+$C81C: 8D B0 C0   STA $C0B0      ; register index
+$C81F: BD A1 C8   LDA $C8A1,X
+$C822: 8D B1 C0   STA $C0B1      ; register value
+$C825: E8         INX
+$C826: E0 10      CPX #$10
+$C828: D0 F1      BNE $C81B
+```
+
+The 16-byte table at `$C8A1`:
+
+| Reg | Value | Meaning |
+|---|---|---|
+| R0 | `$7B` (123) | Horizontal total: 124 character times per scan line |
+| R1 | `$50` (80) | 80 characters displayed per row |
+| R2 | `$5E` (94) | Horizontal sync position |
+| R3 | `$29` | Sync width |
+| R4 | `$1B` (27) | Vertical total: 28 character rows |
+| R5 | `$08` (8) | Vertical total adjust: 8 scan lines |
+| R6 | `$18` (24) | 24 rows displayed |
+| R7 | `$19` (25) | Vertical sync at row 25 |
+| R8 | `$00` | Non-interlaced |
+| R9 | `$08` (8) | **9 scan lines per character row** (rows 0-8) |
+| R10 | `$E0` | Cursor start line 0; bits 6-5 = 11 → blink at 1/32 field rate |
+| R11 | `$08` (8) | Cursor end line 8 -- with R10, a full-cell block cursor |
+| R12/R13 | `$00`/`$00` | Display starts at VRAM address 0 |
+| R14/R15 | `$00`/`$00` | Cursor at home |
+
+Frame: (27 + 1) x 9 + 8 = 260 scan lines. Display area: 80 x 24
+characters, 216 scan lines tall; with the character ROM's 8-bit-wide
+glyphs, 640 dots across.
+
+### Character generator ROM
+
+2048 bytes = **128 glyphs x 16 bytes**, one byte per scan line, glyph
+for code *c* at offset *c* x 16, all 8 bits of each byte used. Observed
+directly in the bytes:
+
+- **Printable characters** (`$21`-`$7F`) use scan lines 0-8 only: a
+  7-line body plus 2 lines of true descenders (`g`, `j`, `p`, `q`, `y`
+  drop below the baseline), with a full lowercase set -- which the
+  stock II+ character ROM lacks.
+- **Codes `$01`-`$1F`** are graphics characters (bars and
+  line-drawing pieces -- e.g. `$01` is a solid bar across scan lines
+  0-2, `$1F` a cross whose vertical stroke runs all 16 lines). 8 of
+  these 31 glyphs have ink on scan lines 9-15; no printable character
+  does.
+- **`$00`, `$10`, `$20`** are blank.
+
+Since the firmware sets R9 = 8, only scan lines 0-8 of each glyph are
+ever displayed -- exactly the printable characters' full height. Lines
+9-15 of those 8 graphics glyphs are never shown under the firmware's
+own setup; they would only appear if software reprogrammed R9.
+
 ### Video set-up flags (`$7F8 + n`)
 
 Only 4 of 8 bits are used:
@@ -328,6 +401,36 @@ SELECT = PEEK($C080 + n*16 + PAGE * 4)          ' activates the page
 POKE $CC00 + (ADDRESS MOD 512), character_code  ' writes the character
 ```
 
+### The card's own `$C300`-`$C3FF` page — confirmed from the ROM binary
+
+The slot page shows the firmware image's **last 256 bytes** (offset
+`$300`-`$3FF`, the same bytes as `$CB00`-`$CBFF`). The bytes there are
+unmistakably slot entry code: `$C300` begins `2C CB FF` (`BIT $FFCB`, the
+standard slot-ROM opening that sets V to tell entry points apart), and
+`$C305`/`$C307`/`$C30B`/`$C30C` hold `$38`/`$18`/`$01`/`$82` -- exactly
+the Pascal 1.1 firmware-protocol signature.
+
+### How characters are stored in VRAM — confirmed from the ROM binary
+
+The firmware writes each character with **bit 7 set from the video
+set-up flags' bit 0** (character set select), not from the character
+itself (`$CA71`-`$CA78`):
+
+```
+$CA71: 0A         ASL            ; character's bit 7 out
+$CA72: 48         PHA
+$CA73: AD FB 07   LDA $07FB      ; set-up flags ($7F8 + 3)
+$CA76: 4A         LSR            ; flags bit 0 (character set) into carry
+$CA77: 68         PLA
+$CA78: 6A         ROR            ; ...and into the character's bit 7
+```
+
+So with the standard character set selected (the default), every
+character lands in VRAM with bit 7 clear; bit 7 set selects the
+alternate character set (or, with the inverse-video modification,
+inverse). The emulator models only the standard set and draws bit-7
+characters with it.
+
 ### C8-space ownership — confirmed against the actual firmware ROM binary
 
 An independent binary dump of Firmware 2.4 (`Videx Videoterm ROM 2.4.bin`,
@@ -359,35 +462,73 @@ physical 2708 chip itself. Anyone implementing this in the emulator
 should model `$CB36`'s behavior as the card's own, and treat `$CC00`
 as out of scope for the VideoTerm ROM specifically.
 
-### 40/80-column switching — confirmed, and corrects the third-party account
+### 40/80-column switching — confirmed from Videx's schematic and the firmware
 
-Real mechanism, from the manual's "Soft Video Switch Theory of
-Operation" section, quoted directly: the Soft Video Switch (an optional
-accessory; the older Switchplate is its manual, non-firmware-controlled
-predecessor) watches the state of **annunciator 0** — a standard Apple
-II annunciator output, not VideoTerm-specific hardware — together with
-the color-killer signal. **"If the annunciator is off, the Soft Video
-Switch displays 40 columns. If the annunciator is on, 80 columns is
-displayed."** The firmware sets annunciator 0 on as each character is
-output. To turn it on: a memory reference to `$C058`. To turn it off:
-`$C059`.
+**Correction**: an earlier version of this section quoted the manual as
+saying a reference to `$C058` turns annunciator 0 *on* (80 columns) and
+`$C059` turns it *off*, and on that basis declared a third-party
+write-up's polarity "backwards". That was wrong -- most likely one of
+this manual's OCR digit confusions (see the sourcing note below). The
+third-party polarity was right. Two independent primary sources agree:
 
-**This corrects the third-party source directly**: that write-up's
-Verilog snippet had the polarity backwards (`$C058` = off/40-col,
-`$C059` = on/80-col in their code) — the real polarity, per Videx's own
-manual, is the reverse: `$C058` = on = 80 columns, `$C059` = off = 40
-columns. The confirmed firmware listing shows a `$C059` write at
-`SETEXIT` (end of the `SETUP`/initialization routine at `$C800`) —
-consistent with resetting to the 40-column/pass-through state as part
-of a cold entry, before normal character output (which sets `$C058`
-per-character) begins.
+**1. The Soft Video Switch schematic (SVS-000).** Annunciator 0 (pin 9
+of the II+'s 9334 annunciator latch) is labeled **"AN0: LOW = 40
+COLUMNS, HIGH = 80 COLUMNS"**. On the Apple II, a reference to `$C059`
+drives AN0 high and `$C058` drives it low -- the convention this
+emulator's `VideoSoftSwitches` already implements. So **`$C059` selects
+80 columns and `$C058` selects 40.**
 
-One scope note: this 40/80 switching lives in the *Soft Video Switch*
-accessory's behavior specifically. The base VideoTerm card (with only
-the older mechanical Switchplate, or no switch at all) still writes to
-the annunciator the same way — the difference is purely in what
-external hardware, if any, is watching that annunciator to decide what
-actually reaches the monitor.
+The schematic also gives the full switching rule. AN0 and the
+**color killer** (pin 4 of the 9334, labeled "low when graphics is on,
+high when graphics is off") each connect through a 1N914 diode to one
+control node, pulled up to +5 V through 200 Ω -- either signal low pulls
+the node low, so it is high **only when both are high**. That node
+drives, through 2K resistors, a 2N3904 (NPN) that passes the
+**80-column video** when the node is high and a 2N3906 (PNP) that passes
+the **Apple's own video** when it is low. Hence:
+
+> **80-column output is displayed if and only if AN0 is high (`$C059`)
+> and graphics is off.** Any graphics mode, or AN0 low (`$C058`),
+> displays the Apple's own video.
+
+Mixed mode has graphics on, so by the color-killer label it displays
+the Apple's video in full, its bottom four 40-column text lines
+included. (That reading follows from the label; the schematic doesn't
+draw mixed mode specifically.)
+
+**2. The firmware ROM binary.** Firmware 2.4 references annunciator 0 in
+exactly three places:
+
+```
+$C82A: 8D 59 C0   STA $C059   ; end of SETUP -- PR#3 initialization
+$CA8F: 8D 59 C0   STA $C059   ; in the routine at $CA89, called from $C8CE
+$C995: 8D 58 C0   STA $C058   ; only when command character "1" ($B1) arrives
+```
+
+The routine at `$CA89` is in the character-output path: its caller
+compares the Monitor's `CH`/`CV` (`$24`/`$25`) against the card's saved
+cursor position, calls `$CA89` with the character, then updates the
+CRTC cursor registers R15/R14. So the firmware touches `$C059` at
+initialization and with every character it outputs -- matching the
+manual's description that "the firmware sets annunciator 0 on as each
+character is output", under the standard convention -- and `$C058`
+only for that one command.
+
+**Emulator display modes** (chosen with the toolbar's Soft Switch /
+Dual Monitor buttons; `display=` in `slots.ini` sets the initial mode):
+- **Single window (default)** models the Soft Video Switch: show the
+  VideoTerm's output when `annunciator[0]` is set and the machine is in
+  text mode; otherwise show the regular screen.
+- **Two windows** bypasses the Soft Video Switch entirely: the primary
+  window always shows the Apple's own video, and the secondary window
+  always shows the VideoTerm's 80-column output, regardless of AN0 or
+  graphics mode.
+
+One scope note: this switching lives in the *Soft Video Switch*
+accessory (the older Switchplate is its manual, non-firmware-controlled
+predecessor). The base VideoTerm card still writes the annunciator the
+same way; what differs is what external hardware, if any, watches it to
+decide what reaches the monitor.
 
 ### Remaining gaps
 
@@ -396,7 +537,10 @@ now been read in full from the actual manual, and its two most
 load-bearing claims (the `$CB36` and `$C82A` addresses used above) have
 been independently confirmed byte-for-byte against the real ROM binary.
 The `$CC00`/`ROMSW` question is now fully resolved (see above), not just
-flagged. No open items remain in this section beyond the general caution
+flagged. The CRTC initialization values and the 40/80-column switching
+rule have since been read from the firmware binary and Videx's own
+schematic respectively (above), and the character generator ROM is now
+in hand. No open items remain in this section beyond the general caution
 that only two specific addresses were spot-checked against the binary,
 not the entire listing — if a future implementation needs some other
 specific routine, checking it against the actual `Videx Videoterm ROM

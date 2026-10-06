@@ -149,7 +149,11 @@ public final class ScanlineModes {
             return new LineMode(Source.TEXT, page2);
         }
         boolean hires = videoSoftSwitches.isHires();
-        if (hires && videoSoftSwitches.isMixed() && VideoScanner.isMixedModeTextLine(cyclesAt)) {
+        // Mixed mode shows its bottom four rows as text over lo-res and hi-res
+        // alike. (VideoScanner's address logic tests hires alone because only
+        // hi-res fetches from different addresses on those lines; what's
+        // displayed there is text either way.)
+        if (videoSoftSwitches.isMixed() && VideoScanner.isMixedModeTextLine(cyclesAt)) {
             return new LineMode(Source.TEXT, page2);
         }
         return new LineMode(hires ? Source.HIRES : Source.LORES, page2);

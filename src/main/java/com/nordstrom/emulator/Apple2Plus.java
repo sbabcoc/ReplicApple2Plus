@@ -2,6 +2,7 @@ package com.nordstrom.emulator;
 
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.expansion.Disk2Controller;
+import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.input.BusInputSink;
 import com.nordstrom.emulator.input.InputMapper;
 import com.nordstrom.emulator.input.InputMapping;
@@ -172,7 +173,8 @@ public final class Apple2Plus {
      * @param toolbar the toolbar currently wired to this machine's CPU
      */
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
-                            PadPoller padPoller, JToolBar toolbar, TypingFeeder typing) {}
+                            PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
+                            EightyColumnView eightyColumns, DisplayModeButtons displayModes) {}
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
@@ -335,6 +337,13 @@ public final class Apple2Plus {
                 break;
             }
         }
+        VideoTerm videoTerm = null;
+        for (SlotCard card : slots) {
+            if (card instanceof VideoTerm v) {
+                videoTerm = v;
+                break;
+            }
+        }
 
         if (disk != null && mediaSource != null) {
             List<RemovableMediaDrive> oldDrives = mediaSource.removableDrives();
@@ -364,7 +373,11 @@ public final class Apple2Plus {
         }
         TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
         clock.addCycleListener(typing::tick);
-        ScreenPanel screen = new ScreenPanel(bus, bus.scanlineModes());
+        if (videoTerm != null && displayChosenAtRuntime != null) {
+            videoTerm.setDisplay(displayChosenAtRuntime); // a reboot keeps the mode chosen from the toolbar
+        }
+        ScreenPanel screen = new ScreenPanel(bus, bus.scanlineModes(), videoTerm);
+        EightyColumnView eightyColumns = videoTerm != null ? new EightyColumnView(videoTerm, screen.getPreferredSize()) : null;
 
         int[] ticksSinceFlash = {0}; // touched only by the emulation thread
         EmulationLoop loop = new EmulationLoop(clock::step, CYCLES_PER_TICK, TICK_NANOS,
@@ -375,6 +388,9 @@ public final class Apple2Plus {
                     SwingUtilities.invokeLater(screen::toggleFlash); // flash state belongs to the paint thread
                 }
                 screen.repaint(); // safe from any thread
+                if (eightyColumns != null) {
+                    eightyColumns.repaint();
+                }
             });
 
         // Game input. The mapper is primed with an absent pad right away,
@@ -393,8 +409,18 @@ public final class Apple2Plus {
         padPoller.start();
 
         JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, loop, onReboot) : null;
+        DisplayModeButtons displayModes = null;
+        if (toolbar != null && videoTerm != null) {
+            VideoTerm card = videoTerm;
+            displayModes = new DisplayModeButtons(card, () -> {
+                displayChosenAtRuntime = card.display();
+                updateEightyColumnWindow(frame, card);
+                screen.repaint();
+            });
+            displayModes.addTo(toolbar);
+        }
 
-        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing);
+        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes);
     }
 
     /**
@@ -432,6 +458,94 @@ public final class Apple2Plus {
         }
     }
 
+    /** The separate 80-column window, created the first time a machine has a VideoTerm and kept across reboots. */
+    private static JFrame eightyColumnFrame;
+
+    /** The current machine's display-mode buttons, for the 80-column window's close handler; null if none. */
+    private static DisplayModeButtons currentDisplayModes;
+
+    /** The display mode last chosen from the toolbar, carried across reboots; null until one is chosen. */
+    private static volatile VideoTerm.Display displayChosenAtRuntime;
+
+    /**
+     * Puts the machine's 80-column view into the separate 80-column window
+     * (creating the window the first time), then shows or hides that window
+     * to match the card's display mode. The window shares the main window's
+     * keyboard, since both feed the one Apple II keyboard.
+     */
+    private static void rewireEightyColumnWindow(JFrame main, Machine previous, Machine next,
+                                                 KeyboardInputListener keyboardInput) {
+        if (eightyColumnFrame != null && previous != null && previous.eightyColumns() != null) {
+            eightyColumnFrame.getContentPane().remove(previous.eightyColumns());
+            for (var listener : eightyColumnFrame.getKeyListeners()) {
+                eightyColumnFrame.removeKeyListener(listener);
+            }
+        }
+        currentDisplayModes = next.displayModes();
+        if (next.eightyColumns() == null) {
+            if (eightyColumnFrame != null) {
+                eightyColumnFrame.setVisible(false);
+            }
+            return;
+        }
+        if (eightyColumnFrame == null) {
+            eightyColumnFrame = new JFrame("ReplicApple2Plus -- 80 Columns");
+            eightyColumnFrame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+            eightyColumnFrame.addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowClosing(java.awt.event.WindowEvent e) {
+                    // Closing the second monitor means going back to one.
+                    if (currentDisplayModes != null) {
+                        currentDisplayModes.select(VideoTerm.Display.SWITCHED);
+                    } else {
+                        eightyColumnFrame.setVisible(false);
+                    }
+                }
+            });
+        }
+        eightyColumnFrame.getContentPane().add(next.eightyColumns());
+        JMenuBar menuBar = new JMenuBar();
+        menuBar.add(EditMenu.buildForEightyColumnWindow(next.eightyColumns(), eightyColumnFrame, next.loop()));
+        eightyColumnFrame.setJMenuBar(menuBar);
+        eightyColumnFrame.addKeyListener(keyboardInput);
+        eightyColumnFrame.setFocusTraversalKeysEnabled(false);
+        eightyColumnFrame.getContentPane().revalidate();
+        eightyColumnFrame.pack();
+        updateEightyColumnWindow(main, next.eightyColumns().card());
+    }
+
+    /**
+     * Shows the 80-column window when the card is in dual-monitor mode and
+     * hides it otherwise. At startup the main window isn't laid out or shown
+     * yet, so a first showing waits until it opens, then appears beside it.
+     */
+    private static void updateEightyColumnWindow(JFrame main, VideoTerm card) {
+        if (eightyColumnFrame == null) {
+            return;
+        }
+        if (card.display() != VideoTerm.Display.SEPARATE) {
+            eightyColumnFrame.setVisible(false);
+            return;
+        }
+        if (eightyColumnFrame.isVisible()) {
+            return;
+        }
+        if (main.isShowing()) {
+            eightyColumnFrame.setLocation(main.getX() + main.getWidth(), main.getY());
+            eightyColumnFrame.setVisible(true);
+            main.toFront();
+            main.requestFocusInWindow();
+        } else {
+            main.addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowOpened(java.awt.event.WindowEvent e) {
+                    main.removeWindowListener(this);
+                    updateEightyColumnWindow(main, card);
+                }
+            });
+        }
+    }
+
     private static void rewireFrame(JFrame frame, Machine previous, Machine next) {
         if (previous != null) {
             frame.getContentPane().remove(previous.screen());
@@ -454,6 +568,8 @@ public final class Apple2Plus {
         KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(), next.loop());
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
+
+        rewireEightyColumnWindow(frame, previous, next, keyboardInput);
 
         frame.getContentPane().revalidate();
         frame.getContentPane().repaint();
