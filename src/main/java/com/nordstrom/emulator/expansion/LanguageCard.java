@@ -14,14 +14,14 @@ import java.util.Set;
  * $Cn00-$CnFF ROM window at all (real hardware's /IOSEL isn't wired to
  * it) -- {@link #readRom}/{@link #writeRom} exist only to satisfy
  * {@link SlotCard}'s contract and are never actually called. What slot 0
- * gets instead is {@link #wantsSlotZeroBanking}, which this card uses
+ * gets instead is {@link #wantsUpperMemory}, which this card uses
  * for its entire reason to exist.
  * <p>
  * Real hardware layout: two independently selectable 4KB RAM banks at
  * $D000-$DFFF (bank 1 and bank 2 -- only one is mapped at a time), plus
  * a single, non-banked 8KB RAM region at $E000-$FFFF. This card has no
  * ROM content of its own -- when its read source selects "ROM," this
- * card simply isn't intercepting that address, and {@link #readSlotZeroBank}
+ * card simply isn't intercepting that address, and {@link #readUpperMemory}
  * returns empty accordingly. What actually shows through when that
  * happens is a question for whatever routes to this card, not for this
  * card itself -- deliberately: a pure RAM expansion has no business
@@ -96,12 +96,12 @@ public final class LanguageCard implements SlotCard {
     }
 
     @Override
-    public boolean wantsSlotZeroBanking() {
+    public boolean wantsUpperMemory() {
         return true;
     }
 
     @Override
-    public OptionalInt readSlotZeroBank(int offset) {
+    public OptionalInt readUpperMemory(int offset) {
         if (!readRam) {
             return OptionalInt.empty(); // not intercepting -- the caller falls through to the system ROM
         }
@@ -109,7 +109,7 @@ public final class LanguageCard implements SlotCard {
     }
 
     @Override
-    public void writeSlotZeroBank(int offset, int value) {
+    public void writeUpperMemory(int offset, int value) {
         if (writeState != WriteState.ENABLED) {
             return; // silently ignored -- write-protected, exactly as designed
         }

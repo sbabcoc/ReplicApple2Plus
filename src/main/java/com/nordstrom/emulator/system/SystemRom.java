@@ -7,15 +7,15 @@ import java.io.UncheckedIOException;
 /**
  * The Apple II+'s own motherboard system ROM at $D000-$FFFF: Applesoft
  * BASIC ($D000-$F7FF) and the Autostart Monitor ($F800-$FFFF). This is
- * what shows through at $D000-$FFFF when nothing overrides it -- an
- * empty slot 0, or a slot-0 card whose own read source currently
- * selects "ROM" rather than intercepting with its own RAM. Consumed
- * only by {@link SystemRomHandler} and {@link SlotZeroBankingHandler},
+ * what shows through at $D000-$FFFF when nothing overrides it -- no
+ * upper-memory card, or one whose own read source currently selects
+ * "ROM" rather than intercepting with its own RAM. Consumed
+ * only by {@link SystemRomHandler} and {@link UpperMemoryHandler},
  * both in this same package -- a card like
  * {@link com.nordstrom.emulator.expansion.LanguageCard} never
  * references this class at all, deliberately: it has no business
  * knowing the Apple II+'s own ROM contents just to report that it
- * isn't intercepting a given address (see {@link SlotCard#readSlotZeroBank}).
+ * isn't intercepting a given address (see {@link SlotCard#readUpperMemory}).
  * <p>
  * Every chip verified against MAME's own source
  * ({@code src/mame/apple/apple2.cpp}, the {@code apple2p} driver):

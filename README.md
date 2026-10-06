@@ -22,9 +22,8 @@ through the address-space design described below.
 **A working Apple II+.** It boots DOS 3.3 from WOZ and DSK disk images,
 reads and writes them, runs Applesoft BASIC and machine-language software, and
 displays text, lo-res and hi-res graphics with sound and game
-controllers, and supports the Videx VideoTerm 80-column card. The Saturn
-128K RAM card is researched and specified but not yet built -- see
-[TODO.md](TODO.md).
+controllers, and supports the Videx VideoTerm 80-column card and the
+Saturn Systems 128K RAM card.
 
 Companion documents:
 - [HARDWARE-REFERENCE.md](HARDWARE-REFERENCE.md) -- primary-source
@@ -78,6 +77,11 @@ Companion documents:
 **Expansion**
 - Language Card in slot 0 (16K of bank-switched RAM, also random at
   power-on).
+- Saturn Systems 128K RAM card, in any slot (`type=saturn128`): eight
+  16K banks of bank-switched RAM, verified with Saturn's own
+  `RAMTEST128K`. Use it instead of the Language Card -- only one card can
+  take over `$D000`-`$FFFF`. Saturn's RAM test and utilities expect it
+  in slots 1-7.
 - Videx VideoTerm 80-column card in slot 3, running its real firmware
   2.4: 80 x 24 text with lowercase and true descenders, a blinking
   block cursor, and the card's own character set. Four display modes,

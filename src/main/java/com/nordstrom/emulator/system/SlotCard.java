@@ -21,8 +21,8 @@ import java.util.Set;
  * is always 0) via the normal {@link #readIoSwitch}/{@link #writeIoSwitch}
  * methods below, but never has {@link #readRom}/{@link #writeRom} or the
  * expansion-ROM methods called -- there is no ROM window for slot 0 to
- * have. What slot 0 gets instead, uniquely, is the ability to bank-switch
- * $D000-$FFFF -- see {@link #wantsSlotZeroBanking}.
+ * have. Bank-switching $D000-$FFFF is open to a card in any slot -- see
+ * {@link #wantsUpperMemory}.
  * <p>
  * Every implementation must have a public NO-ARG constructor, and use
  * {@link #configure} (called exactly once, immediately after
@@ -111,6 +111,18 @@ public interface SlotCard {
     void writeIoSwitch(int offset, int value);
 
     /**
+     * Whether this card has a ROM in its own $Cn00-$CnFF page. A card
+     * without one (a pure RAM expansion, say) leaves that page undriven,
+     * so reads there see the floating bus, exactly as with an empty slot,
+     * and {@link #readRom}/{@link #writeRom} are never called.
+     *
+     * @return true if this card has a $Cn00-$CnFF ROM
+     */
+    default boolean hasRom() {
+        return true;
+    }
+
+    /**
      * Reads from this card's own ROM, offset 0-255 within $Cn00-$CnFF.
      *
      * @param offset 0-255 within this card's ROM
@@ -190,20 +202,21 @@ public interface SlotCard {
     }
 
     /**
-     * Whether this card, occupying slot 0, bank-switches $D000-$FFFF.
-     * Meaningless for any other slot -- ignored there. Most cards never
-     * do this; it's a capability unique to slot 0's special wiring, not
-     * something any slot's card could opt into.
+     * Whether this card takes over $D000-$FFFF, replacing the motherboard
+     * ROM there with its own bank-switched RAM -- as a Language Card or a
+     * Saturn RAM card does, on real hardware by asserting the bus's INHIBIT
+     * line. Works from any slot; at most one card in a machine may ask.
+     * Most cards never do.
      *
-     * @return true if this card bank-switches $D000-$FFFF from slot 0
+     * @return true if this card bank-switches $D000-$FFFF
      */
-    default boolean wantsSlotZeroBanking() {
+    default boolean wantsUpperMemory() {
         return false;
     }
 
     /**
-     * Reads within $D000-$FFFF, offset 0-$2FFF. Only called while this
-     * card occupies slot 0 and {@link #wantsSlotZeroBanking} is true.
+     * Reads within $D000-$FFFF, offset 0-$2FFF. Only called on the card
+     * whose {@link #wantsUpperMemory} is true.
      * An empty result means this card isn't intercepting this address
      * right now -- real hardware terms, it has simply stopped driving
      * the bus -- and the caller falls through to the Apple II+'s own
@@ -214,18 +227,18 @@ public interface SlotCard {
      * @param offset 0-$2FFF within $D000-$FFFF
      * @return the byte at that offset, or empty to fall through to the system ROM
      */
-    default OptionalInt readSlotZeroBank(int offset) {
+    default OptionalInt readUpperMemory(int offset) {
         throw new UnsupportedOperationException(getClass().getName() + " does not provide slot-0 banking");
     }
 
     /**
-     * Writes within $D000-$FFFF. Only called while this card occupies
-     * slot 0 and {@link #wantsSlotZeroBanking} is true.
+     * Writes within $D000-$FFFF. Only called on the card whose
+     * {@link #wantsUpperMemory} is true.
      *
      * @param offset 0-$2FFF within $D000-$FFFF
      * @param value the byte to write
      */
-    default void writeSlotZeroBank(int offset, int value) {
+    default void writeUpperMemory(int offset, int value) {
         // no-op by default
     }
 }

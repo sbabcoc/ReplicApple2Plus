@@ -30,10 +30,10 @@ import com.nordstrom.emulator.MemoryBus;
  * <p>
  * Slot 0 is real but electrically special (see {@link SlotCard}'s own
  * Javadoc): whatever occupies it gets its own $C080-$C08F I/O switches
- * like any other slot, but never a $Cn00-$CnFF ROM window, and uniquely
- * gets the option to bank-switch $D000-$FFFF instead. Both of those
- * routes are wired dynamically, against whatever (if anything) is
- * actually in {@code slots[0]} -- there is deliberately no hardcoded
+ * like any other slot, but never a $Cn00-$CnFF ROM window. A card in any
+ * slot may take over $D000-$FFFF ({@link SlotCard#wantsUpperMemory}). These
+ * routes are wired dynamically, against whatever cards are actually
+ * configured -- there is deliberately no hardcoded
  * reference to {@link com.nordstrom.emulator.expansion.LanguageCard} or any other specific card here.
  * <p>
  * Handles:
@@ -51,7 +51,7 @@ import com.nordstrom.emulator.MemoryBus;
  *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
  *   <li>$C100-$C7FF: slots 1-7's ROM ({@link SlotRomHandler})</li>
  *   <li>$C800-$CFFF: the shared expansion ROM window ({@link ExpansionRomHandler}, via the shared {@link ExpansionRomArbiter}) -- slots 1-7 only</li>
- *   <li>$D000-$FFFF: slot 0's bank-switched RAM if it wants one ({@link SlotZeroBankingHandler}), else the system ROM directly ({@link SystemRomHandler})</li>
+ *   <li>$D000-$FFFF: the upper-memory card's bank-switched RAM if one is configured ({@link UpperMemoryHandler}), else the system ROM directly ({@link SystemRomHandler})</li>
  * </ul>
  * No range in this map is currently a {@link NotYetImplementedHandler}:
  * the last two ($C020-$C02F and $C040-$C04F) became
@@ -136,8 +136,18 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
         addressSpace.register(0xC100, 0xC7FF, new SlotRomHandler(slots, arbiter, floatingBus));
         addressSpace.register(0xC800, 0xCFFF, new ExpansionRomHandler(arbiter));
 
-        AddressRangeHandler upperMemory = (slots[0] != null && slots[0].wantsSlotZeroBanking())
-            ? new SlotZeroBankingHandler(slots[0])
+        SlotCard upperMemoryCard = null;
+        for (int slot = 0; slot < slots.length; slot++) {
+            if (slots[slot] != null && slots[slot].wantsUpperMemory()) {
+                if (upperMemoryCard != null) {
+                    throw new IllegalStateException("Only one card can take over $D000-$FFFF, but more than one "
+                        + "configured card does (a second in slot " + slot + ")");
+                }
+                upperMemoryCard = slots[slot];
+            }
+        }
+        AddressRangeHandler upperMemory = (upperMemoryCard != null)
+            ? new UpperMemoryHandler(upperMemoryCard)
             : new SystemRomHandler();
         addressSpace.register(0xD000, 0xFFFF, upperMemory);
     }

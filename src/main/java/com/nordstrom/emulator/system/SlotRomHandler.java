@@ -23,8 +23,8 @@ final class SlotRomHandler implements AddressRangeHandler {
     public int read(int offset) {
         int slotNum = slotNumFor(offset);
         SlotCard card = slots[slotNum];
-        if (card == null) {
-            return floatingBus.read();
+        if (card == null || !card.hasRom()) {
+            return floatingBus.read(); // nothing drives the bus here
         }
         arbiter.noteOwnRomAccessed(slotNum);
         return card.readRom(offset % 0x100);
@@ -34,7 +34,7 @@ final class SlotRomHandler implements AddressRangeHandler {
     public void write(int offset, int value) {
         int slotNum = slotNumFor(offset);
         SlotCard card = slots[slotNum];
-        if (card == null) {
+        if (card == null || !card.hasRom()) {
             return; // write with nothing present: no effect, matching real floating-bus hardware
         }
         arbiter.noteOwnRomAccessed(slotNum);
