@@ -129,6 +129,19 @@ public interface SlotCard {
     }
 
     /**
+     * The slots this card can work in. Configuring it into any other slot
+     * fails at startup with a message naming the slots it supports, rather
+     * than leaving a card in place that software can't drive. Most cards
+     * work anywhere, which is the default; one whose firmware is written for
+     * a particular slot says so here.
+     *
+     * @return the supported slot numbers, 0-7
+     */
+    default Set<Integer> supportedSlots() {
+        return Set.of(0, 1, 2, 3, 4, 5, 6, 7);
+    }
+
+    /**
      * Whether this card ever claims the shared $C800-$CFFF expansion ROM window. Most cards never do.
      *
      * @return true if this card can own the expansion ROM window

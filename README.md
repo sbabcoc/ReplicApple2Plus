@@ -318,7 +318,9 @@ drive1=path/to/disk1.woz
 drive2=path/to/disk2.dsk
 ```
 
-`[3]` is optional: it adds the VideoTerm (`PR#3` activates it).
+`[3]` is optional: it adds the VideoTerm (`PR#3` activates it). It must
+be slot 3 -- the card's firmware is written for it, and any other slot is
+refused at startup.
 `display` sets the mode it starts in -- `switched` (Soft Switch, the
 default), `apple` (Apple Video), `slot3` (Slot 3 Video) or `separate`
 (Dual Monitor); the toolbar changes it while running.

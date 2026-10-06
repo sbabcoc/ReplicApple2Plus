@@ -79,6 +79,12 @@ public final class VideoTerm implements SlotCard {
         return "videoterm";
     }
 
+    /** Firmware 2.4 is hard-coded for slot 3 (device select at {@code $C0B0}, entry at {@code $C300}). */
+    @Override
+    public Set<Integer> supportedSlots() {
+        return Set.of(3);
+    }
+
     @Override
     public Set<String> getSupportedParameters() {
         return Set.of("display");

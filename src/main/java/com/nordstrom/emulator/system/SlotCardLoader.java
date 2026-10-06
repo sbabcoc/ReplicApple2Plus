@@ -64,7 +64,12 @@ public final class SlotCardLoader {
             }
             cardProps.remove("type"); // the card itself only sees its own settings
 
-            slots[slotNum] = CardTypes.create(typeName, cardProps, classLoader);
+            SlotCard card = CardTypes.create(typeName, cardProps, classLoader);
+            if (!card.supportedSlots().contains(slotNum)) {
+                throw new IllegalStateException("Slot " + slotNum + ": a \"" + typeName + "\" card only works in slot "
+                    + new java.util.TreeSet<>(card.supportedSlots()).toString().replaceAll("[\\[\\]]", ""));
+            }
+            slots[slotNum] = card;
         }
         return slots;
     }

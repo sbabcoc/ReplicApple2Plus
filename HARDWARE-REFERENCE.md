@@ -410,6 +410,28 @@ standard slot-ROM opening that sets V to tell entry points apart), and
 `$C305`/`$C307`/`$C30B`/`$C30C` hold `$38`/`$18`/`$01`/`$82` -- exactly
 the Pascal 1.1 firmware-protocol signature.
 
+### SETUP's "already initialized" marker — confirmed from the ROM binary
+
+`SETUP` skips programming the CRTC when the card's scratch byte at
+`$778` + slot (`$077B` for slot 3) already reads `$30` in its top five
+bits:
+
+```
+$C800: AD 7B 07   LDA $077B
+$C803: 29 F8      AND #$F8
+$C805: C9 30      CMP #$30
+$C807: F0 21      BEQ $C82A     ; past the CRTC loop, straight to STA $C059
+```
+
+That byte is a text-page screen hole, which powers up random, so about
+**1 power-on in 32** starts with the marker already set: the first
+`PR#3` then turns AN0 on without programming the CRTC, and the
+80-column display stays dark. Its low three bits are the firmware's
+pending-command counter (`$CA92`: `AND #$07`), so a set marker can also
+leave the firmware mid-"command". Observed in the emulator (with random
+power-on RAM) as an occasional test failure; a power cycle (Reboot)
+clears it.
+
 ### How characters are stored in VRAM — confirmed from the ROM binary
 
 The firmware writes each character with **bit 7 set from the video

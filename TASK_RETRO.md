@@ -510,6 +510,23 @@ selection, focus, and what each mode shows for AN0 on and off) and in
 the running application, cycling all four modes after `PR#3` and closing
 the Dual Monitor window.
 
+### VideoTerm integration test: the firmware's init marker -- done
+
+`VideoTermFirmwareIntegrationTest` failed intermittently (on the user's
+Mac, then 2 of 40 runs here): after `PR#3`, CRTC R0 was still 0. Cause:
+`SETUP` skips programming the CRTC when `$077B AND $F8 = $30` -- its
+"already initialized" marker, in a screen hole that powers up random --
+so about 1 power-on in 32 skipped it. Confirmed by setting the byte
+deliberately (`$30`/`$37` skip; `$00`/`$FF`/`$38`/`$28` don't). Real
+firmware behavior, not an emulator fault. The test now clears the marker
+before `PR#3` (40 of 40 runs pass), and a second test documents the skip
+itself.
+
+Same delivery fixed a Javadoc warning from the `supportedSlots()` change:
+the new method had been inserted between `wantsExpansionRom()`'s Javadoc
+and its declaration. Verified clean with Java 17's `javadoc`, which
+reproduces the warning against the broken file.
+
 ---
 
 ## Component development history (moved from README.md)

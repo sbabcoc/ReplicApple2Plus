@@ -24,6 +24,14 @@ class VideoTermFirmwareIntegrationTest {
 
     private static final int CYCLES_PER_SECOND = 1_023_000;
 
+    /**
+     * The firmware's "already initialized" marker: SETUP skips programming the
+     * CRTC when {@code $077B AND $F8 = $30}. It lives in a text-page screen
+     * hole ({@code $778} + slot 3), which powers up random like the rest of
+     * RAM -- so about 1 power-on in 32 starts with the marker set.
+     */
+    private static final int INIT_MARKER = 0x077B;
+
     private final VideoTerm card = new VideoTerm();
     private final MotherboardBus bus;
     private final SystemClock clock;
@@ -61,6 +69,7 @@ class VideoTermFirmwareIntegrationTest {
     @Test
     void pr3HandsOutputToTheCardAndTheSoftVideoSwitchFollowsTextAndGraphics() {
         run(2); // cold boot to the Applesoft prompt
+        bus.write(INIT_MARKER, 0x00); // a power-on that didn't happen to leave the marker set
         assertFalse(bus.videoSoftSwitches().softVideoSwitchSelects80Columns(), "40 columns before PR#3");
 
         type("PR#3");
@@ -84,5 +93,21 @@ class VideoTermFirmwareIntegrationTest {
         type("TEXT");
         run(1);
         assertTrue(bus.videoSoftSwitches().softVideoSwitchSelects80Columns(), "back to text: 80 columns again");
+    }
+
+    /**
+     * Documents real firmware behavior rather than a goal: if power-up left
+     * the marker set, SETUP believes the card is already initialized and
+     * skips programming the CRTC, so the 80-column display stays dark.
+     */
+    @Test
+    void pr3SkipsCrtcSetupWhenPowerUpLeftTheInitializedMarkerSet() {
+        run(2);
+        bus.write(INIT_MARKER, 0x30);
+        type("PR#3");
+        run(1);
+        assertEquals(0, card.register(1), "R1 (characters per row) never programmed");
+        assertTrue(bus.videoSoftSwitches().softVideoSwitchSelects80Columns(),
+            "SETUP still turns AN0 on -- its skip lands on the STA $C059");
     }
 }

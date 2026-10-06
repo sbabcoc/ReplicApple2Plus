@@ -23,7 +23,11 @@ Language Card -- the first 16K bank behaves identically to a Language
 Card, so existing Language-Card-aware software works unmodified.
 
 **Addressing**: control range `$C0N0`-`$C0NF`, where N = 8 + slot#
-(`$C080`-`$C08F` for slot 0). Address line A2 selects between two
+(`$C080`-`$C08F` for slot 0). **Emulator limit to resolve when building it**: the
+card's control range follows its slot, but `MotherboardBus` routes
+`$D000`-`$FFFF` bank switching only through slot 0's card
+(`slots[0].wantsSlotZeroBanking()`). Either support the Saturn in slot 0
+only -- declaring `supportedSlots()` as `{0}` -- or extend that routing. Address line A2 selects between two
 modes: state-select (A2=0: read source, write-enable, which 4K
 sub-bank) vs. bank-select (A2=1: which of the 8 16K banks). Full
 verbatim truth table:
@@ -77,3 +81,10 @@ with a real failing case before changing code.
 - **VideoTerm features not modeled.** The alternate character set (VRAM
   bit 7 set; drawn with the standard glyphs instead) and the CRTC's light
   pen registers (R16/R17 read 0). Nothing known uses either.
+- **No reliable in-session recovery from a skipped VideoTerm setup.**
+  About 1 power-on in 32, the firmware's "initialized" marker at `$077B`
+  starts out set and the first `PR#3` leaves the 80-column screen dark
+  (see HARDWARE-REFERENCE.md). Reboot fixes it. Ctrl-Z `0` and
+  `POKE 1915,0 : PR#3` each recovered one bad marker value but not
+  another in testing -- the marker's low bits double as the firmware's
+  command state -- so neither is a dependable answer yet.
