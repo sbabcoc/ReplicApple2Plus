@@ -94,6 +94,8 @@ class VideoTermTest {
     void displayModeComesFromConfiguration() {
         assertEquals(VideoTerm.Display.SWITCHED, configured(null).display());
         assertEquals(VideoTerm.Display.SWITCHED, configured("switched").display());
+        assertEquals(VideoTerm.Display.APPLE, configured("apple").display());
+        assertEquals(VideoTerm.Display.SLOT3, configured("slot3").display());
         assertEquals(VideoTerm.Display.SEPARATE, configured("Separate").display());
         assertThrows(IllegalArgumentException.class, () -> configured("both"));
     }

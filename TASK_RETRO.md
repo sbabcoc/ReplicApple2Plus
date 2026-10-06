@@ -485,6 +485,31 @@ is unchanged. A new test reproduced the bug before the fix (scan line
 in the running application, `GR` with a plot, a line and a `PRINT` now
 shows the commands as text beneath the graphics.
 
+### VideoTerm display modes: a four-way drop-down -- done
+
+**Trigger**: after Merlin's `VID 0`, Soft Switch mode kept showing the
+80-column screen. Reproduced with the user's Merlin disk: `VID 3` turns
+AN0 on through the card's own firmware (`$C82A: STA $C059`), and `VID 0`
+redirects output to the 40-column screen without ever touching AN0 --
+a search of the whole disk found `$C058` only inside copies of the
+Monitor's RESET routine. So the emulator was right: a real Soft Video
+Switch would also keep showing 80 columns. On real hardware, RESET is
+the way back -- the ROM's RESET routine (`$FA62`) clears all four
+annunciators before Merlin regains control -- and the toolbar's Reset
+does the same here, returning to Merlin's main menu in 40 columns with
+the source still in memory.
+
+**Change**: the two Soft Switch / Dual Monitor toggles became a
+non-focusable drop-down with four modes, adding **Apple Video** and
+**Slot 3 Video** -- a single window held on one source, like the manual
+monitor switch such software was written for. `display=` accepts
+`switched`, `apple`, `slot3` and `separate`.
+
+**Verified** with unit tests (the four modes, their order and labels,
+selection, focus, and what each mode shows for AN0 on and off) and in
+the running application, cycling all four modes after `PR#3` and closing
+the Dual Monitor window.
+
 ---
 
 ## Component development history (moved from README.md)

@@ -59,8 +59,9 @@ final class ScreenPanel extends JPanel {
     /**
      * @param switchedVideoTerm a VideoTerm whose output this panel shows in
      *                          place of the Apple's own video whenever the
-     *                          card is in soft-switch mode and the Soft Video
-     *                          Switch would select it, or null for none
+     *                          card's display mode puts 80 columns in the main
+     *                          window (always, or when the Soft Video Switch
+     *                          selects them), or null for none
      */
     ScreenPanel(MotherboardBus bus, ScanlineModes scanlineModes, VideoTerm switchedVideoTerm) {
         this.bus = bus;
@@ -86,9 +87,14 @@ final class ScreenPanel extends JPanel {
 
     /** @return true when this panel is currently showing the VideoTerm's 80 columns rather than the Apple's video */
     boolean showingEightyColumns() {
-        return switchedVideoTerm != null
-            && switchedVideoTerm.display() == VideoTerm.Display.SWITCHED
-            && bus.videoSoftSwitches().softVideoSwitchSelects80Columns();
+        if (switchedVideoTerm == null) {
+            return false;
+        }
+        return switch (switchedVideoTerm.display()) {
+            case SLOT3 -> true;
+            case SWITCHED -> bus.videoSoftSwitches().softVideoSwitchSelects80Columns();
+            case APPLE, SEPARATE -> false;
+        };
     }
 
     @Override

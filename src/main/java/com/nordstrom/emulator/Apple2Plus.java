@@ -174,7 +174,7 @@ public final class Apple2Plus {
      */
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
-                            EightyColumnView eightyColumns, DisplayModeButtons displayModes) {}
+                            EightyColumnView eightyColumns, DisplayModeSelector displayModes) {}
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
@@ -409,10 +409,10 @@ public final class Apple2Plus {
         padPoller.start();
 
         JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, loop, onReboot) : null;
-        DisplayModeButtons displayModes = null;
+        DisplayModeSelector displayModes = null;
         if (toolbar != null && videoTerm != null) {
             VideoTerm card = videoTerm;
-            displayModes = new DisplayModeButtons(card, () -> {
+            displayModes = new DisplayModeSelector(card, () -> {
                 displayChosenAtRuntime = card.display();
                 updateEightyColumnWindow(frame, card);
                 screen.repaint();
@@ -461,8 +461,8 @@ public final class Apple2Plus {
     /** The separate 80-column window, created the first time a machine has a VideoTerm and kept across reboots. */
     private static JFrame eightyColumnFrame;
 
-    /** The current machine's display-mode buttons, for the 80-column window's close handler; null if none. */
-    private static DisplayModeButtons currentDisplayModes;
+    /** The current machine's display-mode selector, for the 80-column window's close handler; null if none. */
+    private static DisplayModeSelector currentDisplayModes;
 
     /** The display mode last chosen from the toolbar, carried across reboots; null until one is chosen. */
     private static volatile VideoTerm.Display displayChosenAtRuntime;

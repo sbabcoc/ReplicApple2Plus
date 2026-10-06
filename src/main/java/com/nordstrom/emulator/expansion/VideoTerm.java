@@ -32,21 +32,33 @@ import java.util.Set;
  * by the firmware's setup, R14-R17 readable (R16/R17 being the light pen,
  * which isn't modeled and reads 0).
  * <p>
- * Configuration: {@code display} sets the initial display mode,
- * {@code switched} (the default) or {@code separate}; the application can
- * change it while running. Switched models the Soft Video Switch -- one
- * screen, showing 80 columns when annunciator 0 is on and the machine is in
- * text mode. Separate gives the 80-column output its own window and leaves
- * the main window always showing the Apple's video.
+ * Configuration: {@code display} sets the initial display mode -- see
+ * {@link Display} for the four choices and their configuration values; the
+ * application can change it while running.
  */
 public final class VideoTerm implements SlotCard {
 
     /** How the 80-column output reaches the screen. */
     public enum Display {
-        /** One window; the Soft Video Switch picks 80 columns when AN0 is on and graphics is off. */
-        SWITCHED,
-        /** A second window always shows the 80-column output. */
-        SEPARATE
+        /** One window; the Soft Video Switch picks 80 columns when AN0 is on and graphics is off. Config value {@code switched}. */
+        SWITCHED("switched"),
+        /** One window, always the Apple's own video -- a monitor switch set to the Apple. Config value {@code apple}. */
+        APPLE("apple"),
+        /** One window, always the card's 80 columns -- a monitor switch set to slot 3. Config value {@code slot3}. */
+        SLOT3("slot3"),
+        /** Two windows: the main one always the Apple's video, a second always the 80 columns. Config value {@code separate}. */
+        SEPARATE("separate");
+
+        private final String configValue;
+
+        Display(String configValue) {
+            this.configValue = configValue;
+        }
+
+        /** @return this mode's value for {@code display=} in the slot configuration */
+        public String configValue() {
+            return configValue;
+        }
     }
 
     static final int VRAM_SIZE = 2048;
@@ -74,13 +86,17 @@ public final class VideoTerm implements SlotCard {
 
     @Override
     public void configure(Properties props) {
-        String mode = props.getProperty("display", "switched").trim();
-        display = switch (mode.toLowerCase(java.util.Locale.ROOT)) {
-            case "switched" -> Display.SWITCHED;
-            case "separate" -> Display.SEPARATE;
-            default -> throw new IllegalArgumentException(
-                "videoterm: display must be 'switched' or 'separate', not '" + mode + "'");
-        };
+        String mode = props.getProperty("display", Display.SWITCHED.configValue()).trim();
+        display = null;
+        for (Display candidate : Display.values()) {
+            if (candidate.configValue().equalsIgnoreCase(mode)) {
+                display = candidate;
+            }
+        }
+        if (display == null) {
+            throw new IllegalArgumentException("videoterm: display must be switched, apple, slot3 or separate, not '"
+                + mode + "'");
+        }
         firmware = VideoTermRoms.firmware();
         VideoTermRoms.charset(); // fail at startup, not first paint, if the character ROM is missing or wrong
         vram = PowerOnRam.allocate(VRAM_SIZE); // static RAM, also indeterminate at power-on

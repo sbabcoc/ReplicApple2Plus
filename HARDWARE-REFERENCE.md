@@ -514,8 +514,15 @@ manual's description that "the firmware sets annunciator 0 on as each
 character is output", under the standard convention -- and `$C058`
 only for that one command.
 
-**Emulator display modes** (chosen with the toolbar's Soft Switch /
-Dual Monitor buttons; `display=` in `slots.ini` sets the initial mode):
+**Emulator display modes** (chosen with the toolbar's display-mode
+drop-down; `display=` in `slots.ini` sets the initial mode). Besides the
+two below, **Apple Video** and **Slot 3 Video** hold a single window on
+one source, like a manual monitor switch -- for software that leaves
+80-column mode without clearing AN0. Merlin (1983) is one: its `VID 0`
+redirects output to the 40-column screen but never touches `$C058`, so
+under the Soft Video Switch rule the stale 80-column screen stays up
+until something clears AN0 -- such as RESET, whose Monitor routine at
+`$FA62` reads `$C058`/`$C05A`/`$C05D`/`$C05F`.
 - **Single window (default)** models the Soft Video Switch: show the
   VideoTerm's output when `annunciator[0]` is set and the machine is in
   text mode; otherwise show the regular screen.

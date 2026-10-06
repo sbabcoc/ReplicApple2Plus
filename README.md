@@ -80,13 +80,22 @@ Companion documents:
   power-on).
 - Videx VideoTerm 80-column card in slot 3, running its real firmware
   2.4: 80 x 24 text with lowercase and true descenders, a blinking
-  block cursor, and the card's own character set. Two display modes,
-  switched at any time from the toolbar: **Soft Switch** models Videx's
-  Soft Video Switch -- the main window shows 80 columns when annunciator
-  0 is on and the machine is in text mode, and the Apple's video
-  otherwise; **Dual Monitor** gives the 80 columns a window of their own
-  beside an always-Apple main window. Closing that window returns to
-  Soft Switch, and the chosen mode carries across Reboot.
+  block cursor, and the card's own character set. Four display modes,
+  chosen at any time from the toolbar:
+  - **Soft Switch** models Videx's Soft Video Switch: the main window
+    shows 80 columns when annunciator 0 is on and the machine is in text
+    mode, and the Apple's video otherwise.
+  - **Apple Video** and **Slot 3 Video** hold the main window on one
+    source, like a manual monitor switch -- useful with software that
+    leaves 80-column mode without turning annunciator 0 off. (Merlin's
+    `VID 0` is one: on real hardware with a Soft Video Switch, its user
+    would press RESET, whose ROM routine clears the annunciators; the
+    toolbar's Reset does the same here.)
+  - **Dual Monitor** gives the 80 columns a window of their own beside
+    an always-Apple main window. Closing that window returns to Soft
+    Switch.
+
+  The chosen mode carries across Reboot.
 - Peripherals are plug-ins: cards are discovered through Java's standard
   `ServiceLoader`, and new ones can be added from external jars without
   rebuilding the emulator.
@@ -98,7 +107,7 @@ Companion documents:
   cancels.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
   cycle that keeps the inserted disks), and -- with a VideoTerm
-  configured -- the Soft Switch / Dual Monitor display choice.
+  configured -- the display mode drop-down.
 
 ## Architecture
 
@@ -311,8 +320,8 @@ drive2=path/to/disk2.dsk
 
 `[3]` is optional: it adds the VideoTerm (`PR#3` activates it).
 `display` sets the mode it starts in -- `switched` (Soft Switch, the
-default) or `separate` (Dual Monitor); the toolbar changes it while
-running.
+default), `apple` (Apple Video), `slot3` (Slot 3 Video) or `separate`
+(Dual Monitor); the toolbar changes it while running.
 
 `drive1` and `drive2` are both optional. If drive 1 is empty at startup,
 the emulator offers to insert a boot disk first -- otherwise the
