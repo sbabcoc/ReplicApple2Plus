@@ -5,15 +5,13 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Locks in {@link Disk2Controller}'s real phase-stepper algorithm --
- * confirmed against two independent sources when originally built: a
- * step occurs only when a phase that was genuinely on is turned off
- * while exactly one neighbor is on, with direction determined by which
- * neighbor. This is real, easy-to-get-subtly-wrong hardware behavior
- * (both-neighbors-on, neither-on, and redundant-off all have to
- * correctly produce no movement, not just the two "normal" stepping
- * cases), not something a passing glance at the code would catch a
- * regression in.
+ * Locks in {@link Disk2Controller}'s phase-stepper behavior: the magnets
+ * act on the head where it actually is. If the magnet under the head is
+ * off and exactly one neighbor is on, the head moves half a track toward
+ * that neighbor; otherwise it stays. Both-neighbors-on, neither-on, and
+ * redundant-off all have to correctly produce no movement, not just the
+ * two "normal" stepping cases. (An earlier model tracked a remembered
+ * "last phase" instead; see ProDosSeekTest for the seek it got wrong.)
  * <p>
  * Each such clean transition moves the head by 2 quarter-tracks, not
  * 1 -- confirmed against real Apple documentation ("Beneath Apple
@@ -103,9 +101,9 @@ class Disk2ControllerPhaseSteppingTest {
     @Test
     void bothNeighborsOnProducesNoStep() {
         Disk2Controller disk = new Disk2Controller();
+        disk.writeIoSwitch(0x3, 0); // phase 1 on: draws the head from phase 0 onto phase 1
         int start = disk.drive(0).quarterTrack();
 
-        disk.writeIoSwitch(0x3, 0); // phase 1 on
         disk.writeIoSwitch(0x1, 0); // phase 0 on (previous neighbor of 1)
         disk.writeIoSwitch(0x5, 0); // phase 2 on (next neighbor of 1) -- both neighbors of 1 now on
         disk.writeIoSwitch(0x2, 0); // phase 1 off, with BOTH neighbors on -> no step
@@ -127,9 +125,9 @@ class Disk2ControllerPhaseSteppingTest {
     @Test
     void turningOffAnAlreadyOffPhaseNeverSteps() {
         Disk2Controller disk = new Disk2Controller();
+        disk.writeIoSwitch(0x3, 0); // phase 1 on: draws the head from phase 0 onto phase 1
         int start = disk.drive(0).quarterTrack();
 
-        disk.writeIoSwitch(0x3, 0); // phase 1 on
         disk.writeIoSwitch(0x0, 0); // phase 0 off -- but phase 0 was never on, not a real transition
 
         assertEquals(start, disk.drive(0).quarterTrack());

@@ -631,6 +631,65 @@ not a from-scratch peripheral.
 
 </details>
 
+### ProDOS-order (.po) disk images -- done
+
+A 140K `.po` image holds the same 560 sectors as a `.dsk`, in ProDOS
+order (each 512-byte block as two consecutive sectors). `DskDiskImage`
+now picks its physical-to-file sector table by extension: the existing
+DOS 3.3 table, or the ProDOS one. Both tables were checked against
+MAME's `ap2_dsk.cpp` (`dos_skewing` matched the existing table exactly;
+`prodos_skewing` was adopted as-is). Reading, writing and blank media
+are shared code. Insert accepts `.po`, New can create one, and the
+extension swap in New knows it.
+
+**Verified** with sample images from AppleCommander's repository
+(GPL-licensed, so used for verification only, not added to this
+project): `DOS 3.3.po` boots DOS 3.3 as a `.po`, while the same bytes
+named `.dsk` run off into garbage after the boot sector -- so the order
+really matters. Unit tests check that the same disk stored in either
+order produces identical tracks; both fail with the ProDOS table broken.
+
+**Also learned**: AppleCommander's `Prodos.dsk` is Apple's ProDOS 8
+2.0.3, which starts and then stops with "REQUIRES ENHANCED APPLE IIE OR
+LATER" -- confirming that Apple's last ProDOS dropped the II+, and that
+the community 2.4.x series is the one to use here.
+
+### ProDOS 2.4.3 boots: head stepping follows the head -- done
+
+**Symptom**: ProDOS 2.4.3 (`ProDOS_2_4_3.po`, the official release
+image) showed its splash screen on a II+ with a Language Card, then
+hung. A profile showed the boot loader reading tracks fine, then the
+kernel's disk driver (in Language Card RAM, `$D385`-`$D3A8`) seeking
+and searching for address fields forever. Logging head movement: the
+kernel's first step from track 5 went **outward**, its seek to track 0
+ended on track 1, and its retries rocked the head between quarter-tracks
+4 and 6.
+
+**Cause**: the stepper was modeled on transitions, with a separately
+remembered "current phase". When a phase opposite the head was energized
+with nothing else on, that model adopted it as its reference although
+an opposite magnet doesn't move the head -- leaving the reference two
+phases away from the head (logged: `currentPhase=0` with the head over
+phase 2). The kernel's first inward step was then read as outward.
+DOS 3.3's stepping happened never to trigger this.
+
+**Fix**: `settleHead()` decides from the head's real position, as the
+magnets do: if the magnet under the head is off and exactly one
+neighbor is on, the head moves half a track toward it; otherwise it
+stays. No remembered phase to drift. Two existing stepper tests relied
+on the old model's convention that the first phase touched "adopts" the
+head without moving it; on a real drive, energizing the neighbor of the
+head's magnet pulls the head over, so their baselines now start after
+that move (what each test checks is unchanged).
+
+**Verified**: ProDOS 2.4.3 boots to Bitsy Bye, launches BASIC.SYSTEM,
+and `CATALOG` lists the disk (280 blocks). Every earlier disk still
+boots to the same screen (Joust, Merlin, the Saturn software disk, a
+ProDOS-ordered DOS 3.3 master), and Joust plays through its second load.
+`ProDosSeekTest` reproduces the trap and the recorded seek; run against
+the old model it fails and ends on quarter-track 4 -- exactly where the
+real boot got stuck.
+
 ---
 
 ## Component development history (moved from README.md)

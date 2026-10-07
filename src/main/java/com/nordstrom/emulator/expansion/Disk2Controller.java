@@ -92,7 +92,6 @@ public final class Disk2Controller implements SlotCard {
     private static final long MOTOR_OFF_DELAY_CYCLES = 1_163_250L;
 
     private final boolean[] phaseOn = new boolean[4];
-    private int currentPhase = -1; // -1 = not yet established; set on first phase touch
     private boolean motorOn;
     /**
      * Cycles remaining before a pending motor-off actually takes effect;
@@ -373,116 +372,54 @@ public final class Disk2Controller implements SlotCard {
     }
 
     /**
-     * Turns off phase {@code n}, stepping the currently-selected drive's
-     * head if this is a genuine on-to-off transition with exactly one
-     * adjacent phase currently on -- the real Disk II stepper mechanism
-     * (confirmed against two independent sources): a step only occurs
-     * when the phase being turned off had been on, and only one of its
-     * two neighbors is energized. The next (clockwise) neighbor being on
-     * steps inward (higher track numbers); the previous
-     * (counter-clockwise) neighbor being on steps outward (toward track
-     * 0). Both neighbors on, or neither, means no step -- the head
-     * doesn't move on every switch access, only on a real, unambiguous
-     * transition.
-     * <p>
-     * Each such clean transition moves the head by 2 quarter-tracks, not
-     * 1: real Apple documentation ("Beneath Apple DOS") describes the
-     * disk arm as positionable over 70 "phases" across 35 tracks -- 2
-     * phases per track -- with "two phases of the stepper motor... must
-     * be cycled" to move one full track. A real Apple "phase" is
-     * therefore 2 quarter-tracks (this project's own indexing unit,
-     * matching the WOZ format's 0-159 range for representing disk data
-     * positions), and standard DOS's own phase-stepping code only ever
-     * issues one clean transition per "phase" of desired movement --
-     * confirmed directly against a real Virtual ][ trace of this exact
-     * disk's boot sequence, where a fixed seek target produced exactly
-     * double this project's own resulting head travel before this fix.
-     *
-     * @param n the phase (0-3) being turned off
-     */
-    /**
-     * Turns off phase {@code n} and steps the currently-selected drive if
-     * this is a clean, unambiguous transition -- confirmed against two
-     * independent sources: a step occurs only when a phase that was
-     * genuinely on is turned off while exactly one neighbor is on, with
-     * direction determined by which neighbor. Both-neighbors-on,
-     * neither-on, and redundant-off all correctly produce no movement.
-     * Each such clean transition moves the head by 2 quarter-tracks, not 1
-     * (see this method's own history for the real-hardware justification).
-     * <p>
-     * Also updates {@link #currentPhase} -- the motor's last-known settled
-     * phase -- on every genuine (guard-passing) off transition, including
-     * the no-step cases: with neither neighbor on, the rotor has no reason
-     * to have moved from {@code n}'s own position, so {@code n} remains the
-     * reference; with both neighbors on, {@code n} is still the best
-     * available reference (better than losing it entirely). This tracking
-     * exists to support {@link #turnOnPhase}'s different, later-added
-     * responsibility -- see its Javadoc.
+     * Turns off phase {@code n} -- see {@link #settleHead}.
      *
      * @param n the phase (0-3) being turned off
      */
     private void turnOffPhase(int n) {
-        if (phaseOn[n]) {
-            boolean nextOn = phaseOn[(n + 1) % 4];
-            boolean prevOn = phaseOn[(n + 3) % 4];
-            phaseOn[n] = false;
-            if (nextOn && !prevOn) {
-                drives[selectedDrive].step(2);
-                currentPhase = (n + 1) % 4;
-            } else if (prevOn && !nextOn) {
-                drives[selectedDrive].step(-2);
-                currentPhase = (n + 3) % 4;
-            } else {
-                currentPhase = n;
-            }
-        }
+        phaseOn[n] = false;
+        settleHead();
     }
 
     /**
-     * Turns on phase {@code n}. Normal SEEKABS usage turns the new phase on
-     * while the old one is still on (a genuine overlap), and the resulting
-     * step is correctly produced later, at the old phase's OFF touch, by
-     * {@link #turnOffPhase} -- this method must NOT also step in that case,
-     * or the same transition would be double-counted. This method only
-     * steps when NO other phase is currently on at all: a different,
-     * legitimate real access pattern -- BOOT0's own track-0 recalibration
-     * loop -- turns each phase fully off before turning the next one on,
-     * with no overlap at any point. Left unhandled, such a pattern never
-     * satisfies {@link #turnOffPhase}'s own neighbor-on condition (since no
-     * neighbor is ever on when each off touch happens) and never steps at
-     * all. When resuming cleanly from all-off, real hardware's rotor
-     * retains its last aligned position (tracked here as
-     * {@link #currentPhase}, maintained across both methods) and moves
-     * toward whichever adjacent phase is newly energized -- confirmed by
-     * hand-tracing BOOT0's exact access pattern, which steps outward
-     * cleanly on every iteration from the second one on under this rule.
+     * Turns on phase {@code n} -- see {@link #settleHead}.
      *
      * @param n the phase (0-3) being turned on
      */
     private void turnOnPhase(int n) {
-        boolean anyOtherOn = false;
-        for (int i = 0; i < 4; i++) {
-            if (i != n && phaseOn[i]) {
-                anyOtherOn = true;
-                break;
-            }
-        }
         phaseOn[n] = true;
-        if (anyOtherOn) {
-            return; // overlap case -- defer entirely to turnOffPhase, as before
-        }
-        if (currentPhase < 0) {
-            currentPhase = n; // very first phase touch of the session
+        settleHead();
+    }
+
+    /**
+     * Moves the selected drive's head the way the stepper magnets pull it
+     * from where it actually is. The head sits over one of the four phase
+     * magnets (half-track {@code h} is over magnet {@code h mod 4}). If that
+     * magnet is off and exactly one of its two neighbors is on, the head is
+     * drawn half a track -- 2 quarter-tracks -- toward the energized
+     * neighbor. Otherwise it stays: held by its own magnet, balanced between
+     * two energized neighbors, or with nothing nearby pulling at all.
+     * <p>
+     * Deciding from the head's real position, not from a separately
+     * remembered "last phase", keeps the two from ever disagreeing. That
+     * covers every pattern software uses: DOS's overlapped seeks (the new
+     * phase on while the old is still on -- the head moves when the old
+     * one goes off), the boot ROM's non-overlapped recalibration, and
+     * ProDOS's seeks, which a remembered-phase model could step the wrong
+     * way after a different program had last moved the head.
+     */
+    private void settleHead() {
+        Drive drive = drives[selectedDrive];
+        int phase = (drive.quarterTrack() / 2) % 4;
+        if (phaseOn[phase]) {
             return;
         }
-        if (n == (currentPhase + 1) % 4) {
-            drives[selectedDrive].step(2);
-            currentPhase = n;
-        } else if (n == (currentPhase + 3) % 4) {
-            drives[selectedDrive].step(-2);
-            currentPhase = n;
-        } else if (n != currentPhase) {
-            currentPhase = n; // two apart (opposite) -- ambiguous; adopt as new reference
+        boolean nextOn = phaseOn[(phase + 1) % 4];
+        boolean prevOn = phaseOn[(phase + 3) % 4];
+        if (nextOn && !prevOn) {
+            drive.step(2);
+        } else if (prevOn && !nextOn) {
+            drive.step(-2);
         }
     }
 
@@ -541,7 +478,7 @@ public final class Disk2Controller implements SlotCard {
      * currently loaded and makes its track data available to the LSS
      * via {@link #diskImage}. {@code insert} picks {@link WozDiskImage}
      * or {@link DskDiskImage} by file extension ({@code .dsk}/{@code
-     * .do} versus everything else) -- callers never need to know or
+     * .do}/{@code .po} versus everything else) -- callers never need to know or
      * care which one actually ends up loaded.
      */
     static final class Drive implements RemovableMediaDrive {
@@ -649,7 +586,7 @@ public final class Disk2Controller implements SlotCard {
             }
             persistBeforeReplacing(); // before loading, so re-inserting the same file reads the saved writes
             String name = imagePath.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-            DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
+            DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do") || name.endsWith(".po"))
                 ? DskDiskImage.load(imagePath)
                 : WozDiskImage.load(imagePath);
             insertLoadedImage(image, imagePath);
@@ -668,7 +605,7 @@ public final class Disk2Controller implements SlotCard {
             persistBeforeReplacing();
             // Format by extension, matching insert()'s own dispatch.
             String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-            DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do"))
+            DiskImage image = (name.endsWith(".dsk") || name.endsWith(".do") || name.endsWith(".po"))
                 ? DskDiskImage.createBlank(path)
                 : WozDiskImage.createBlank(path);
             insertLoadedImage(image, path);

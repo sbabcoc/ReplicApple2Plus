@@ -19,7 +19,8 @@ through the address-space design described below.
 
 ## Current status
 
-**A working Apple II+.** It boots DOS 3.3 from WOZ and DSK disk images,
+**A working Apple II+.** It boots DOS 3.3 and ProDOS 8 (2.4.x, with
+64K: a Language Card or Saturn card) from WOZ, DSK and PO disk images,
 reads and writes them, runs Applesoft BASIC and machine-language software, and
 displays text, lo-res and hi-res graphics with sound and game
 controllers, and supports the Videx VideoTerm 80-column card and the
@@ -64,11 +65,11 @@ Companion documents:
   mapping is configurable.
 
 **Disks** (Disk II controller, two drives)
-- WOZ 2 images (5.25") and DOS-order DSK images (`.dsk`/`.do`), read
-  and written. Writes persist to the image file on track change, eject
+- WOZ 2 images (5.25"), DOS-order DSK images (`.dsk`/`.do`) and
+  ProDOS-order images (`.po`, 140K), read and written. Writes persist to the image file on track change, eject
   and exit.
-- **Disk ▸ New...** creates blank, unformatted WOZ or DSK media ready
-  for `INIT`. A blank DSK is an empty file, the same convention Virtual
+- **Disk ▸ New...** creates blank, unformatted WOZ, DSK or PO media
+  ready to format. A blank DSK is an empty file, the same convention Virtual
   ][ uses.
 - Per-disk write protection, shown in each drive's menu title and
   toggled with a Writable/Protected choice.
@@ -185,8 +186,9 @@ catalog — regenerate it, don't trust it to stay current).
 - **Cassette output and the utility strobe** (`$C020`-`$C02F`,
   `$C040`-`$C04F`) accept accesses and do nothing; no cassette is modeled
   and nothing is wired to the strobe.
-- **Other disk formats.** No 13-sector DOS 3.2 media, no ProDOS-order
-  (`.po`) images, and no 3.5" WOZ disks or WOZ FLUX/WRIT chunks.
+- **Other disk formats.** No 13-sector DOS 3.2 media, no 800K `.po`
+  images or 3.5" WOZ disks (the II+ has no 3.5" drive), and no WOZ
+  FLUX/WRIT chunks.
 
 ## Verification
 

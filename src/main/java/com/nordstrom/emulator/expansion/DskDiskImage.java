@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Reads and writes a DOS-order sector image (.dsk/.do, 35 tracks x 16
+ * Reads and writes a sector image in DOS order (.dsk/.do) or ProDOS order (.po), 35 tracks x 16
  * sectors x 256 bytes = 143,360 bytes). Reading synthesizes the real, historical
  * 6-and-2 GCR bitstream each track would actually have on a physical
  * disk -- so {@link Disk2LogicSequencer} reads it through the exact
@@ -20,7 +20,11 @@ import java.nio.file.Path;
  * order (sector 0 first, sector 1 second, ...), but physical sector 0
  * on the disk is not logical sector 0's neighbor -- DOS 3.3's
  * well-documented software skew means physical sector position P
- * holds logical sector {@link #PHYSICAL_TO_LOGICAL}[P]. The address
+ * holds logical sector {@link #DOS_ORDER}[P]. A .po file holds the
+ * same 560 sectors in ProDOS order instead -- each 512-byte ProDOS
+ * block as two consecutive 256-byte sectors -- so physical position P
+ * holds file sector {@link #PRODOS_ORDER}[P]. The extension picks the
+ * order; everything else is identical. The address
  * field written at each physical position still names that physical
  * position's own number (0-15) -- the skew is purely about which
  * logical data ends up where, not a renumbering of the address fields
@@ -78,7 +82,10 @@ public final class DskDiskImage implements DiskImage {
     private static final int EXPECTED_FILE_SIZE = TRACKS * SECTORS_PER_TRACK * SECTOR_SIZE;
 
     /** Real, documented DOS 3.3 sector skew: physical position -> logical sector number. */
-    private static final int[] PHYSICAL_TO_LOGICAL = {0, 7, 14, 6, 13, 5, 12, 4, 11, 3, 10, 2, 9, 1, 8, 15};
+    private static final int[] DOS_ORDER = {0, 7, 14, 6, 13, 5, 12, 4, 11, 3, 10, 2, 9, 1, 8, 15};
+
+    /** ProDOS-order file sector at each physical position -- MAME's prodos_skewing (ap2_dsk.cpp). */
+    private static final int[] PRODOS_ORDER = {0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15};
 
     /** The real 64-entry 6-and-2 GCR translate table, ported from a2kit's FWD_62. */
     private static final int[] TRANSLATE_62 = {
@@ -144,9 +151,14 @@ public final class DskDiskImage implements DiskImage {
     /** Tracks of a blank (0-byte) image that nothing has written to yet -- they read as random noise. */
     private final boolean[] trackIsUnformatted = new boolean[TRACKS];
 
+    /** File sector at each physical position: {@link #DOS_ORDER} or {@link #PRODOS_ORDER}. */
+    private final int[] sectorOrder;
+
     private DskDiskImage(byte[] diskData, Path path, boolean unformatted) {
         this.diskData = diskData;
         this.path = path;
+        this.sectorOrder = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".po")
+            ? PRODOS_ORDER : DOS_ORDER;
         java.util.Arrays.fill(trackIsUnformatted, unformatted);
     }
 
@@ -154,7 +166,7 @@ public final class DskDiskImage implements DiskImage {
      * Loads a DOS-order sector image, or a blank (0-byte) one -- see this
      * class's Javadoc on blank media.
      *
-     * @param path the .dsk/.do file to load
+     * @param path the .dsk/.do/.po file to load
      * @return the parsed disk image
      * @throws IOException if the file can't be read
      * @throws IllegalArgumentException if the file is neither empty nor exactly the expected 143,360-byte size
@@ -242,10 +254,10 @@ public final class DskDiskImage implements DiskImage {
             byte[][] sectors = decodeTrack(trackBits[track], trackStreams[track].bitCount());
             for (int physical = 0; physical < SECTORS_PER_TRACK; physical++) {
                 if (sectors[physical] == null) {
-                    undecoded.add("track " + track + " sector " + PHYSICAL_TO_LOGICAL[physical]);
+                    undecoded.add("track " + track + " sector " + sectorOrder[physical]);
                     continue;
                 }
-                int offset = (track * SECTORS_PER_TRACK + PHYSICAL_TO_LOGICAL[physical]) * SECTOR_SIZE;
+                int offset = (track * SECTORS_PER_TRACK + sectorOrder[physical]) * SECTOR_SIZE;
                 System.arraycopy(sectors[physical], 0, diskData, offset, SECTOR_SIZE);
             }
             // What the file now holds for this track is the new baseline: a later persist
@@ -432,7 +444,7 @@ public final class DskDiskImage implements DiskImage {
         BitOutput out = new BitOutput();
         writeSyncGap(out);
         for (int physicalSector = 0; physicalSector < SECTORS_PER_TRACK; physicalSector++) {
-            int logicalSector = PHYSICAL_TO_LOGICAL[physicalSector];
+            int logicalSector = sectorOrder[physicalSector];
             byte[] sectorData = readSector(track, logicalSector);
 
             writeBytes(out, ADDRESS_PROLOG);

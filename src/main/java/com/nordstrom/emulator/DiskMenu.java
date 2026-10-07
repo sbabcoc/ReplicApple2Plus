@@ -280,7 +280,7 @@ final class DiskMenu {
     static void promptAndInsert(RemovableMediaDrive drive, Component parent, Executor emulationThread) {
         JFileChooser chooser = chooserAtLastDirectory();
         chooser.setFileFilter(new FileNameExtensionFilter(
-            "Disk images (*.woz, *.dsk, *.do)", "woz", "dsk", "do"));
+            "Disk images (*.woz, *.dsk, *.do, *.po)", "woz", "dsk", "do", "po"));
         int result = chooser.showOpenDialog(parent);
         rememberDirectory(chooser);
         if (result != JFileChooser.APPROVE_OPTION) {
@@ -319,7 +319,7 @@ final class DiskMenu {
     static String withDiskExtension(String name, String extension) {
         String base = name == null ? "" : name.trim();
         String lower = base.toLowerCase(java.util.Locale.ROOT);
-        for (String known : new String[] {".woz", ".dsk", ".do"}) {
+        for (String known : new String[] {".woz", ".dsk", ".do", ".po"}) {
             if (lower.endsWith(known)) {
                 base = base.substring(0, base.length() - known.length());
                 break;
@@ -362,15 +362,18 @@ final class DiskMenu {
     private static void promptAndCreateBlank(RemovableMediaDrive drive, Component parent, Executor emulationThread) {
         JFileChooser chooser = chooserAtLastDirectory();
         FileNameExtensionFilter woz = new FileNameExtensionFilter("WOZ disk images (*.woz)", "woz");
-        FileNameExtensionFilter dsk = new FileNameExtensionFilter("DSK disk images (*.dsk, *.do)", "dsk", "do");
+        FileNameExtensionFilter dsk = new FileNameExtensionFilter("DSK disk images, DOS order (*.dsk, *.do)", "dsk", "do");
+        FileNameExtensionFilter po = new FileNameExtensionFilter("PO disk images, ProDOS order (*.po)", "po");
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.addChoosableFileFilter(woz);
         chooser.addChoosableFileFilter(dsk);
+        chooser.addChoosableFileFilter(po);
         chooser.setFileFilter(woz);
         chooser.setSelectedFile(new java.io.File("untitled.woz"));
         // Switching the type swaps the name's extension to match, keeping whatever name was typed.
         chooser.addPropertyChangeListener(JFileChooser.FILE_FILTER_CHANGED_PROPERTY, event -> {
-            String extension = (event.getNewValue() == dsk) ? ".dsk" : ".woz";
+            Object filter = event.getNewValue();
+            String extension = filter == dsk ? ".dsk" : filter == po ? ".po" : ".woz";
             chooser.setSelectedFile(new java.io.File(withDiskExtension(typedFileName(chooser), extension)));
         });
         int result = chooser.showSaveDialog(parent);
@@ -381,8 +384,9 @@ final class DiskMenu {
         // A typed extension decides the format; with none, the selected filter does.
         java.io.File chosen = chooser.getSelectedFile();
         String lower = chosen.getName().toLowerCase(java.util.Locale.ROOT);
-        if (!lower.endsWith(".woz") && !lower.endsWith(".dsk") && !lower.endsWith(".do")) {
-            String extension = (chooser.getFileFilter() == dsk) ? ".dsk" : ".woz";
+        if (!lower.endsWith(".woz") && !lower.endsWith(".dsk") && !lower.endsWith(".do") && !lower.endsWith(".po")) {
+            Object filter = chooser.getFileFilter();
+            String extension = filter == dsk ? ".dsk" : filter == po ? ".po" : ".woz";
             chosen = new java.io.File(chosen.getParentFile(), chosen.getName() + extension);
         }
         java.nio.file.Path path = chosen.toPath();
