@@ -232,8 +232,9 @@ returning an error code. The card must never wait forever:
 - **Reboot:** builds a new machine with a new card, so the session
   ends with the old card.
 - **Silence:** if the adapter neither completes the request nor polls
-  for a long time, the host window says the Apple stopped responding
-  and offers to keep waiting or cancel.
+  for 10 seconds, the host window says the Apple stopped responding and
+  offers to keep waiting or cancel. Cancel closes the window; the guest
+  stays stuck until RESET, which the message suggests.
 
 In each case the host window reports which files completed and which
 didn't. The emulator never retries a write on its own: a partly

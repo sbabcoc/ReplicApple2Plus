@@ -3,6 +3,7 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.expansion.VideoTerm;
+import com.nordstrom.emulator.transfer.HostTransferCard;
 import com.nordstrom.emulator.input.BusInputSink;
 import com.nordstrom.emulator.input.InputMapper;
 import com.nordstrom.emulator.input.InputMapping;
@@ -174,7 +175,8 @@ public final class Apple2Plus {
      */
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
-                            EightyColumnView eightyColumns, DisplayModeSelector displayModes) {}
+                            EightyColumnView eightyColumns, DisplayModeSelector displayModes,
+                            HostTransferCard transferCard) {}
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
@@ -338,10 +340,13 @@ public final class Apple2Plus {
             }
         }
         VideoTerm videoTerm = null;
+        HostTransferCard transferCard = null;
         for (SlotCard card : slots) {
-            if (card instanceof VideoTerm v) {
+            if (card instanceof VideoTerm v && videoTerm == null) {
                 videoTerm = v;
-                break;
+            }
+            if (card instanceof HostTransferCard t && transferCard == null) {
+                transferCard = t;
             }
         }
 
@@ -420,7 +425,8 @@ public final class Apple2Plus {
             displayModes.addTo(toolbar);
         }
 
-        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes);
+        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
+            transferCard);
     }
 
     /**
@@ -546,6 +552,25 @@ public final class Apple2Plus {
         }
     }
 
+    /** The transfer window for the current machine's transfer card, or null if it has none. */
+    private static TransferWindow transferWindow;
+
+    /**
+     * Gives the machine's host file transfer card, if it has one, a transfer
+     * window as its host side -- replacing the previous machine's window,
+     * whose card (and any session) went with that machine.
+     */
+    private static void rewireTransferWindow(JFrame frame, Machine next) {
+        if (transferWindow != null) {
+            transferWindow.dispose();
+            transferWindow = null;
+        }
+        if (next.transferCard() != null) {
+            transferWindow = new TransferWindow(frame, next.transferCard().initialDirectory());
+            next.transferCard().setHost(transferWindow);
+        }
+    }
+
     private static void rewireFrame(JFrame frame, Machine previous, Machine next) {
         if (previous != null) {
             frame.getContentPane().remove(previous.screen());
@@ -570,6 +595,7 @@ public final class Apple2Plus {
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 
         rewireEightyColumnWindow(frame, previous, next, keyboardInput);
+        rewireTransferWindow(frame, next);
 
         frame.getContentPane().revalidate();
         frame.getContentPane().repaint();

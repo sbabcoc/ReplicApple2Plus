@@ -18,8 +18,14 @@ Build phases:
    host naming convention, capability-driven text conversion, and the
    `SlotCard.onReset()` hook, tested headless with a register-level fake
    adapter. Not yet offered as a card type: it has no firmware ROM.
-2. Host transfer window (Swing): file dialogs, guest volume/directory
-   tree, progress, errors, "stopped responding".
+2. **Host transfer window -- done.** `TransferWindow` (Swing) as the
+   card's `TransferHost`: guest volume/directory tree loaded lazily
+   through the adapter, Import/Export with the platform's file dialogs and
+   an editable table of suggested guest names (`GuestNames`), replace and
+   overwrite questions, progress and log, Done/close sending END, and a
+   "stopped responding" banner after 10 seconds. Transfer logic lives in
+   `TransferOperations`, tested headless with the fake adapter on its own
+   thread; the window was checked on a virtual display.
 3. ProDOS adapter firmware (ca65), tested end to end under ProDOS 2.4.3.
 4. DOS 3.3 adapter firmware, tested under real DOS 3.3. Works the same on every platform, including Android
 under Termux/PRoot (`/sdcard/...`). Full design, decisions and open

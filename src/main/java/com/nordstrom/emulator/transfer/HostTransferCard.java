@@ -24,7 +24,7 @@ import java.util.Set;
  */
 public final class HostTransferCard implements SlotCard {
 
-    private TransferHost host;
+    private volatile TransferHost host; // set on the UI thread, read on the emulation thread
     private Path initialDirectory;
 
     private TransferSession session;
