@@ -690,6 +690,43 @@ ProDOS-ordered DOS 3.3 master), and Joust plays through its second load.
 the old model it fails and ends on quarter-track 4 -- exactly where the
 real boot got stuck.
 
+### Host file transfer card: ProDOS adapter firmware (phase 3) -- done
+
+The card's 6502 firmware (`firmware/hostfiles/hostfiles.s`, ca65), which
+implements the abstract file API for ProDOS 8 by calling the MLI. Details
+of what was built are in TRANSFER-CARD.md section 6. What the work turned
+up:
+
+- **Checked against the real system first:** the directory header and
+  file entry offsets (read from the ProDOS 2.4.3 disk's block 2), the
+  memory bit map's layout and BASIC.SYSTEM's vectors (read from a running
+  system) -- not taken from memory.
+- **A line-by-line review before the first run caught six bugs:** `fail`
+  never saved the error code it looked up; the agent copy rounded up to
+  whole pages and could have read `$CFFF` (releasing the ROM it was
+  running from); the type table's end marker could match file type `$00`;
+  the GET_FILE_INFO list was a byte short; `JMP (finptr)` could have hit
+  the 6502's page-wrap bug; and the chunk-size and hex-digit code was
+  wrong. The code then outgrew one 2K bank, so the agent moved to bank 1,
+  copied by a routine in the `$Cn00` page.
+- **The first real run worked except the ending**, which hung the Apple.
+  Reading the vectors during the session showed BASIC.SYSTEM keeps the
+  output device in `CSW` as well as `VECTOUT`; restoring only `VECTOUT`
+  re-entered the firmware. Both are restored now.
+- **The DOS 3.3 exit printed the ProDOS message:** a `BNE` used as a jump
+  after loading message offset 0. Found by running real DOS 3.3.
+- **`.gitignore` excluded `*.rom`,** which would have kept the committed
+  firmware out of the repository; it now has an exception for that file.
+
+Verified under real ProDOS 2.4.3 and BASIC.SYSTEM 1.7: every request,
+multi-chunk files both ways, subdirectories, replacing, deleting,
+attributes, the early exits under ProDOS (no host) and DOS 3.3, memory
+restored (a BASIC program in the borrowed region still runs), and the
+real application opening the transfer window on `PR#2`. Permanent tests:
+`HostTransferCardFirmwareTest` (the image) and
+`ProDosTransferIntegrationTest` (the whole session, when the ProDOS image
+is supplied).
+
 ---
 
 ## Component development history (moved from README.md)

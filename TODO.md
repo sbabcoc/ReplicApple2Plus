@@ -26,7 +26,11 @@ Build phases:
    "stopped responding" banner after 10 seconds. Transfer logic lives in
    `TransferOperations`, tested headless with the fake adapter on its own
    thread; the window was checked on a virtual display.
-3. ProDOS adapter firmware (ca65), tested end to end under ProDOS 2.4.3.
+3. **ProDOS adapter firmware -- done.** `firmware/hostfiles/hostfiles.s`
+   (ca65), image committed as a resource; the card is now a configurable
+   type (`type=hostfiles`). Verified under real ProDOS 2.4.3 and
+   BASIC.SYSTEM; `ProDosTransferIntegrationTest` runs the whole session
+   when `ProDOS_2_4_3.po` is in its test resources.
 4. DOS 3.3 adapter firmware, tested under real DOS 3.3. Works the same on every platform, including Android
 under Termux/PRoot (`/sdcard/...`). Full design, decisions and open
 questions: [TRANSFER-CARD.md](TRANSFER-CARD.md).

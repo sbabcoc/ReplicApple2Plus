@@ -315,3 +315,34 @@ nexusPublishing {
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// Host file transfer card firmware (optional): rebuilds the committed ROM
+// image from firmware/hostfiles with the cc65 suite's ca65 and ld65, which
+// must be on the PATH. A normal build never needs this -- it uses the
+// committed src/main/resources/.../transfer/hostfiles-firmware.rom.
+// ---------------------------------------------------------------------
+def firmwareDir = layout.projectDirectory.dir('firmware/hostfiles')
+def firmwareObject = layout.buildDirectory.file('firmware/hostfiles.o')
+def firmwareImage = layout.projectDirectory.file(
+    'src/main/resources/com/nordstrom/emulator/transfer/hostfiles-firmware.rom')
+
+tasks.register('assembleHostFilesFirmwareObject', Exec) {
+    group = 'firmware'
+    description = 'Assembles the host file transfer card firmware with ca65.'
+    inputs.file(firmwareDir.file('hostfiles.s'))
+    outputs.file(firmwareObject)
+    doFirst { firmwareObject.get().asFile.parentFile.mkdirs() }
+    commandLine 'ca65', '-o', firmwareObject.get().asFile.path, firmwareDir.file('hostfiles.s').asFile.path
+}
+
+tasks.register('assembleHostFilesFirmware', Exec) {
+    group = 'firmware'
+    description = 'Links the host file transfer card firmware ROM image with ld65.'
+    dependsOn 'assembleHostFilesFirmwareObject'
+    inputs.file(firmwareDir.file('hostfiles.cfg'))
+    inputs.file(firmwareObject)
+    outputs.file(firmwareImage)
+    commandLine 'ld65', '-C', firmwareDir.file('hostfiles.cfg').asFile.path,
+        '-o', firmwareImage.asFile.path, firmwareObject.get().asFile.path
+}

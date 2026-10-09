@@ -19,10 +19,18 @@ import java.util.Set;
  * adapter's message; {@code $2} = data port; {@code $3} read = protocol
  * version plus "host available" bit, write = ROM bank select.
  * <p>
- * The firmware ROM is not built yet, so for now the card has no ROM of its
- * own and isn't offered as a configurable card type.
+ * Its firmware -- the guest OS adapter, built from {@code firmware/hostfiles}
+ * with ca65 -- is a committed resource: 256 bytes for the card's own
+ * {@code $Cn00} page, then 2K expansion ROM banks for {@code $C800-$CFFF},
+ * selected through register {@code $3}.
  */
 public final class HostTransferCard implements SlotCard {
+
+    private static final String FIRMWARE = "hostfiles-firmware.rom";
+    private static final int SLOT_PAGE = 0x100;
+    private static final int BANK_SIZE = 0x800;
+
+    private final byte[] firmware = loadFirmware();
 
     private volatile TransferHost host; // set on the UI thread, read on the emulation thread
     private Path initialDirectory;
@@ -79,13 +87,35 @@ public final class HostTransferCard implements SlotCard {
     }
 
     @Override
-    public boolean hasRom() {
-        return false; // until the firmware exists
+    public int readRom(int offset) {
+        return firmware[offset & 0xFF] & 0xFF;
     }
 
     @Override
-    public int readRom(int offset) {
-        throw new UnsupportedOperationException("no firmware yet -- hasRom() is false");
+    public boolean wantsExpansionRom() {
+        return true;
+    }
+
+    /** The selected bank of the firmware's expansion ROM; a bank past the end reads $FF. */
+    @Override
+    public int readExpansionRom(int offset) {
+        int index = SLOT_PAGE + romBank * BANK_SIZE + offset;
+        return index < firmware.length ? firmware[index] & 0xFF : 0xFF;
+    }
+
+    private static byte[] loadFirmware() {
+        try (var in = HostTransferCard.class.getResourceAsStream(FIRMWARE)) {
+            if (in == null) {
+                throw new IllegalStateException("hostfiles: firmware resource " + FIRMWARE + " is missing");
+            }
+            byte[] image = in.readAllBytes();
+            if (image.length < SLOT_PAGE + BANK_SIZE || (image.length - SLOT_PAGE) % BANK_SIZE != 0) {
+                throw new IllegalStateException("hostfiles: firmware image has an unexpected size: " + image.length);
+            }
+            return image;
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("hostfiles: can't read the firmware", e);
+        }
     }
 
     @Override

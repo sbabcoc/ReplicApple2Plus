@@ -52,6 +52,11 @@ Thumbs.db
 *.bin
 !gradle/wrapper/gradle-wrapper.jar
 
+# Exception: the host file transfer card's firmware is this project's own
+# code (firmware/hostfiles), not Apple firmware -- the image is committed so
+# building the emulator never needs a 6502 toolchain.
+!src/main/resources/com/nordstrom/emulator/transfer/hostfiles-firmware.rom
+
 # Exception: Klaus2m5's 6502 functional-test ROM is public-domain test
 # tooling, not Apple firmware -- the blanket *.bin rule above was aimed at
 # copyrighted ROM/disk assets and would otherwise catch this incidentally.

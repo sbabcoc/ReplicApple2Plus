@@ -83,6 +83,15 @@ Companion documents:
   `RAMTEST128K`. Use it instead of the Language Card -- only one card can
   take over `$D000`-`$FFFF`. Saturn's RAM test and utilities expect it
   in slots 1-7.
+- Host file transfer card, in any slot 1-7 (`type=hostfiles`): an
+  invented card for moving files between the host and the Apple's own
+  disks. Under ProDOS 8, `PR#n` opens a transfer window on the host
+  showing the Apple's volumes and folders; import host files or export
+  Apple ones, with text converted and file types kept in the host file
+  names (`GAME#BIN,2000`). The card's firmware does every file
+  operation through ProDOS itself -- the emulator never touches a disk
+  image -- and returns memory exactly as it found it. DOS 3.3 support
+  is planned. Design: [TRANSFER-CARD.md](TRANSFER-CARD.md).
 - Videx VideoTerm 80-column card in slot 3, running its real firmware
   2.4: 80 x 24 text with lowercase and true descenders, a blinking
   block cursor, and the card's own character set. Four display modes,
@@ -331,6 +340,17 @@ refused at startup.
 default), `apple` (Apple Video), `slot3` (Slot 3 Video) or `separate`
 (Dual Monitor); the toolbar changes it while running.
 
+To move files with the host file transfer card, add it in any free slot
+1-7 (`dir=` optionally names the folder its file dialogs open first):
+
+```
+[2]
+type=hostfiles
+```
+
+Then, under ProDOS 8 with BASIC.SYSTEM (which needs 64K -- a Language
+Card or Saturn card), type `PR#2`.
+
 `drive1` and `drive2` are both optional. If drive 1 is empty at startup,
 the emulator offers to insert a boot disk first -- otherwise the
 Autostart ROM would wait forever for one. Disks can be inserted,
@@ -342,6 +362,8 @@ created, ejected and write-protected at any time from the Disk menu.
   peripheral and what it needs.
 - `./gradlew runSlotConfigTemplate [-PpluginsDir=DIR] [-PoutputFile=FILE]` —
   generate a starter slot configuration file.
+- `./gradlew assembleHostFilesFirmware` — rebuild the host file transfer
+  card's firmware image from source (needs ca65 and ld65 on the PATH).
 
 ## Packaging
 
@@ -392,6 +414,13 @@ directory, skipping the installer format).
 - `.../expansion/` -- expansion cards and their ROMs: `Disk2Controller`
   with its logic sequencer and disk image formats (`WozDiskImage`,
   `DskDiskImage`), `LanguageCard`, and `VideoTerm` with its renderer.
+- `.../transfer/` -- the host file transfer card (`HostTransferCard`),
+  its session protocol, naming and text conversion; the transfer window
+  is `TransferWindow` in the application package.
+- `firmware/hostfiles/` -- the transfer card's 6502 firmware (ca65
+  source and ld65 layout). The assembled image is committed as a
+  resource; `./gradlew assembleHostFilesFirmware` rebuilds it (needs
+  ca65 and ld65 from the cc65 suite).
 - `.../input/` -- game controller input: providers (Jamepad, network),
   polling, and mapping onto the paddles and buttons.
 - `android-bridge/` -- PadBridge, the Android companion app that forwards

@@ -310,6 +310,42 @@ import.
 
 ## 6. Firmware (the ProDOS and DOS 3.3 adapters)
 
+**As built (ProDOS adapter, `firmware/hostfiles/hostfiles.s`):**
+
+- **ROM layout:** the `$Cn00` page (entry, the copy routine, finish), then
+  expansion ROM bank 0 (detection, borrowing memory, messages) and bank 1
+  (the ProDOS agent image). The `$Cn00` page is position-independent: it
+  runs at `$C100`-`$C700` depending on the slot. Its first bytes match
+  neither the Autostart ROM's disk-boot signature nor Pascal 1.1's.
+- **Entry:** `PR#n` makes BASIC.SYSTEM call `$Cn00` with a character to
+  print. The firmware saves the registers, finds its slot (`JSR $FF58`,
+  the return address's high byte), records it in `MSLOT` (`$07F8`),
+  touches `$CFFF` and jumps to `$C800`.
+- **Borrowed memory, fixed:** `$0800`-`$15FF` (agent at `$0800`, ProDOS
+  I/O buffer at `$1000`, data buffer at `$1400`) and zero page
+  `$06`-`$09`. Used only if the ProDOS bit map marks pages `$08`-`$15`
+  free (under BASIC.SYSTEM they are), otherwise the firmware says so.
+  Saved to the card before use, restored by the finish routine, from ROM,
+  at the end.
+- **Code at `$C800` calls nothing but COUT1 (`$FDF0`),** which touches no
+  card. All ProDOS calls and all printing during the session come from
+  the agent in RAM.
+- **Ending: both output vectors.** BASIC.SYSTEM keeps the output device
+  in `CSW` (`$36`) as well as in its own `VECTOUT` (`$BE30`); restoring
+  only `VECTOUT`, as Tech Note #4 suggests, left `CSW` pointing at the
+  card, so the next character re-entered the firmware. Finish sets both
+  to `$FDF0`.
+- **Early exits** print one line and return: no host window, memory in
+  use, no ProDOS, or DOS 3.3 -- which is undone the DOS way, `CSW` to
+  `$FDF0` then `JSR $3EA` so DOS reconnects its hooks, until the DOS
+  adapter exists.
+- **Verified** under real ProDOS 2.4.3 and BASIC.SYSTEM 1.7 in the
+  emulator: every request, multi-chunk files both ways, subdirectories,
+  replacing, deleting, attributes (`CATALOG` shows the lock), and a
+  BASIC program in the borrowed region surviving the session.
+
+**The design as planned:**
+
 - **ROM:** 256 bytes at `$Cn00` (entry, signature) plus banked 2K
   pages at `$C800`-`$CFFF`. Size is not a constraint.
 - **OS detection** -- ProDOS first, then DOS 3.3, confirmed against
