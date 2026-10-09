@@ -3,6 +3,62 @@
 Open work only. Completed tasks, with the reasoning and verification
 history behind them, are in [TASK_RETRO.md](TASK_RETRO.md).
 
+## Host file transfer card -- designed, not yet built
+
+A peripheral card, invented for this emulator, that moves files between
+the host and the Apple's disks with the guest OS doing every file
+operation. The emulator drives the transfer through host dialogs and an
+abstract file API, knowing no guest OS; the card's firmware is the
+adapter that implements that API for ProDOS (MLI) and DOS 3.3 (file
+manager). The API is OS-neutral; CP/M support is pinned below.
+
+Build phases:
+1. **Card, Java side -- done.** Registers and wire format (TRANSFER-CARD.md
+   5.2), sessions and the request queue, the `TransferHost` interface, the
+   host naming convention, capability-driven text conversion, and the
+   `SlotCard.onReset()` hook, tested headless with a register-level fake
+   adapter. Not yet offered as a card type: it has no firmware ROM.
+2. Host transfer window (Swing): file dialogs, guest volume/directory
+   tree, progress, errors, "stopped responding".
+3. ProDOS adapter firmware (ca65), tested end to end under ProDOS 2.4.3.
+4. DOS 3.3 adapter firmware, tested under real DOS 3.3. Works the same on every platform, including Android
+under Termux/PRoot (`/sdcard/...`). Full design, decisions and open
+questions: [TRANSFER-CARD.md](TRANSFER-CARD.md).
+
+## Microsoft SoftCard II (Z80, CP/M) -- pinned
+
+Not started; recorded so the groundwork isn't lost. No manual or
+schematic is available, but the SoftCard II CP/M 2.28B master disk
+(64K, 1984) carries both halves of the card's protocol -- the 6502 BIOS
+and the Z80 BIOS -- so the card's behavior can be reverse-engineered
+from code. Found by booting that disk with logging probe cards (card in
+slot 4, registers `$C0C0`-`$C0CF`):
+
+- `$C0n0`: read = next byte from the Z80; write = next byte to the Z80.
+- `$C0n1`: bit 7 = a byte from the Z80 is waiting (`LDA`/`BPL` loops);
+  bit 0 = the byte sent to the Z80 hasn't been taken yet (`ROR`/`BCS`).
+- Startup: the Z80 executes instructions fed through the latch -- the
+  6502 plants a 61-byte Z80 loader at `$8000` (`LD (HL),n` / `INC HL`
+  pairs from the table at `$DAC1`), then sends `JP $8000`. The loader
+  starts with `OUT (0),A`.
+- Running: the 6502 serves the Z80 -- its loop at `$1444` waits for a
+  command byte and dispatches through the table at `$0D63` (disk,
+  screen, keyboard).
+
+Still to establish, from the Z80 code: its I/O port assignments, what
+starts and ends instruction feeding, and any reliance on interrupts or
+timing. Needs a Z80 core (validated with a standard instruction
+exerciser) plus the card itself.
+
+## Transfer card: CP/M import/export -- pinned
+
+A CP/M adapter for the host file transfer card, so CP/M files can be
+imported and exported like ProDOS and DOS 3.3 ones. Depends on the
+SoftCard II above. Because CP/M runs in the card's own RAM, the Z80
+likely can't reach the transfer card's registers directly; the adapter
+would go through CP/M's 6502-side server. Design notes in
+[TRANSFER-CARD.md](TRANSFER-CARD.md), open question 2.
+
 ## Known issues and leads
 
 Problems observed, limitations accepted, and leads noticed in passing.

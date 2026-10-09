@@ -111,6 +111,15 @@ public interface SlotCard {
     void writeIoSwitch(int offset, int value);
 
     /**
+     * The RESET line was asserted. On real hardware the slot connector
+     * carries RESET to every card; most cards ignore it, which is the
+     * default. Called on the emulation thread as the line goes active.
+     */
+    default void onReset() {
+        // most cards don't react to RESET
+    }
+
+    /**
      * Whether this card has a ROM in its own $Cn00-$CnFF page. A card
      * without one (a pure RAM expansion, say) leaves that page undriven,
      * so reads there see the floating bus, exactly as with an empty slot,

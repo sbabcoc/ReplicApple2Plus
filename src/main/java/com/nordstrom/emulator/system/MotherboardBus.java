@@ -98,6 +98,19 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
         return new MotherboardBus(slots, false);
     }
 
+    /**
+     * Tells every configured card the RESET line was asserted -- see
+     * {@link SlotCard#onReset}. Call on the emulation thread, alongside the
+     * CPU's own {@code raiseReset()}.
+     */
+    public void resetCards() {
+        for (SlotCard card : slots) {
+            if (card != null) {
+                card.onReset();
+            }
+        }
+    }
+
     private MotherboardBus(SlotCard[] slots, boolean openAudioDevice) {
         speakerOutput = openAudioDevice ? new SpeakerOutput(speakerToggle) : new SpeakerOutput(speakerToggle, null);
         if (slots.length != 8) {

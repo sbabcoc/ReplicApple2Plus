@@ -49,6 +49,8 @@ final class ToolbarControls {
      * {@code onReboot}.
      *
      * @param cpu the CPU this toolbar's RESET button controls
+     * @param resetCards tells the slot cards RESET was asserted; run on the
+     *                   emulation thread together with the CPU's raiseReset()
      * @param emulationThread runs each raise/lower on the emulation thread --
      *                        mouse events arrive on the Swing event thread, and
      *                        the reset line must not be touched concurrently with
@@ -60,7 +62,7 @@ final class ToolbarControls {
      *                 is responsible for running safely
      * @return the built toolbar, ready to add to a {@code JFrame}
      */
-    static JToolBar build(Cpu6502 cpu, Executor emulationThread, Runnable onReboot) {
+    static JToolBar build(Cpu6502 cpu, Runnable resetCards, Executor emulationThread, Runnable onReboot) {
         JToolBar toolbar = new JToolBar();
         toolbar.setFloatable(false);
 
@@ -68,7 +70,10 @@ final class ToolbarControls {
         resetButton.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                emulationThread.execute(cpu::raiseReset);
+                emulationThread.execute(() -> {
+                    cpu.raiseReset();
+                    resetCards.run(); // the slot connector carries RESET to every card
+                });
             }
 
             @Override

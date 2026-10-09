@@ -408,7 +408,7 @@ public final class Apple2Plus {
         PadPoller padPoller = new PadPoller(padProviderFactory, inputMapper, PAD_POLL_INTERVAL_MS, System.err);
         padPoller.start();
 
-        JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, loop, onReboot) : null;
+        JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, bus::resetCards, loop, onReboot) : null;
         DisplayModeSelector displayModes = null;
         if (toolbar != null && videoTerm != null) {
             VideoTerm card = videoTerm;
