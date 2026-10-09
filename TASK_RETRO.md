@@ -727,6 +727,48 @@ real application opening the transfer window on `PR#2`. Permanent tests:
 `ProDosTransferIntegrationTest` (the whole session, when the ProDOS image
 is supplied).
 
+### Host file transfer card: DOS 3.3 adapter firmware (phase 4) -- done
+
+The second adapter, in banks 2-3 of the card's ROM; what was built is in
+TRANSFER-CARD.md section 6. Grounded in *Beneath Apple DOS* (chapters 4-6,
+read directly) and checked against DOS itself where they disagreed: the
+book's two chapters swap file types `$08` and `$10`, and DOS's own
+CATALOG code settled it.
+
+What the work turned up:
+
+- **My automated branch fix captured unnamed labels.** Rewriting an
+  out-of-range branch as an inverted branch around a `JMP` inserted a new
+  `:`, which an earlier `:+` then bound to -- DELETE without a file name
+  would have answered OK. All 15 such fixes were redone with named labels.
+  Re-assembling phase 3's source the same way reproduced its committed ROM
+  byte for byte, so phase 3's fixes had captured nothing.
+- **A line-by-line review before running** found: the type table's end
+  marker made text (type `$00`) unreachable both ways; a stale top byte
+  of the remaining-length counter on reads; the file type read after
+  POSITION instead of from OPEN; and my own draft setting the copy's
+  variables inside the borrowed region before stashing it, which would
+  have stashed (and restored) the adapter's values instead of the user's.
+- **The agent outgrew one bank and the old RAM layout** (its code would
+  have run into the file manager's buffers); images now span banks, and
+  the region grew to `$0800`-`$1BFF`.
+- **An emulator defect:** the expansion-ROM arbiter threw on an access to
+  `$CFFF` when two cards were latched -- the documented release itself,
+  which its own Javadoc describes. It surfaced as the real VideoTerm
+  firmware crashing on `PR#3` after a transfer session (another card's
+  latch is legitimately left set). Fixed to release all latches, with a
+  floating-bus read; any other access with two latched still faults. The
+  DOS agent's slot scan was also changed to release before each page.
+- **A false "stopped responding":** only polls and completions counted as
+  adapter activity, so a long reply -- a 9-second DOS catalog -- could
+  trip the 10-second banner. Every register access counts now.
+
+Verified under the real DOS 3.3 System Master: drives, catalog, export,
+imports, replace, lock, delete, errors, memory restored, DOS's hooks as a
+DOS that never saw the card has them, the VideoTerm before and after,
+and the real application's transfer window. ProDOS sessions re-verified
+on the new ROM.
+
 ---
 
 ## Component development history (moved from README.md)

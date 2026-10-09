@@ -120,6 +120,7 @@ public final class HostTransferCard implements SlotCard {
 
     @Override
     public int readIoSwitch(int offset) {
+        noteActivity();
         switch (offset) {
             case Protocol.REG_REQUEST:
                 return nextRequest();
@@ -134,6 +135,7 @@ public final class HostTransferCard implements SlotCard {
 
     @Override
     public void writeIoSwitch(int offset, int value) {
+        noteActivity();
         switch (offset) {
             case Protocol.REG_DATA -> fromAdapter.write(value);
             case Protocol.REG_COMPLETE -> complete(value & 0xFF);
@@ -154,11 +156,20 @@ public final class HostTransferCard implements SlotCard {
         romBank = 0;
     }
 
+    /**
+     * Any register access shows the adapter is alive -- including the data
+     * bytes of a long reply, during which it neither polls nor completes.
+     */
+    private void noteActivity() {
+        if (session != null) {
+            session.noteAdapterActivity();
+        }
+    }
+
     private int nextRequest() {
         if (session == null) {
             return Protocol.REQ_END; // nothing to serve: the adapter should finish
         }
-        session.noteAdapterActivity();
         if (session.awaitingCompletion()) {
             return 0;
         }
@@ -183,7 +194,6 @@ public final class HostTransferCard implements SlotCard {
             }
             default -> {
                 if (code < 0x80 && session != null) {
-                    session.noteAdapterActivity();
                     if (session.complete(code, message)) {
                         endSession(TransferHost.EndReason.COMPLETED, "the session ended");
                     }

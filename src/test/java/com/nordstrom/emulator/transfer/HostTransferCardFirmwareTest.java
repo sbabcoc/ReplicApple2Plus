@@ -36,6 +36,11 @@ class HostTransferCardFirmwareTest {
         int[] bank1 = {card.readExpansionRom(0), card.readExpansionRom(1), card.readExpansionRom(2)};
         assertFalse(java.util.Arrays.equals(bank0, bank1), "banks 0 and 1 hold different code");
         assertEquals(0x00, bank1[0], "bank 1 starts with the agent's finish pointer, zeroed until set");
+        card.writeIoSwitch(Protocol.REG_STATUS, 2);
+        assertEquals(0x00, card.readExpansionRom(0), "bank 2 starts the DOS 3.3 agent: its finish pointer too");
+        card.writeIoSwitch(Protocol.REG_STATUS, 3);
+        int bank3 = card.readExpansionRom(0);
+        assertTrue(bank3 != 0xFF, "the DOS agent's image runs on into bank 3");
         card.writeIoSwitch(Protocol.REG_STATUS, 9);
         assertEquals(0xFF, card.readExpansionRom(0), "a bank past the end of the image reads $FF");
     }

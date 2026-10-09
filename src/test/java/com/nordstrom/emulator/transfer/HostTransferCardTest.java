@@ -283,4 +283,16 @@ class HostTransferCardTest {
         assertThrows(IllegalArgumentException.class, () -> new HostTransferCard().configure(props));
         assertNull(new HostTransferCard().initialDirectory());
     }
+
+    @Test
+    void dataBytesOfALongReplyCountAsActivity() throws Exception {
+        TransferSession session = begin();
+        session.volumes();
+        card.readIoSwitch(Protocol.REG_REQUEST); // the adapter takes the request...
+        Thread.sleep(30);
+        long beforeData = session.nanosSinceAdapterActivity();
+        card.writeIoSwitch(Protocol.REG_DATA, 3); // ...and is still sending its reply
+        assertTrue(session.nanosSinceAdapterActivity() < beforeData,
+            "a data byte is activity, not only polls and completions");
+    }
 }

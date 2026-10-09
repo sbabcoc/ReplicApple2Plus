@@ -78,6 +78,14 @@ final class ExpansionRomArbiter {
             } else {
                 owner.writeExpansionRom(offset, value);
             }
+        } else if (offset == RELEASE_OFFSET) {
+            // $CFFF with several cards latched: the documented way out of
+            // exactly this state -- every card sees the access and releases
+            // (below). For that one cycle several ROMs drive the bus, so a
+            // read's value is undefined; the floating bus stands in for it.
+            if (value < 0) {
+                result = floatingBus.read();
+            }
         } else {
             // More than one slot latched at once -- a genuine electrical
             // bus conflict on real hardware, not something this emulator

@@ -3,7 +3,7 @@
 Open work only. Completed tasks, with the reasoning and verification
 history behind them, are in [TASK_RETRO.md](TASK_RETRO.md).
 
-## Host file transfer card -- designed, not yet built
+## Host file transfer card -- built (ProDOS 8 and DOS 3.3)
 
 A peripheral card, invented for this emulator, that moves files between
 the host and the Apple's disks with the guest OS doing every file
@@ -31,7 +31,17 @@ Build phases:
    type (`type=hostfiles`). Verified under real ProDOS 2.4.3 and
    BASIC.SYSTEM; `ProDosTransferIntegrationTest` runs the whole session
    when `ProDOS_2_4_3.po` is in its test resources.
-4. DOS 3.3 adapter firmware, tested under real DOS 3.3. Works the same on every platform, including Android
+4. **DOS 3.3 adapter firmware -- done.** Banks 2-3 of the same ROM;
+   verified under the real DOS 3.3 System Master;
+   `DosTransferIntegrationTest` runs the whole session when a System
+   Master image (`DOS_3_3_System_Master.woz`/`.dsk`/`.po`) is in its test
+   resources.
+
+Open choice: a DOS 3.3 listing of a full System Master takes about 9
+seconds, mostly reading each A, I and B file's header for exact sizes.
+Only B files need theirs (the load address names the host file); A and I
+could report sectors x 256 like the other types, roughly halving the
+time. Works the same on every platform, including Android
 under Termux/PRoot (`/sdcard/...`). Full design, decisions and open
 questions: [TRANSFER-CARD.md](TRANSFER-CARD.md).
 

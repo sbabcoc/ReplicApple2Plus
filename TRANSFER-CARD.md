@@ -344,6 +344,45 @@ import.
   replacing, deleting, attributes (`CATALOG` shows the lock), and a
   BASIC program in the borrowed region surviving the session.
 
+**As built (DOS 3.3 adapter, the same source):**
+
+- **Banks 2-3** hold its image, which is larger than one bank: the copy
+  routine follows an image from `$CFFF` on to `$C800` of the next bank
+  (reading `$CFFF` releases the ROM, but every fetch from the `$Cn` page
+  selects it again). Both agents run at `$0800` and begin with the same
+  header -- finish pointer, slot, entry -- so the main code can start
+  either. The borrowed region grew to `$0800`-`$1BFF`: agent code up to
+  `$15FF`, the DOS agent's buffers above it, the copy's own variables at
+  `$1BFB`-`$1BFF`, outside every agent's destination.
+- **Containers are drives,** `S6,D1` and so on, for each slot whose ROM
+  page carries the Disk II signature. The scan touches `$CFFF` before
+  reading each page, so it never leaves two cards selected at once.
+- **LIST reads the catalog through RWTS** (`$3E3`/`$3D9`, documented by
+  Apple): the file manager's CATALOG call only prints, and the output
+  device is this card. For B files it reads the first data sector for
+  the exact load address and length; for A and I files, the length.
+  Other types report sectors x 256. A full System Master takes about 9
+  seconds -- real disk speed, mostly those header reads.
+- **READ and WRITE use the file manager** (`$3DC`/`$3D6`) with the
+  agent's own buffers, and carry plain data: the adapter strips and adds
+  DOS's headers (B: load address and length; A, I: length). Text is read
+  to its first `$00`. Locked files get a LOCK call after CLOSE.
+- **Facts from *Beneath Apple DOS*, checked:** a WRITE range length is
+  one less than the byte count; OPEN with X = 0 answers "file not found"
+  even as it creates the file. Chapter 6's OPEN list has types `$08` and
+  `$10` swapped -- DOS's own CATALOG code (`$ADE8`, indexing its
+  `TIABSRAB` table by bit position) and chapter 4 agree that `$08` is S
+  and `$10` is R.
+- **Ending:** finish restores output the DOS way when DOS is running --
+  `CSW` to `$FDF0`, then `JSR $3EA` -- leaving DOS's hooks exactly as a
+  DOS that never saw the card has them, and `PRINT CHR$(4)"CATALOG"`
+  still works.
+- **Verified** under the real DOS 3.3 System Master: drives, the full
+  catalog with load addresses and locks, export (`HELLO#A,0000,80`),
+  imports (text stored high-bit with CR; a binary `BLOAD`s and runs),
+  replace prompts, lock, delete, errors, a BASIC program surviving, and
+  a VideoTerm in slot 3 working before, during and after a session.
+
 **The design as planned:**
 
 - **ROM:** 256 bytes at `$Cn00` (entry, signature) plus banked 2K

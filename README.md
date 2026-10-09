@@ -85,13 +85,13 @@ Companion documents:
   in slots 1-7.
 - Host file transfer card, in any slot 1-7 (`type=hostfiles`): an
   invented card for moving files between the host and the Apple's own
-  disks. Under ProDOS 8, `PR#n` opens a transfer window on the host
-  showing the Apple's volumes and folders; import host files or export
-  Apple ones, with text converted and file types kept in the host file
-  names (`GAME#BIN,2000`). The card's firmware does every file
-  operation through ProDOS itself -- the emulator never touches a disk
-  image -- and returns memory exactly as it found it. DOS 3.3 support
-  is planned. Design: [TRANSFER-CARD.md](TRANSFER-CARD.md).
+  disks. Under ProDOS 8 or DOS 3.3, `PR#n` opens a transfer window on
+  the host showing the Apple's volumes and folders, or its drives;
+  import host files or export Apple ones, with text converted and file
+  types kept in the host file names (`GAME#BIN,2000`, `PROG#B,0300`).
+  The card's firmware does every file operation through the Apple's own
+  OS -- the emulator never touches a disk image -- and returns memory
+  exactly as it found it. Design: [TRANSFER-CARD.md](TRANSFER-CARD.md).
 - Videx VideoTerm 80-column card in slot 3, running its real firmware
   2.4: 80 x 24 text with lowercase and true descenders, a blinking
   block cursor, and the card's own character set. Four display modes,
@@ -349,7 +349,8 @@ type=hostfiles
 ```
 
 Then, under ProDOS 8 with BASIC.SYSTEM (which needs 64K -- a Language
-Card or Saturn card), type `PR#2`.
+Card or Saturn card) or under DOS 3.3, type `PR#2`. The card borrows
+`$0800`-`$1BFF` for the session and puts it back afterwards.
 
 `drive1` and `drive2` are both optional. If drive 1 is empty at startup,
 the emulator offers to insert a boot disk first -- otherwise the
