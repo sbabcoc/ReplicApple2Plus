@@ -37,4 +37,16 @@ class PrintSpoolTest {
         card.writeIoSwitch(Protocol.REG_PRINT, 0xC1);
         assertArrayEquals(new byte[] {(byte) 0xC1}, card.printSpool().takeIfIdle(0));
     }
+
+    @Test
+    void aListingIsTrimmedToItsNonBlankLines() {
+        PrintSpool spool = new PrintSpool();
+        // Applesoft's leading Return, an Integer-style line, BASIC's fresh line and prompt
+        for (int b : new int[] {0x8D, 0xA0, 0xB1, 0xB0, 0x8D, 0x8D, 0xDD}) {
+            spool.append(b);
+        }
+        spool.trimListing();
+        assertArrayEquals(new byte[] {(byte) 0xA0, (byte) 0xB1, (byte) 0xB0, (byte) 0x8D}, spool.takeIfIdle(0),
+            "blank lines at both ends and the prompt go; spaces within the line stay");
+    }
 }

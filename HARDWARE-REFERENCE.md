@@ -225,11 +225,11 @@ nuance as the standard card.)
 
 ---
 
-### Confirmed by running Saturn's own software
+### What Saturn's own software shows
 
 Saturn's 1982 software disk (`RAMTEST128K`, the "128K Extended RAM Test",
-Natural Language Systems, revised by Kenneth Roe, April 1982) settled
-two things the manual alone didn't:
+Natural Language Systems, revised by Kenneth Roe, April 1982) settles
+two things the manual alone doesn't:
 
 - **The card works from any slot.** The RAM test asks which slots to
   test and accepts only **1-7** -- it ignores `0` -- and the disk's
@@ -238,12 +238,8 @@ two things the manual alone didn't:
   slot other than 0 is what the bus's INHIBIT line is for.
 - **It has no slot ROM**: its `$Cn00` page is undriven (floating bus).
 
-The emulated card (`SaturnCard`, 128K) passes the full test from slot 4:
-every page of all eight 16K banks and both 4K sub-banks. A deliberately
-broken copy that ignored bank select failed immediately with
-`?LOOKS LIKE 16K RAM`, so the test does detect a bad card. The 64K
-model isn't modeled -- how it treats the bank-select addresses for banks
-5-8 isn't documented here.
+The 64K model isn't modeled: how it treats the bank-select addresses
+for banks 5-8 isn't documented.
 
 ## 3. Videx VideoTerm 80-Column Card (Implemented)
 
@@ -448,9 +444,7 @@ That byte is a text-page screen hole, which powers up random, so about
 `PR#3` then turns AN0 on without programming the CRTC, and the
 80-column display stays dark. Its low three bits are the firmware's
 pending-command counter (`$CA92`: `AND #$07`), so a set marker can also
-leave the firmware mid-"command". Observed in the emulator (with random
-power-on RAM) as an occasional test failure; a power cycle (Reboot)
-clears it.
+leave the firmware mid-"command". A power cycle (Reboot) clears it.
 
 ### How characters are stored in VRAM — confirmed from the ROM binary
 

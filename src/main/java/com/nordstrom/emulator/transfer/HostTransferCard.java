@@ -20,8 +20,10 @@ import java.util.Set;
  * version plus "host available" bit, write = ROM bank select; {@code $4}
  * write = a printed character, for the {@link #printSpool print spool};
  * {@code $5} = where the firmware has got to in typing a recipe, 0 when not
- * typing -- kept on the card because RAM powers up random, and cleared by
- * RESET.
+ * typing; {@code $6} = the listing capture's phase (0 idle, 1 typing, 2
+ * capturing); {@code $7} write = trim the capture to its non-blank lines.
+ * {@code $5} and {@code $6} are kept on the card because RAM powers up
+ * random, and RESET clears them.
  * <p>
  * {@code IN#n} starts a transfer session; {@code PR#n} prints.
  * <p>
@@ -49,6 +51,7 @@ public final class HostTransferCard implements SlotCard {
     private byte[] stash = new byte[0];
     private int romBank;
     private int typing; // the firmware's place in a recipe; 0 = not typing
+    private int phase;  // the listing capture: 0 idle, 1 typing the command, 2 capturing
 
     @Override
     public String getShortName() {
@@ -138,6 +141,8 @@ public final class HostTransferCard implements SlotCard {
                 return Protocol.VERSION | (host != null ? Protocol.STATUS_HOST_AVAILABLE : 0);
             case Protocol.REG_TYPING:
                 return typing;
+            case Protocol.REG_PHASE:
+                return phase;
             default:
                 return 0;
         }
@@ -152,6 +157,8 @@ public final class HostTransferCard implements SlotCard {
             case Protocol.REG_STATUS -> romBank = value & 0xFF;
             case Protocol.REG_PRINT -> printSpool.append(value & 0xFF);
             case Protocol.REG_TYPING -> typing = value & 0xFF;
+            case Protocol.REG_PHASE -> phase = value & 0xFF;
+            case Protocol.REG_TRIM -> printSpool.trimListing();
             default -> {
                 // unused register
             }
@@ -166,7 +173,8 @@ public final class HostTransferCard implements SlotCard {
         toAdapter = new byte[0];
         toAdapterPos = 0;
         romBank = 0;
-        typing = 0; // a recipe interrupted by RESET is abandoned
+        typing = 0; // a capture interrupted by RESET is abandoned
+        phase = 0;
     }
 
     /**

@@ -317,17 +317,6 @@ class HostTransferCardTest {
     }
 
     @Test
-    void printListingEndsTheSessionLikeEnd() throws Exception {
-        TransferSession session = begin();
-        assertTrue(session.capabilities().printsListing());
-        CompletableFuture<Void> listing = session.printListing();
-        assertEquals(Protocol.REQ_PRINT_LISTING, adapter.serveNext());
-        done(listing);
-        assertFalse(session.isOpen());
-        assertEquals(List.of(TransferHost.EndReason.COMPLETED), host.ended);
-    }
-
-    @Test
     void theTypingRegisterIsTheCardsAndResetClearsIt() {
         assertEquals(0, card.readIoSwitch(Protocol.REG_TYPING), "power-on: not typing, whatever RAM holds");
         card.writeIoSwitch(Protocol.REG_TYPING, 7);

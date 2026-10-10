@@ -15,11 +15,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.prefs.Preferences;
 
 /**
- * The host side of printing to the transfer card (PR#n): watches the card's
- * print spool and, once printing has been idle for {@link #IDLE_SECONDS},
- * takes the job, converts it to host text and asks where to save it
- * (TRANSFER-CARD.md 7). Anything printed while the dialog is open goes into
- * the next job. Runs entirely on the Swing event thread.
+ * The host side of capturing a program listing (PR#n): watches the card's
+ * print spool and, once the listing has stopped arriving for
+ * {@link #IDLE_SECONDS}, takes it, converts it to host text and asks for the
+ * file to save it as (TRANSFER-CARD.md 7). Anything arriving while the
+ * dialog is open goes into the next listing. Runs entirely on the Swing
+ * event thread.
  */
 final class PrintJobSaver {
 
@@ -70,12 +71,12 @@ final class PrintJobSaver {
 
     private void save(byte[] text) {
         JFileChooser chooser = new JFileChooser(startDirectory());
-        chooser.setDialogTitle(String.format("Save Printed Output (%,d characters)", text.length));
-        chooser.setSelectedFile(new File(chooser.getCurrentDirectory(), "printout.txt"));
+        chooser.setDialogTitle(String.format("Save Program Listing (%,d characters)", text.length));
+        chooser.setSelectedFile(new File(chooser.getCurrentDirectory(), "program-listing.txt"));
         while (chooser.showSaveDialog(owner) == JFileChooser.APPROVE_OPTION) {
             File file = chooser.getSelectedFile();
             if (file.exists() && JOptionPane.showConfirmDialog(owner, file.getName() + " already exists. Replace it?",
-                    "Save Printed Output", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) {
+                    "Save Program Listing", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) {
                 continue; // back to the dialog
             }
             try {
@@ -83,7 +84,7 @@ final class PrintJobSaver {
                 PREFS.put(DIRECTORY_KEY, file.getParentFile().getAbsolutePath());
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(owner, "Couldn't save " + file + ": " + e.getMessage(),
-                    "Save Printed Output", JOptionPane.ERROR_MESSAGE);
+                    "Save Program Listing", JOptionPane.ERROR_MESSAGE);
                 continue;
             }
             return;

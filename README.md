@@ -84,10 +84,9 @@ Companion documents:
 - Language Card in slot 0 (16K of bank-switched RAM, also random at
   power-on).
 - Saturn Systems 128K RAM card, in any slot (`type=saturn128`): eight
-  16K banks of bank-switched RAM, verified with Saturn's own
-  `RAMTEST128K`. Use it instead of the Language Card -- only one card can
-  take over `$D000`-`$FFFF`. Saturn's RAM test and utilities expect it
-  in slots 1-7.
+  16K banks of bank-switched RAM. Use it instead of the Language Card --
+  only one card can take over `$D000`-`$FFFF`. Saturn's RAM test and
+  utilities expect it in slots 1-7.
 - Host file transfer card, in any slot 1-7 (`type=hostfiles`): an
   invented card for moving files between the host and the Apple's own
   disks. Under ProDOS 8 or DOS 3.3, `IN#n` opens a transfer window on
@@ -96,8 +95,8 @@ Companion documents:
   types kept in the host file names (`GAME#BIN,2000`, `PROG#B,0300`).
   The card's firmware does every file operation through the Apple's own
   OS -- the emulator never touches a disk image -- and returns memory
-  exactly as it found it. `PR#n` prints to the card, saving the output
-  as a host text file -- a BASIC program's source, for one.
+  exactly as it found it. `PR#n` captures the BASIC program's listing
+  -- its source, exactly -- as a host text file.
   Design: [TRANSFER-CARD.md](TRANSFER-CARD.md).
 - Videx VideoTerm 80-column card in slot 3, running its real firmware
   2.4: 80 x 24 text with lowercase and true descenders, a blinking
@@ -358,31 +357,32 @@ type=hostfiles
 Then, under ProDOS 8 with BASIC.SYSTEM (which needs 64K -- a Language
 Card or Saturn card) or under DOS 3.3:
 
-- **`IN#2`** opens the transfer window. The card borrows `$0800`-`$1BFF`
-  for the session and puts it back afterwards. How host file names carry
-  Apple file types, and how text is converted, are in
+- **`IN#2`** opens the transfer window. First choose **Import files into
+  the Apple** or **Export a file to the host**; then select on the Apple
+  side what the action applies to -- the file to export, or the volume or
+  folder to import into (selecting a file means the folder it's in). The
+  line above the buttons says exactly what the action will apply to.
+  **Export File...** opens a save dialog with the host name suggested --
+  for example `CONVERT13#A,0000,80`, which keeps the Apple file type for
+  importing it back; any folder and name will do. **Choose Host Files to
+  Import...** first checks the destination -- an empty drive or a
+  write-protected disk is explained before anything is chosen -- then
+  asks for one or more host files, and their names on the Apple. The
+  card borrows `$0800`-`$1BFF` for the session
+  and puts it back afterwards. How host file names carry Apple file
+  types, and how text is converted, are in
   [TRANSFER-CARD.md](TRANSFER-CARD.md) section 4.
 
-  ![The transfer window, showing a ProDOS volume](docs/images/transfer-window.png)
+  ![The transfer window, exporting a file](docs/images/transfer-window.png)
 
-- **Exporting a BASIC program's source:** click **Print Program Listing**
-  in the transfer window. The card ends the session and types the right
-  command for the running BASIC itself -- Applesoft or Integer BASIC --
-  and the listing, exactly, every line whole, arrives as a print job.
+- **`PR#2`** captures the BASIC program's listing -- Applesoft or
+  Integer BASIC: the card types `LIST` itself, and the listing, exactly,
+  every line whole, goes to a host text file. A dialog asks for its name
+  and folder, opening in the last folder used, else the card's `dir=`
+  folder.
 
-  ![The card typing the command after Print Program Listing](docs/images/print-listing-typed.png)
+  ![The card typing the command after PR#2](docs/images/capture-listing-typed.png)
 
-- **`PR#2`** prints to the card. When printing stops, a dialog asks where
-  to save the output as a host text file -- opening in the last folder
-  used, else the card's `dir=` folder.
-
-  ![The save dialog for printed output](docs/images/print-save-dialog.png)
-
-  The commands the card types, to use by hand:
-  - Applesoft (ProDOS or DOS 3.3): `:PR#2: LIST: PR#0` -- the leading
-    colon keeps the OS from taking `PR#` as its own command.
-  - Integer BASIC (DOS 3.3): `0 PRINT "`*Ctrl-D*`PR#2": LIST 1,32767:
-    PRINT "`*Ctrl-D*`PR#0": END`, then `RUN`, then `DEL 0,0`.
 - **To load source back**, import the file as a text file (`IN#2`), then
   `NEW` and `EXEC` it: BASIC reads it as if typed.
 

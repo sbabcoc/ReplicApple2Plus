@@ -690,6 +690,48 @@ ProDOS-ordered DOS 3.3 master), and Joust plays through its second load.
 the old model it fails and ends on quarter-track 4 -- exactly where the
 real boot got stuck.
 
+### Host file transfer card: design, card and window (phases 1-2) -- done
+
+**The design, reached by elimination.** The goal: move files between the
+host and the Apple's disks, on macOS, Windows, Linux and Android (Termux
+storage proved readable and writable from PRoot at `/sdcard`).
+Alternatives considered and rejected:
+- the emulator reading and writing file systems inside disk images --
+  rejected: the guest OS must own its disks;
+- a host folder presented as a ProDOS volume, or a ZIP archive as one --
+  much machinery for little gain, since most Apple II formats (tokenized
+  BASIC, high-bit text, application files) aren't readable on a host
+  anyway;
+- ADTPro over an emulated serial card -- it moves whole disk images,
+  which an emulator already has as host files, and its GPL licence
+  doesn't fit this Apache-licensed project;
+- relying on transfer software the user supplies.
+
+Chosen: an invented card whose firmware is a guest-side adapter, calling
+the running OS's own file API; the emulator knows only an abstract file
+API, so another OS (CP/M was the test case) needs only another adapter.
+No DMA -- everything crosses the card's registers -- and a session is
+started by the guest, never by interrupts.
+
+**Phase 1, the card's Java side:** registers and wire format,
+`TransferSession` with its request queue, the `TransferHost` interface,
+the host naming convention (settled first, since exported files must
+keep importing faithfully), capability-driven text conversion, and the
+`SlotCard.onReset()` hook. Tested headless through a fake adapter that
+drives only the four registers, following the specification
+independently of the card. Three deliberate faults -- RESET ignored, tag
+commas unescaped, DOS text's high bit not set -- were each caught; the
+RESET one first showed up as a hanging test, so the test helper now
+asserts completion before reading a result.
+
+**Phase 2, the transfer window:** `TransferWindow` (Swing) as the card's
+`TransferHost`, with the transfer logic in `TransferOperations` and name
+suggestions in `GuestNames`, both tested headless with the fake adapter
+on its own thread. The tests caught `GuestNames` turning an empty name
+into `"A"`; a screenshot showed the log not wrapping long lines. The
+window was checked on a virtual display: browsing, import, export,
+RESET, a superseding session, Done, and the "stopped responding" banner.
+
 ### Host file transfer card: ProDOS adapter firmware (phase 3) -- done
 
 The card's 6502 firmware (`firmware/hostfiles/hostfiles.s`, ca65), which
@@ -863,6 +905,110 @@ Verified under the real systems -- Applesoft under ProDOS and DOS 3.3,
 Integer BASIC under DOS 3.3 (whose typed `DEL 0,0` removes the helper
 line) -- and in the real application. The README and TRANSFER-CARD.md
 now carry screenshots (`docs/images/`) captured from the application.
+
+### Host file transfer card: the window and PR#n, from real use -- done
+
+Scott's first real use on macOS turned up problems the tests didn't,
+each diagnosed before it was changed:
+
+- **Export failed** with the folder name doubled in the path
+  (`.../apple-2-artifacts/apple-2-artifacts/...`). The folder dialog was a
+  *save* dialog; macOS's adds a "Save As" field, which makes the choice a
+  new item inside the folder shown -- a folder that didn't exist, and
+  nothing checked. Now an open-folder dialog (**Export Here**), and a
+  choice that isn't an existing folder is rejected.
+- **The keyboard seemed dead after Done** or the close button -- clicking
+  the Apple's window brought it back: the transfer window never returned
+  keyboard focus when it closed. It does now.
+- **The window didn't say what an action applied to,** and every button
+  was always enabled. It now asks for the action first (import or
+  export), keeps the tree inactive until then, shows a status line
+  naming what the action will apply to, and enables its one action
+  button only when it can act -- all decided in one place,
+  `updateActions()`.
+- **`PR#n` typed directly left the Apple looking hung** -- all output,
+  the echo of typing included, went to the card. At Scott's direction
+  `PR#n` now *captures the program listing*: the card types the right
+  command itself, and the listing goes to a Save Program Listing dialog.
+  This replaced the window's Print Program Listing button and its
+  protocol request (`$08`) and capability (`$0E`), now removed.
+
+A second round of use found more:
+
+- **Every control was disabled on the next `IN#n`** after a session ended
+  with Done: the window object outlives each session, and `open()` never
+  reset its `finishing` flag. Reproduced, then fixed by resetting
+  per-session state.
+- **The export folder dialog still couldn't be used on macOS:** in
+  folders-only mode its chooser can approve only a highlighted subfolder,
+  never the folder being viewed, and its name field names a folder.
+  Settled with Scott: export is one file per request, through a real
+  save dialog that suggests the host name -- read first, so a DOS 3.3 B
+  file's name includes its load address (`readForExport` and
+  `saveExport` in `TransferOperations`). This also answered his point
+  that the window promised several files ("export files") without saying
+  how to select them. Testing the replace question found `ask()` would
+  have thrown on the event thread (it used `invokeAndWait`); it now asks
+  directly there.
+
+- **The capture's typed command carried a redundant `PR#n`** -- Scott's
+  point: he had just typed `PR#n` himself. It existed because the capture
+  start put output back on the screen. Now output stays on the card and
+  the card types only `LIST`, the same for both BASICs (Integer BASIC's
+  line-0 helper, `RUN` and `DEL 0,0` are gone). The echo of the typed
+  command goes to the screen, and BASIC's prompt after the listing is
+  trimmed at the card (register `$7`, ending the capture at its last
+  non-blank line) and printed on the screen. Two failures on the way:
+  with both vectors on the card, `$Cn00` took every keyboard read for
+  output, so nothing was typed -- fixed with a separate input entry; and
+  the first trim left the blank line BASIC prints before its prompt.
+  At Scott's request, the trim also removes blank lines at the head --
+  Applesoft's LIST starts with a Return -- but not the spaces that
+  right-align Integer BASIC's line numbers.
+
+Import had also been reported as not working; in the virtual-display run
+it worked, taking about 6 seconds -- real Disk II speed -- with no moving
+progress for a single file. Its cause on macOS wasn't established.
+
+Verified: the full flow in the real application (window states, export,
+import, Done returning focus, `PR#2` capture and save), and
+`PrintIntegrationTest` -- `PR#2` captures exactly the listing under
+ProDOS and DOS 3.3, Applesoft and Integer BASIC, with EXEC round trips.
+
+### Host file transfer card: checking an import's destination -- done
+
+At Scott's request, an import now checks its destination first: an empty
+drive or a write-protected disk is explained before any host files are
+chosen, rather than failing per file afterwards with a bare code.
+
+- **Investigated first:** importing onto a write-protected disk appeared
+  to *succeed* -- an artifact of the sandbox running as root, for which
+  `Files.isWritable()` is always true (a `.dsk`/`.po` disk is protected by
+  making its host file read-only). Rerun as an unprivileged user, as on
+  macOS: `WRITE_PROTECTED`, correctly; an empty drive failed with
+  `IO_ERROR` (DOS 3.3) or `NOT_FOUND` (ProDOS).
+- **A new request, CHECK_WRITABLE (`$08`):** write protection can't be
+  learned from reads alone, so each adapter writes back, unchanged, a
+  block it has just read -- ProDOS block 2 (READ_BLOCK/WRITE_BLOCK, unit
+  from ON_LINE, after GET_FILE_INFO on the path), DOS 3.3 the VTOC
+  through RWTS. Both refuse a protected disk (`$2B`, `$10`).
+- **The window** checks on the worker before the host file dialog, and
+  explains the problem in a message and the log.
+
+Verified under real ProDOS and DOS 3.3, unprivileged: OK, then
+`WRITE_PROTECTED` once protected, and the empty drive, with the disk
+images byte-identical after the checks; and in the real application,
+both messages and the dialog for a good disk. One side effect: the
+write-back marks the disk changed, so protecting it afterwards makes the
+emulator report at exit that it couldn't write the (identical) data
+back.
+
+Also at Scott's request: after a session, the Apple shows a fresh prompt.
+BASIC prints its prompt before calling the card, and the session's title
+moved the cursor off that line, so input resumed on a line without one.
+The firmware now starts a new line and prints the prompt character (`$33`)
+before waiting for a key -- after a session and after an early exit
+alike. Both end-to-end tests check for it, and fail without the fix.
 
 ---
 

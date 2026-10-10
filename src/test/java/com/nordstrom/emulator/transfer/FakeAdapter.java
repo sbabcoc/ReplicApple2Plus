@@ -24,6 +24,8 @@ final class FakeAdapter {
     final List<List<String>> directories = new ArrayList<>();
     /** Files whose aux value this adapter, like the DOS 3.3 one, reports only when they're read. */
     final java.util.Set<List<String>> auxOnRead = new java.util.HashSet<>();
+    /** Containers whose disk is write-protected, for CHECK_WRITABLE. */
+    final java.util.Set<List<String>> writeProtected = new java.util.HashSet<>();
     int requestsServed;
 
     FakeAdapter(HostTransferCard card) {
@@ -177,7 +179,13 @@ final class FakeAdapter {
             case Protocol.REQ_DELETE -> {
                 finish(files.remove(readPath()) != null ? ResultCode.OK.code() : ResultCode.NOT_FOUND.code());
             }
-            case Protocol.REQ_END, Protocol.REQ_PRINT_LISTING -> finish(ResultCode.OK.code());
+            case Protocol.REQ_END -> finish(ResultCode.OK.code());
+            case Protocol.REQ_CHECK_WRITABLE -> {
+                List<String> container = readPath();
+                finish(!directories.contains(container) ? ResultCode.NOT_FOUND.code()
+                    : writeProtected.contains(container) ? ResultCode.WRITE_PROTECTED.code()
+                    : ResultCode.OK.code());
+            }
             default -> finish(ResultCode.IO_ERROR.code());
         }
         requestsServed++;
@@ -211,7 +219,6 @@ final class FakeAdapter {
             .fileType(Protocol.CAP_DEFAULT_BINARY_TYPE, "BIN", 0)
             .field(Protocol.CAP_DEFAULT_ATTRIBUTES, (byte) 0xE3)
             .field(Protocol.CAP_TEXT_AUX_IS_RECORD_LENGTH, (byte) 1)
-            .field(Protocol.CAP_PRINTS_LISTING, (byte) 1)
             .build();
     }
 

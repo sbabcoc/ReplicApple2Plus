@@ -114,15 +114,17 @@ public final class TransferSession {
     }
 
     /**
-     * Asks the adapter to end the session and then print the BASIC program's
-     * listing -- it types the right command for the running BASIC, and the
-     * listing arrives as a print job. Only if the capability record says the
-     * adapter can ({@link Capabilities#printsListing}).
+     * Asks whether files can be written to a container: whether its disk is
+     * there, readable, and not write-protected. The adapter tests it the way
+     * its OS allows -- typically by writing back, unchanged, a block it has
+     * just read.
      *
-     * @return completion: the session has ended and the printing has begun
+     * @param container a volume, directory or drive, as name components
+     * @return completion if they can; fails with the reason if not
+     *     ({@code WRITE_PROTECTED}, {@code NOT_FOUND}, {@code IO_ERROR}, ...)
      */
-    public CompletableFuture<Void> printListing() {
-        return submit(Protocol.REQ_PRINT_LISTING, new byte[0], reply -> null);
+    public CompletableFuture<Void> checkWritable(List<String> container) {
+        return submit(Protocol.REQ_CHECK_WRITABLE, new Wire.Writer().path(container).toByteArray(), reply -> null);
     }
 
     private <T> CompletableFuture<T> submit(int opcode, byte[] args, Function<byte[], T> parser) {
@@ -202,7 +204,7 @@ public final class TransferSession {
      *
      * @param code    the completion code, $00-$7F
      * @param payload the adapter's reply
-     * @return true if that request was END or PRINT_LISTING, which end the session
+     * @return true if that request was END, which ends the session
      */
     boolean complete(int code, byte[] payload) {
         Request<?> request = current;
@@ -225,8 +227,7 @@ public final class TransferSession {
             }
             request.future.completeExceptionally(new TransferException(result, nativeCode, message));
         }
-        boolean ending = request.opcode == Protocol.REQ_END || request.opcode == Protocol.REQ_PRINT_LISTING;
-        return ending && result == ResultCode.OK;
+        return request.opcode == Protocol.REQ_END && result == ResultCode.OK;
     }
 
     /** Ends the session, failing everything outstanding. */

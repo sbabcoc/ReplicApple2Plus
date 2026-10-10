@@ -181,6 +181,9 @@ class ProDosTransferIntegrationTest {
 
             assertEquals(null, failure.get());
             assertEquals(TransferHost.EndReason.COMPLETED, ended.get());
+            // a fresh prompt: the session's output moved the cursor off BASIC's
+            String lastRow = screen().lines().filter(row -> !row.isBlank()).reduce((earlier, later) -> later).orElse("");
+            assertEquals("]", lastRow.strip(), "a new prompt after the session:\n" + screen());
             GuestEntry hello = listing.get().stream().filter(e -> e.name().equals("HELLO")).findFirst().orElseThrow();
             assertEquals(new FileType("TXT", 0), hello.type());
             assertEquals(12, hello.size(), "two lines, CR-terminated");

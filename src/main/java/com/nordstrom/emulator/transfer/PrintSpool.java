@@ -25,6 +25,36 @@ public final class PrintSpool {
     }
 
     /**
+     * Trims the job to its non-blank lines: drops empty lines at its head,
+     * and at its tail an unterminated last line and any empty lines before
+     * it. Applesoft's LIST starts with a carriage return; after any listing,
+     * BASIC starts its prompt on a fresh line -- a carriage return, then the
+     * prompt -- still to the card. The firmware has these removed when the
+     * listing is over. Spaces within lines are kept: Integer BASIC's
+     * right-align its line numbers. Emulation thread.
+     */
+    public synchronized void trimListing() {
+        byte[] bytes = job.toByteArray();
+        int end = bytes.length;
+        while (end > 0 && !isReturn(bytes[end - 1])) {
+            end--; // the unterminated last line
+        }
+        while (end > 1 && isReturn(bytes[end - 1]) && isReturn(bytes[end - 2])) {
+            end--; // trailing empty lines
+        }
+        int start = 0;
+        while (start < end && isReturn(bytes[start])) {
+            start++; // leading empty lines
+        }
+        job.reset();
+        job.write(bytes, start, end - start);
+    }
+
+    private static boolean isReturn(byte b) {
+        return (b & 0x7F) == '\r';
+    }
+
+    /**
      * Takes the job if one is waiting and nothing has been printed for at
      * least {@code idleNanos}; otherwise leaves it.
      *

@@ -181,6 +181,9 @@ class DosTransferIntegrationTest {
 
             assertEquals(null, failure.get());
             assertEquals(TransferHost.EndReason.COMPLETED, ended.get());
+            // a fresh prompt: the session's output moved the cursor off BASIC's
+            String lastRow = screen().lines().filter(row -> !row.isBlank()).reduce((earlier, later) -> later).orElse("");
+            assertEquals("]", lastRow.strip(), "a new prompt after the session:\n" + screen());
             assertTrue(volumes.get().contains("S6,D1"), String.valueOf(volumes.get()));
             byte[] expected = "HELLO\rTHERE\r".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             for (int i = 0; i < expected.length; i++) {

@@ -80,7 +80,11 @@ final class TransferWindow implements TransferHost {
     private JLabel silenceLabel;
     private Timer silenceTimer;
     private long silenceDismissedUntil;
-    private final List<JButton> actions = new ArrayList<>();
+    private javax.swing.JRadioButton importMode;
+    private javax.swing.JRadioButton exportMode;
+    private JLabel status;
+    private JButton actionButton;
+    private JButton refreshButton;
     private JButton doneButton;
     private boolean finishing;
     private final AtomicBoolean busy = new AtomicBoolean();
@@ -114,6 +118,10 @@ final class TransferWindow implements TransferHost {
         }
         session = newSession;
         ops = new TransferOperations(newSession);
+        // Per-session state starts fresh: this object outlives each window,
+        // and a previous session's Done left finishing set.
+        finishing = false;
+        silenceDismissedUntil = 0;
         worker = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "host-transfer");
             t.setDaemon(true);
@@ -134,7 +142,7 @@ final class TransferWindow implements TransferHost {
         tree = new JTree(model);
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
-        tree.getSelectionModel().setSelectionMode(TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION);
+        tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
         tree.addTreeWillExpandListener(new TreeWillExpandListener() {
             @Override
             public void treeWillExpand(TreeExpansionEvent event) {
@@ -158,34 +166,40 @@ final class TransferWindow implements TransferHost {
         progress.setStringPainted(true);
         progress.setString("");
 
-        // Transfer actions on the left, session actions on the right: one row
-        // that never wraps (a wrapped FlowLayout row is clipped, not shown).
-        JPanel transferActions = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        JPanel sessionActions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        JPanel buttons = new JPanel(new BorderLayout());
-        buttons.add(transferActions, BorderLayout.WEST);
-        buttons.add(sessionActions, BorderLayout.EAST);
-        JButton importButton = new JButton("Import from Host...");
-        importButton.addActionListener(e -> chooseImport());
-        JButton exportButton = new JButton("Export to Host...");
-        exportButton.addActionListener(e -> chooseExport());
-        JButton refreshButton = new JButton("Refresh");
+        // First the action, then the Apple side: the tree is inactive, and
+        // the one action button says what it will do, only once a mode is chosen.
+        importMode = new javax.swing.JRadioButton("Import files into the Apple");
+        exportMode = new javax.swing.JRadioButton("Export a file to the host");
+        javax.swing.ButtonGroup modes = new javax.swing.ButtonGroup();
+        modes.add(importMode);
+        modes.add(exportMode);
+        importMode.addActionListener(e -> modeChanged());
+        exportMode.addActionListener(e -> modeChanged());
+        tree.addTreeSelectionListener(e -> updateActions());
+        status = new JLabel(" ");
+
+        actionButton = new JButton("Choose a mode above");
+        actionButton.addActionListener(e -> {
+            if (importMode.isSelected()) {
+                chooseImport();
+            } else if (exportMode.isSelected()) {
+                chooseExport();
+            }
+        });
+        refreshButton = new JButton("Refresh");
         refreshButton.addActionListener(e -> refreshSelected());
         doneButton = new JButton("Done");
         doneButton.addActionListener(e -> finish());
-        JButton listingButton = new JButton("Print Program Listing");
-        listingButton.setToolTipText("End the session and print the BASIC program's source to a host text file");
-        listingButton.addActionListener(e -> printListing());
-        listingButton.setVisible(caps.printsListing()); // only if the adapter can
-        actions.add(importButton);
-        actions.add(exportButton);
-        actions.add(refreshButton);
-        transferActions.add(importButton);
-        transferActions.add(exportButton);
+        // The transfer action on the left, ending the session on the right:
+        // one row that never wraps (a wrapped FlowLayout row is clipped).
+        JPanel transferActions = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        transferActions.add(actionButton);
         transferActions.add(refreshButton);
-        sessionActions.add(listingButton);
+        JPanel sessionActions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         sessionActions.add(doneButton);
-        actions.add(listingButton);
+        JPanel buttons = new JPanel(new BorderLayout());
+        buttons.add(transferActions, BorderLayout.WEST);
+        buttons.add(sessionActions, BorderLayout.EAST);
 
         silenceLabel = new JLabel();
         JButton keepWaiting = new JButton("Keep Waiting");
@@ -209,11 +223,18 @@ final class TransferWindow implements TransferHost {
         JPanel south = new JPanel();
         south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
         south.add(silenceBanner);
+        JPanel statusRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        statusRow.add(status);
+        south.add(statusRow);
         south.add(progress);
         south.add(buttons);
 
+        JPanel modeRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        modeRow.add(new JLabel("What would you like to do?"));
+        modeRow.add(importMode);
+        modeRow.add(exportMode);
         JPanel top = new JPanel(new BorderLayout());
-        top.add(new JLabel(" Select a folder on the Apple to import into, or files to export."), BorderLayout.NORTH);
+        top.add(modeRow, BorderLayout.NORTH);
         top.add(new JScrollPane(tree), BorderLayout.CENTER);
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, top, new JScrollPane(log));
         split.setResizeWeight(0.7);
@@ -228,7 +249,54 @@ final class TransferWindow implements TransferHost {
 
         silenceTimer = new Timer(1000, e -> checkSilence());
         silenceTimer.start();
+        updateActions();
         loadVolumes();
+    }
+
+    private void modeChanged() {
+        // One item either way: a destination to import into, or the file to
+        // export -- export is one file per request, saved under a name chosen
+        // in a save dialog.
+        tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+        tree.clearSelection();
+        updateActions();
+    }
+
+    /**
+     * Enables what can act now and says what the action will apply to --
+     * from the mode, the selection, and whether work is under way. Called
+     * whenever any of those change.
+     */
+    void updateActions() {
+        if (window == null) {
+            return;
+        }
+        boolean idle = !busy.get() && !finishing && session.isOpen();
+        boolean chosen = importMode.isSelected() || exportMode.isSelected();
+        importMode.setEnabled(idle);
+        exportMode.setEnabled(idle);
+        tree.setEnabled(chosen && !finishing);
+        refreshButton.setEnabled(idle && chosen && tree.getSelectionPath() != null);
+        doneButton.setEnabled(!finishing || !session.isOpen());
+        if (importMode.isSelected()) {
+            DefaultMutableTreeNode target = selectedContainerNode();
+            actionButton.setText("Choose Host Files to Import...");
+            actionButton.setEnabled(idle && target != null);
+            status.setText(target == null
+                ? "Select the volume or folder on the Apple to import into (or a file in it)."
+                : "Import into: " + String.join("/", ((GuestNode) target.getUserObject()).path));
+        } else if (exportMode.isSelected()) {
+            List<GuestNode> files = selectedFiles();
+            actionButton.setText("Export File...");
+            actionButton.setEnabled(idle && files.size() == 1);
+            status.setText(files.isEmpty()
+                ? "Select the file on the Apple to export."
+                : "Export: " + String.join("/", files.get(0).path));
+        } else {
+            actionButton.setText("Choose an action above");
+            actionButton.setEnabled(false);
+            status.setText("Choose whether to import files into the Apple or export them to the host.");
+        }
     }
 
     private void ended(TransferSession endedSession, EndReason reason) {
@@ -242,10 +310,10 @@ final class TransferWindow implements TransferHost {
         appendLog(reason == EndReason.RESET
             ? "The Apple was reset, so the session ended. Files not marked done above were not transferred."
             : "The Apple started a new session, so this one ended.");
-        actions.forEach(b -> b.setEnabled(false));
         doneButton.setText("Close");
         finishing = true; // closing now just closes
         silenceBanner.setVisible(false);
+        updateActions();
     }
 
     /** Done, or the window's close box: ask the adapter to END; the window closes when it does. */
@@ -263,26 +331,9 @@ final class TransferWindow implements TransferHost {
             ops.cancel();
         }
         finishing = true;
-        actions.forEach(b -> b.setEnabled(false));
-        doneButton.setEnabled(false);
+        updateActions();
         appendLog("Finishing -- the Apple is restoring its memory...");
         ops.end();
-    }
-
-    /**
-     * Print Program Listing: the adapter ends the session and types the
-     * command that prints the BASIC program's listing; it arrives as a print
-     * job, and the print saver asks where to save it.
-     */
-    private void printListing() {
-        if (finishing || !session.isOpen() || busy.get()) {
-            return;
-        }
-        finishing = true;
-        actions.forEach(b -> b.setEnabled(false));
-        doneButton.setEnabled(false);
-        appendLog("Printing the program listing -- the Apple types the command...");
-        session.printListing();
     }
 
     private void closeWindow() {
@@ -295,6 +346,10 @@ final class TransferWindow implements TransferHost {
         if (window != null) {
             window.dispose();
             window = null;
+            if (owner != null) { // keyboard focus back to the Apple: typing goes
+                owner.toFront(); // to the focused window, and nothing else
+                owner.requestFocus(); // would return it there
+            }
         }
     }
 
@@ -422,12 +477,56 @@ final class TransferWindow implements TransferHost {
 
     // ---- import ----
 
+    /**
+     * Choose Host Files to Import...: first check that files can be written
+     * to the destination -- a disk there, readable, unprotected -- so a
+     * problem is explained before any files are chosen, not reported per
+     * file after.
+     */
     private void chooseImport() {
         DefaultMutableTreeNode target = selectedContainerNode();
         if (target == null) {
-            JOptionPane.showMessageDialog(window, "Select the volume or folder on the Apple to import into.");
-            return;
+            return; // the button is enabled only with a destination
         }
+        GuestNode destination = (GuestNode) target.getUserObject();
+        String where = String.join("/", destination.path);
+        runOnWorker("Checking " + where + "...", () -> {
+            com.nordstrom.emulator.transfer.ResultCode check = ops.checkWritable(destination.path);
+            SwingUtilities.invokeLater(() -> {
+                if (check == com.nordstrom.emulator.transfer.ResultCode.OK) {
+                    chooseImportFiles(target);
+                } else if (check != null) { // null: cancelled
+                    explainUnwritable(where, check);
+                }
+            });
+        });
+    }
+
+    /** Why files can't be imported into a destination, in the log and a message. */
+    private void explainUnwritable(String where, com.nordstrom.emulator.transfer.ResultCode why) {
+        String problem;
+        String remedy;
+        switch (why) {
+            case WRITE_PROTECTED -> {
+                problem = "The disk holding " + where + " is write-protected.";
+                remedy = "Remove the protection (Disk menu) and try again.";
+            }
+            case NOT_FOUND, IO_ERROR -> {
+                problem = where + " can't be read -- is its disk in the drive?";
+                remedy = "Insert it (Disk menu) and try again.";
+            }
+            default -> {
+                problem = "Files can't be written to " + where + " (" + why + ").";
+                remedy = "";
+            }
+        }
+        appendLog("Import into " + where + ": " + problem);
+        JOptionPane.showMessageDialog(window, remedy.isEmpty() ? problem : problem + "\n" + remedy,
+            "Import", JOptionPane.WARNING_MESSAGE);
+    }
+
+    /** The host files to import into a destination already checked, then their names on the Apple. */
+    private void chooseImportFiles(DefaultMutableTreeNode target) {
         JFileChooser chooser = new JFileChooser(startDirectory(IMPORT_DIRECTORY_KEY));
         chooser.setDialogTitle("Import from Host");
         chooser.setMultiSelectionEnabled(true);
@@ -489,33 +588,49 @@ final class TransferWindow implements TransferHost {
 
     // ---- export ----
 
+    /**
+     * Export File...: read the selected file first -- its host name may depend
+     * on what reading learns -- then ask where to save it, with that name
+     * suggested.
+     */
     private void chooseExport() {
         List<GuestNode> files = selectedFiles();
-        if (files.isEmpty()) {
-            JOptionPane.showMessageDialog(window, "Select the files on the Apple to export.");
+        if (files.size() != 1) {
+            return; // the button is enabled only for one file
+        }
+        GuestNode file = files.get(0);
+        runOnWorker("Reading " + file.entry.name() + "...", () -> {
+            TransferOperations.ExportRead read = ops.readForExport(file.path, file.entry);
+            SwingUtilities.invokeLater(() -> saveExported(file, read));
+        });
+    }
+
+    /** The save dialog for a file read for export: any folder, any name, the convention's name suggested. */
+    private void saveExported(GuestNode file, TransferOperations.ExportRead read) {
+        String source = String.join("/", file.path);
+        if (!read.succeeded()) {
+            logResult(source, read.failure());
             return;
         }
         JFileChooser chooser = new JFileChooser(startDirectory(EXPORT_DIRECTORY_KEY));
-        chooser.setDialogTitle("Export to Host -- choose a folder");
-        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        if (chooser.showSaveDialog(window) != JFileChooser.APPROVE_OPTION) {
+        chooser.setDialogTitle("Export " + file.entry.name() + " to the Host");
+        chooser.setSelectedFile(new File(chooser.getCurrentDirectory(), read.hostName()));
+        while (chooser.showSaveDialog(window) == JFileChooser.APPROVE_OPTION) {
+            File target = chooser.getSelectedFile();
+            if (target.isDirectory()) {
+                chooser.setCurrentDirectory(target); // a folder: look inside it
+                chooser.setSelectedFile(new File(target, read.hostName()));
+                continue;
+            }
+            if (target.exists() && !ask(target.getName() + " already exists. Replace it?")) {
+                continue; // back to the dialog
+            }
+            PREFS.put(EXPORT_DIRECTORY_KEY, target.getParentFile().getAbsolutePath());
+            TransferOperations.Result r = ops.saveExport(read, target.toPath());
+            logResult(source + " -> " + target, r);
             return;
         }
-        File folder = chooser.getSelectedFile();
-        PREFS.put(EXPORT_DIRECTORY_KEY, folder.getAbsolutePath());
-        exportFiles(files, folder.toPath());
-    }
-
-    /** Exports guest files to a host folder -- the part after the dialogs. Package-visible for tests. */
-    void exportFiles(List<GuestNode> files, Path folder) {
-        runOnWorker("Exporting...", () -> {
-            for (int i = 0; i < files.size() && !ops.isCancelled(); i++) {
-                GuestNode g = files.get(i);
-                setProgress(i, files.size(), "Exporting " + g.entry.name());
-                TransferOperations.Result r = ops.exportFile(g.path, g.entry, folder, dialogs());
-                logResult(String.join("/", g.path) + " -> " + r.name(), r);
-            }
-        });
+        appendLog(source + ": export cancelled.");
     }
 
     // ---- helpers ----
@@ -543,7 +658,12 @@ final class TransferWindow implements TransferHost {
         };
     }
 
+    /** A yes/no question, asked on the event thread -- from it or from the worker. */
     private boolean ask(String question) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            return window != null && JOptionPane.showConfirmDialog(window, question, "Host File Transfer",
+                JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION;
+        }
         boolean[] yes = new boolean[1];
         try {
             SwingUtilities.invokeAndWait(() -> yes[0] = window != null && JOptionPane.showConfirmDialog(window,
@@ -560,8 +680,9 @@ final class TransferWindow implements TransferHost {
         if (worker == null || worker.isShutdown()) {
             return;
         }
+        busy.set(true);
+        updateActions();
         worker.execute(() -> {
-            busy.set(true);
             setProgress(-1, 0, status);
             try {
                 task.run();
@@ -572,6 +693,7 @@ final class TransferWindow implements TransferHost {
             } finally {
                 busy.set(false);
                 setProgress(0, 0, "");
+                SwingUtilities.invokeLater(this::updateActions);
             }
         });
     }

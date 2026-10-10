@@ -54,6 +54,8 @@ CARD_DONE = $C081       ; write: completion code / message code
 CARD_DATA = $C082       ; data port
 CARD_STAT = $C083       ; read: version, bit 7 = host window available
 CARD_PRINT = $C084      ; write: the next printed character
+CARD_PHASE = $C086      ; read/write: the listing capture's phase (below)
+CARD_TRIM = $C087       ; write: trim the capture to its non-blank lines
 CARD_TYPING = $C085     ; read/write: where typing a recipe has got to, plus
                         ; one; 0 = not typing. On the card, not in RAM: RAM
                         ; powers up random, the card's register at 0, and
@@ -99,6 +101,8 @@ MLI_DESTROY  = $C1
 MLI_SET_INFO = $C3
 MLI_GET_INFO = $C4
 MLI_ON_LINE  = $C5
+MLI_READ_BLOCK  = $80
+MLI_WRITE_BLOCK = $81
 MLI_OPEN     = $C8
 MLI_READ     = $CA
 MLI_WRITE    = $CB
@@ -127,26 +131,44 @@ entry:  pha                     ; the character BASIC asked us to print
         sta     MSLOT
         cmp     CSW+1           ; called as the output device (PR#n)?
         beq     print
-        asl     a               ; no -- as the input device: X = slot*16
-        asl     a
-        asl     a
-        asl     a
-        tax
-        bit     $CFFF           ; release every card's expansion ROM; the next
-        lda     CARD_TYPING,x   ; fetch from $Cn re-selects ours. Typing a
-        bne     typing          ; recipe?
-        jmp     main            ; no: IN#n starts a transfer session
-typing: jmp     type_next
+        bit     $CFFF           ; no -- as the input device: IN#n starts a
+        jmp     main            ; transfer session. (Release every card's
+                                ; expansion ROM; the next fetch from $Cn
+                                ; re-selects ours.)
 
-; PR#n: print. The character goes to the card's print register and
-; nowhere else -- no echo, the screen cursor never moves -- because BASIC's
-; LIST breaks lines by the cursor's column (TRANSFER-CARD.md 7). All
-; registers are kept, as for any output routine.
+; The input entry, used only while the card types a command: the firmware
+; points the input vector here, not at $Cn00, because output points at
+; $Cn00 meanwhile -- one entry couldn't tell the two apart.
+in_entry:
+        pha
+        txa
+        pha
+        tya
+        pha
+        jsr     IORTS           ; find our slot, as at $Cn00
+        tsx
+        lda     $0100,x
+        sta     MSLOT
+        bit     $CFFF
+        jmp     type_next
+
+; PR#n: capture the program listing. While the card is capturing (phase
+; 2), the character is part of the listing: it goes to the print register
+; and nowhere else -- no echo, the screen cursor never moves -- because
+; BASIC's LIST breaks lines by the cursor's column (TRANSFER-CARD.md 7).
+; Otherwise bank 0 decides. All registers are kept, as for any output
+; routine.
 print:  asl     a               ; $Cn -> Y = slot*16
         asl     a
         asl     a
         asl     a
         tay
+        lda     CARD_PHASE,y    ; capturing the listing?
+        cmp     #2
+        beq     @listing
+        bit     $CFFF           ; no: PR#n just typed, or the echo of the
+        jmp     phase_output    ; command the card is typing -- see bank 0
+@listing:
         tsx
         lda     $0103,x         ; the character, pushed first
         sta     CARD_PRINT,y
@@ -189,15 +211,7 @@ finish: lda     #MSG_RECALL
         sta     ZP+1
         pla
         sta     ZP
-        pla                     ; the agent's flag: print the program listing?
-        beq     @input          ; no
-        tsx                     ; yes: type its recipe (in bank 0) instead of
-        ldy     CH              ; giving input back to the keyboard. The first
-        lda     (BASL),y        ; typed character restores what's under the
-        sta     $0103,x         ; cursor *now* -- it has moved since entry
-        bit     $CFFF
-        jmp     type_start
-@input: lda     #<KEYIN         ; input back to the keyboard -- IN#0 -- the way
+        lda     #<KEYIN         ; input back to the keyboard -- IN#0 -- the way
         sta     KSW             ; the running OS needs. KSW in both cases:
         lda     #>KEYIN         ; BASIC.SYSTEM keeps the device there too,
         sta     KSW+1           ; and would call us again otherwise
@@ -211,7 +225,7 @@ finish: lda     #MSG_RECALL
         bne     @out            ; (always: >KEYIN isn't 0)
 @dos:   jsr     DOSHOOK         ; DOS 3.3: let DOS reconnect its hooks
 @out:   bit     $CFFF
-        jmp     resume_input
+        jmp     resume_prompted
 
 ; Copies COPYCNT bytes of the agent image from (PTR), starting in bank
 ; COPYBANK, to (PTR2); then selects bank 0 again and returns to
@@ -393,6 +407,15 @@ say_and_leave:
         bne     @next
 @done:  ; fall through
 
+; Back to waiting for a key with BASIC's prompt shown again: BASIC printed
+; it before calling us, and what we printed since -- a title, a message --
+; moved the cursor off that line.
+resume_prompted:
+        jsr     new_line
+        lda     PROMPT
+        jsr     COUT1
+        ; fall through
+
 ; Back to waiting for a key, as if the card had never been asked: X as we
 ; were called with it; the cursor flashed where it is *now* -- messages may
 ; have moved it -- exactly as RDKEY does; then the Monitor's KEYIN, which
@@ -457,47 +480,88 @@ is_dos33:
         cmp     #$60
 @no:    rts
 
-; ---- typing a recipe: the card as the input device -----------------------
-; Started by finish after a "print listing" request; continued by every
-; keyboard read while the card's typing register is non-zero. The recipe is chosen by BASIC's
-; prompt character -- guest knowledge, so it lives here, in the adapter.
-; On entry the stack holds the registers saved at $Cn00: A (the character
-; under the cursor, which RDKEY flashed), X, Y (= CH).
+; ---- capturing the program listing: PR#n --------------------------------
+; PR#n points output at the card, and it stays there: the listing is what
+; LIST sends. The card types LIST itself, as the input device; the echo of
+; what it types goes to the screen, and BASIC's prompt after the listing is
+; dropped. The phase is held on the card -- RAM powers up random, the
+; card's registers at 0, and RESET clears them:
 
-SLOT_MARK = $01                 ; in a recipe: this card's slot digit
+PHASE_TYPING    = 1             ; typing LIST: output is its echo
+PHASE_CAPTURING = 2             ; output is the listing ($Cn page path)
 
-type_start:
-        lda     PROMPT
-        and     #$7F
-        ldy     #recipe_applesoft - recipes + 1
-        cmp     #']'
-        beq     @chosen
-        ldy     #recipe_integer - recipes + 1
-        cmp     #'>'
-        beq     @chosen
-        jmp     type_done       ; not at a BASIC prompt: just give input back
-@chosen:
+; An output character in phase 0 or 1. On the stack: A, X, Y as saved at
+; $Cn00.
+phase_output:
         jsr     slot_x
-        tya
+        lda     CARD_PHASE,x
+        bne     @echo
+        lda     PROMPT          ; phase 0: PR#n was just typed. At a BASIC
+        and     #$7F            ; prompt? ']' Applesoft, '>' Integer BASIC --
+        cmp     #']'            ; guest knowledge, so it lives here, in the
+        beq     @basic          ; adapter
+        cmp     #'>'
+        beq     @basic
+        jsr     undo_io         ; no: nothing to list -- back to the screen
+        jmp     @screen
+@basic: lda     #<in_entry      ; input from the card's input entry, the way
+        sta     KSW             ; the running OS needs; output stays on the
+        lda     MSLOT           ; card, where PR#n put it
+        sta     KSW+1
+        lda     MLI
+        cmp     #$4C
+        bne     @not_prodos
+        lda     #<in_entry      ; ProDOS: BASIC.SYSTEM's own input vector too
+        sta     VECTIN
+        lda     MSLOT
+        sta     VECTIN+1
+        jmp     @armed
+@not_prodos:
+        jsr     is_dos33
+        bne     @armed
+        jsr     DOSHOOK         ; DOS 3.3: DOS adopts the card as input as well
+@armed: jsr     slot_x
+        lda     #1              ; type LIST from its first character
         sta     CARD_TYPING,x
-        ; fall through
+        lda     #PHASE_TYPING
+        sta     CARD_PHASE,x
+        jmp     @screen         ; (this character -- BASIC's own -- to the screen)
+@echo:  ldy     CARD_TYPING,x   ; phase 1: all of the command typed?
+        lda     recipe-1,y
+        bne     @screen         ; not yet: an echo
+        tsx                     ; yes: and this is the echo of its Return?
+        lda     $0103,x
+        and     #$7F
+        cmp     #$0D
+        bne     @screen
+        jsr     slot_x          ; then the listing starts with the next
+        lda     #PHASE_CAPTURING ; character
+        sta     CARD_PHASE,x
+@screen:
+        pla                     ; the character, to the screen
+        tay
+        pla
+        tax
+        pla
+        jmp     COUT1
 
+; ---- typing: the card as the input device ---------------------------------
+; Every keyboard read while the card's typing register is non-zero returns
+; the command's next character. On entry the stack holds the registers
+; saved at $Cn00: A (the character under the cursor, which RDKEY flashed),
+; X, Y (= CH).
 type_next:
         jsr     slot_x
         ldy     CARD_TYPING,x   ; where we've got to, plus one
-        lda     recipes-1,y
+        beq     type_done       ; (not typing after all: just clean up)
+        lda     recipe-1,y
         beq     type_done
         iny
         pha
         tya
         sta     CARD_TYPING,x
         pla
-        cmp     #SLOT_MARK
-        bne     :+
-        lda     MSLOT           ; this card's slot digit
-        and     #$0F
-        ora     #'0'
-:       ora     #$80            ; as the keyboard would give it
+        ora     #$80            ; as the keyboard would give it
         pha
         tsx                     ; stack: typed, Y, X, A (under the cursor)
         lda     $0104,x         ; put back the character RDKEY flashed
@@ -513,22 +577,52 @@ type_next:
         pla
         rts
 
+; The keyboard read after the listing: the capture is over. The card trims
+; it to its non-blank lines -- Applesoft's LIST starts with a Return, and
+; BASIC's fresh line and prompt after the listing went to the card too --
+; and the prompt is printed on the screen, where it belongs.
 type_done:
         jsr     slot_x
         lda     #0
         sta     CARD_TYPING,x
-        jsr     undo_in         ; input back to the keyboard, as IN#0 would
+        sta     CARD_PHASE,x
+        sta     CARD_TRIM,x
+        jsr     undo_io         ; output to the screen, input to the keyboard
+        lda     PROMPT
+        jsr     COUT1
         jmp     resume_input
 
-; The recipes of TRANSFER-CARD.md 7: print exactly the program's listing.
-recipes:
-recipe_applesoft:               ; :PR#n: LIST: PR#0
-        .byte   ":PR#", SLOT_MARK, ": LIST: PR#0", $0D, 0
-recipe_integer:                 ; 0 PRINT "^DPR#n": LIST 1,32767: PRINT "^DPR#0": END
-        .byte   "0 PRINT ", $22, $04, "PR#", SLOT_MARK, $22, ": LIST 1,32767: PRINT "
-        .byte   $22, $04, "PR#0", $22, ": END", $0D
-        .byte   "RUN", $0D
-        .byte   "DEL 0,0", $0D, 0
+; Output back to the screen and input back to the keyboard -- PR#0 and
+; IN#0 -- the way the running OS needs.
+undo_io:
+        lda     #<COUT1
+        sta     CSW
+        lda     #>COUT1
+        sta     CSW+1
+        lda     #<KEYIN
+        sta     KSW
+        lda     #>KEYIN
+        sta     KSW+1
+        lda     MLI
+        cmp     #$4C
+        bne     @not_prodos
+        lda     #<COUT1
+        sta     VECTOUT
+        lda     #>COUT1
+        sta     VECTOUT+1
+        lda     #<KEYIN
+        sta     VECTIN
+        lda     #>KEYIN
+        sta     VECTIN+1
+        rts
+@not_prodos:
+        jsr     is_dos33
+        bne     @done
+        jsr     DOSHOOK
+@done:  rts
+
+; What the card types: the same for Applesoft and Integer BASIC.
+recipe: .byte   "LIST", $0D, 0
 
         .macro  apple_string str
         .repeat .strlen(str), i
@@ -622,7 +716,7 @@ loop:   ldx     slotx
         jmp     do_end
 :       cmp     #8
         bne     :+
-        jmp     do_print_listing
+        jmp     do_check
 :       lda     #RES_IO_ERROR   ; not a request we know
         jsr     complete
         jmp     loop
@@ -966,7 +1060,9 @@ receive_bytes:
 ; ---- MAKE_DIR, DELETE, END -------------------------------------------
 do_make_dir:
         jsr     read_path
-        bcs     bad_name
+        bcc     @far22
+        jmp     bad_name
+@far22:
         lda     #$E3
         sta     create_access
         lda     #$0F            ; file type $0F: directory
@@ -977,23 +1073,95 @@ do_make_dir:
         lda     #$0D            ; storage type $D: directory
         sta     create_storage
         MLI_CALL MLI_CREATE, create_params
-        bcs     fail
+        bcc     @far21
+        jmp     fail
+@far21:
         jmp     ok
 
 do_delete:
         jsr     read_path
-        bcs     bad_name
+        bcc     @far20
+        jmp     bad_name
+@far20:
         MLI_CALL MLI_DESTROY, destroy_params
-        bcs     fail
+        bcc     @far19
+        jmp     fail
+@far19:
         jmp     ok
 
-do_end: lda     #0              ; finish's flag: just give input back
-        beq     end_session
-do_print_listing:
-        lda     #1              ; finish's flag: type the listing recipe
-end_session:
-        pha
-        lda     #RES_OK
+; ---- CHECK_WRITABLE: can files be written to this volume or directory? ----
+; The path must exist (GET_FILE_INFO), and its volume's disk must accept a
+; write: its block 2 is read, then written back unchanged -- a protected
+; disk refuses with error $2B.
+do_check:
+        jsr     read_path
+        bcc     :+
+        jmp     bad_name
+:       lda     #$0A
+        sta     info_params
+        MLI_CALL MLI_GET_INFO, info_params
+        bcc     :+
+        jmp     fail
+:       lda     #0              ; the volume's unit: ON_LINE lists them all
+        sta     online_unit
+        MLI_CALL MLI_ON_LINE, online_params
+        bcc     :+
+        jmp     fail
+:       lda     #<DATABUF
+        sta     PTR
+        lda     #>DATABUF
+        sta     PTR+1
+@entry: ldy     #0              ; a record: unit and name length, then the name
+        lda     (PTR),y
+        and     #$0F
+        beq     @next
+        sta     count
+        jsr     volume_matches  ; the path's first component?
+        bcs     @found
+@next:  clc
+        lda     PTR
+        adc     #16
+        sta     PTR
+        bne     @entry
+        lda     #RES_NOT_FOUND
+        jsr     complete
+        jmp     loop
+@found: ldy     #0
+        lda     (PTR),y
+        and     #$F0
+        sta     block_unit
+        MLI_CALL MLI_READ_BLOCK, block_params
+        bcc     :+
+        jmp     fail
+:       MLI_CALL MLI_WRITE_BLOCK, block_params ; unchanged
+        bcc     :+
+        jmp     fail            ; $2B: write-protected
+:       jmp     ok
+
+; Carry set if the ON_LINE record at (PTR), name length in count, names the
+; volume in pathname ("/VOL/...").
+volume_matches:
+        ldy     #1
+@char:  lda     (PTR),y
+        and     #$7F
+        cmp     pathname+1,y    ; pathname+2 onward: after the leading "/"
+        bne     @no
+        iny
+        dec     count
+        bne     @char
+        tya                     ; and the volume name ends where the path does,
+        cmp     pathname        ; or at a "/" (Y = name length + 1)
+        beq     @yes
+        bcs     @no             ; (a name longer than the path can't match)
+        lda     pathname+1,y
+        cmp     #'/'
+        bne     @no
+@yes:   sec
+        rts
+@no:    clc
+        rts
+
+do_end: lda     #RES_OK
         jsr     complete
         ldx     slotx
         jmp     (finptr)        ; restore memory from ROM, then return
@@ -1252,7 +1420,6 @@ version:
         .byte   $0B, 6, 3, "BIN", 0, 0  ; default other type: BIN $0000
         .byte   $0C, 1, $E3             ; default access: unlocked
         .byte   $0D, 1, 1               ; a TXT aux value is a record length
-        .byte   $0E, 1, 1               ; can print the BASIC program's listing
         .byte   $00
 capabilities_end:
 
@@ -1283,6 +1450,13 @@ close_params:
         .byte   1
 close_ref:
         .byte   0
+
+block_params:                   ; READ_BLOCK and WRITE_BLOCK
+        .byte   3
+block_unit:
+        .byte   0
+        .addr   DATABUF
+        .word   2               ; the volume directory's key block
 
 create_params:
         .byte   7
@@ -1424,7 +1598,7 @@ loop:   ldx     slotx
         jmp     do_end
 :       cmp     #8
         bne     :+
-        jmp     do_print_listing
+        jmp     do_check
 :       lda     #0              ; MAKE_DIR (DOS is flat) or unknown: OTHER, 0
         jsr     put_other_code
         jmp     loop
@@ -1602,8 +1776,54 @@ list_entry:
         clc
         rts
 
+; ---- CHECK_WRITABLE: can files be written to this drive? -------------------
+; Its VTOC must read -- an empty or unreadable drive fails here -- and be
+; accepted when written back unchanged: RWTS refuses a protected disk with
+; return code $10.
+do_check:
+        jsr     read_path
+        bcs     @bad
+        lda     has_name        ; a drive, not a file
+        bne     @bad
+        lda     #$11            ; the VTOC: track 17, sector 0
+        ldy     #0
+        ldx     #>CATBUF
+        jsr     read_sector
+        bcs     @io
+        lda     #$11            ; written back unchanged
+        ldy     #0
+        ldx     #>CATBUF
+        jsr     write_sector
+        bcs     @refused
+        jmp     ok
+@refused:
+        ldy     #$0D            ; RWTS's return code
+        lda     (PTR2),y
+        cmp     #$10            ; write-protected
+        bne     @io
+        lda     #RES_WRITE_PROT
+        jsr     complete
+        jmp     loop
+@io:    lda     #RES_IO_ERROR
+        jsr     complete
+        jmp     loop
+@bad:   jmp     bad_name
+
+; Writes page X to track A, sector Y through RWTS. Carry set on error.
+write_sector:
+        pha
+        lda     #2              ; WRITE
+        sta     rw_command
+        pla
+        jmp     rwts_call
+
 ; Reads track A, sector Y into page X through RWTS. Carry set on error.
 read_sector:
+        pha
+        lda     #1              ; READ
+        sta     rw_command
+        pla
+rwts_call:
         sta     rw_track
         sty     rw_sector
         stx     rw_page
@@ -1637,7 +1857,7 @@ read_sector:
         lda     rw_page
         sta     (PTR2),y
         ldy     #$0C
-        lda     #1              ; READ
+        lda     rw_command
         sta     (PTR2),y
         ldy     iob
         lda     iob+1
@@ -1939,13 +2159,7 @@ do_delete:
         jmp     ok
 :       jmp     bad_name
 
-do_end: lda     #0              ; finish's flag: just give input back
-        beq     end_session
-do_print_listing:
-        lda     #1              ; finish's flag: type the listing recipe
-end_session:
-        pha
-        lda     #RES_OK
+do_end: lda     #RES_OK
         jsr     complete
         ldx     slotx
         jmp     (finptr)        ; restore memory from ROM, then return
@@ -2385,7 +2599,6 @@ capabilities:
         .byte   $0B, 4, 1, "B", 0, 0    ; default other type: B
         .byte   $0C, 1, 0               ; default attributes: unlocked
         .byte   $0D, 1, 0               ; no record length is kept
-        .byte   $0E, 1, 1               ; can print the BASIC program's listing
         .byte   $00
 capabilities_end:
 
@@ -2407,6 +2620,7 @@ cat_sector:     .byte   0
 rw_track:       .byte   0
 rw_sector:      .byte   0
 rw_page:        .byte   0
+rw_command:     .byte   0
 type_hold:      .byte   0
 hex_hold:       .byte   0
 aux_hold:       .word   0

@@ -3,47 +3,12 @@
 Open work only. Completed tasks, with the reasoning and verification
 history behind them, are in [TASK_RETRO.md](TASK_RETRO.md).
 
-## Host file transfer card -- built (ProDOS 8 and DOS 3.3)
+## Emulated printer (PDF)
 
-A peripheral card, invented for this emulator, that moves files between
-the host and the Apple's disks with the guest OS doing every file
-operation. The emulator drives the transfer through host dialogs and an
-abstract file API, knowing no guest OS; the card's firmware is the
-adapter that implements that API for ProDOS (MLI) and DOS 3.3 (file
-manager). The API is OS-neutral; CP/M support is pinned below.
-
-Build phases:
-1. **Card, Java side -- done.** Registers and wire format (TRANSFER-CARD.md
-   5.2), sessions and the request queue, the `TransferHost` interface, the
-   host naming convention, capability-driven text conversion, and the
-   `SlotCard.onReset()` hook, tested headless with a register-level fake
-   adapter. Not yet offered as a card type: it has no firmware ROM.
-2. **Host transfer window -- done.** `TransferWindow` (Swing) as the
-   card's `TransferHost`: guest volume/directory tree loaded lazily
-   through the adapter, Import/Export with the platform's file dialogs and
-   an editable table of suggested guest names (`GuestNames`), replace and
-   overwrite questions, progress and log, Done/close sending END, and a
-   "stopped responding" banner after 10 seconds. Transfer logic lives in
-   `TransferOperations`, tested headless with the fake adapter on its own
-   thread; the window was checked on a virtual display.
-3. **ProDOS adapter firmware -- done.** `firmware/hostfiles/hostfiles.s`
-   (ca65), image committed as a resource; the card is now a configurable
-   type (`type=hostfiles`). Verified under real ProDOS 2.4.3 and
-   BASIC.SYSTEM; `ProDosTransferIntegrationTest` runs the whole session
-   when `ProDOS_2_4_3.po` is in its test resources.
-4. **DOS 3.3 adapter firmware -- done.** Banks 2-3 of the same ROM;
-   verified under the real DOS 3.3 System Master;
-   `DosTransferIntegrationTest` runs the whole session when a System
-   Master image (`DOS_3_3_System_Master.woz`/`.dsk`/`.po`) is in its test
-   resources.
- Works the same on every platform, including Android
-under Termux/PRoot (`/sdcard/...`). Full design, decisions and open
-questions: [TRANSFER-CARD.md](TRANSFER-CARD.md).
-
-Printing to the card is built too (`PR#n`; TRANSFER-CARD.md section 7).
-Later, separately: an emulated printer -- an interface card plus, say, an
-Epson-compatible printer rendering to PDF -- for program output on paper,
-graphics included.
+An interface card plus a printer -- say, Epson-compatible -- rendering to
+PDF, for program output on paper, graphics included. Text export is
+already covered by printing to the transfer card (TRANSFER-CARD.md
+section 7).
 
 ## Microsoft SoftCard II (Z80, CP/M) -- pinned
 
@@ -77,7 +42,7 @@ imported and exported like ProDOS and DOS 3.3 ones. Depends on the
 SoftCard II above. Because CP/M runs in the card's own RAM, the Z80
 likely can't reach the transfer card's registers directly; the adapter
 would go through CP/M's 6502-side server. Design notes in
-[TRANSFER-CARD.md](TRANSFER-CARD.md), open question 2.
+[TRANSFER-CARD.md](TRANSFER-CARD.md) section 8.
 
 ## Known issues and leads
 

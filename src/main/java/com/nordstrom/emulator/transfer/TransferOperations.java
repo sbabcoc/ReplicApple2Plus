@@ -174,7 +174,90 @@ public final class TransferOperations {
     }
 
     /**
-     * Exports a guest file to a host folder.
+     * Checks that files can be written to a container before any are chosen
+     * for it: its disk there, readable, and not write-protected.
+     *
+     * @param container the destination volume, directory or drive
+     * @return {@link ResultCode#OK} if they can, else why not -- {@code null}
+     *     if the check was cancelled
+     */
+    public ResultCode checkWritable(List<String> container) {
+        try {
+            await(session.checkWritable(container));
+            return ResultCode.OK;
+        } catch (TransferException e) {
+            return e.result() != null ? e.result() : ResultCode.IO_ERROR;
+        } catch (Cancelled c) {
+            return null;
+        }
+    }
+
+    /**
+     * A guest file read for export: the name the naming convention gives it
+     * on the host, and its bytes as they'll be saved there -- or, if the read
+     * didn't succeed, why not.
+     *
+     * @param hostName  the host name (section 4 of TRANSFER-CARD.md), or null on failure
+     * @param data      the bytes to save, text already converted, or null on failure
+     * @param converted true if the data is text converted for the host
+     * @param failure   null if the read succeeded; otherwise its result
+     */
+    public record ExportRead(String hostName, byte[] data, boolean converted, Result failure) {
+
+        /** @return true if the file was read and is ready to save */
+        public boolean succeeded() {
+            return failure == null;
+        }
+    }
+
+    /**
+     * Reads a guest file for export. Reading comes first because the host
+     * name may depend on it: a listing may not have read far enough to know
+     * the aux value (a DOS 3.3 B file's load address), and READ supplies it.
+     *
+     * @param file  the guest file
+     * @param entry its listing entry (for its type and attributes)
+     * @return the host name and bytes, or why the read failed
+     */
+    public ExportRead readForExport(List<String> file, GuestEntry entry) {
+        Capabilities caps = session.capabilities();
+        GuestData read;
+        try {
+            read = await(session.read(file));
+        } catch (TransferException e) {
+            return new ExportRead(null, null, false, failure(entry.name(), e));
+        } catch (Cancelled c) {
+            return new ExportRead(null, null, false, new Result(Outcome.CANCELLED, entry.name(), "cancelled"));
+        }
+        FileType type = read.type() != null ? read.type() : entry.type();
+        String hostName = HostNames.encode(entry.name(), type, entry.attributes(), caps);
+        boolean convert = caps.isConvertibleText(type);
+        byte[] data = convert ? TextConversion.toHost(read.bytes(), caps) : read.bytes();
+        return new ExportRead(hostName, data, convert, null);
+    }
+
+    /**
+     * Saves a file read for export, under whatever name and folder the user
+     * chose -- replacing an existing file there, which the caller has
+     * confirmed.
+     *
+     * @param read   a successful {@link #readForExport} result
+     * @param target the host file to save it as
+     * @return how it went
+     */
+    public Result saveExport(ExportRead read, Path target) {
+        String name = target.getFileName().toString();
+        try {
+            writeAtomically(target, read.data());
+        } catch (IOException e) {
+            return new Result(Outcome.FAILED, name, "can't write " + target + ": " + e.getMessage());
+        }
+        return new Result(Outcome.DONE, name, read.converted() ? "text, converted" : "");
+    }
+
+    /**
+     * Exports a guest file to a host folder, under the name the naming
+     * convention gives it.
      *
      * @param file      the guest file
      * @param entry     its listing entry (for its type and attributes)
@@ -183,31 +266,15 @@ public final class TransferOperations {
      * @return how it went
      */
     public Result exportFile(List<String> file, GuestEntry entry, Path folder, Conflicts conflicts) {
-        Capabilities caps = session.capabilities();
-        GuestData read;
-        try {
-            read = await(session.read(file));
-        } catch (TransferException e) {
-            return failure(entry.name(), e);
-        } catch (Cancelled c) {
-            return new Result(Outcome.CANCELLED, entry.name(), "cancelled");
+        ExportRead read = readForExport(file, entry);
+        if (!read.succeeded()) {
+            return read.failure();
         }
-        // The type as the adapter learned it while reading, if it sent one: a
-        // listing may not have read far enough to know the aux value.
-        FileType type = read.type() != null ? read.type() : entry.type();
-        String hostName = HostNames.encode(entry.name(), type, entry.attributes(), caps);
-        Path target = folder.resolve(hostName);
+        Path target = folder.resolve(read.hostName());
         if (Files.exists(target) && !conflicts.overwriteHostFile(target)) {
-            return new Result(Outcome.SKIPPED, hostName, "already exists; kept the host's copy");
+            return new Result(Outcome.SKIPPED, read.hostName(), "already exists; kept the host's copy");
         }
-        boolean convert = caps.isConvertibleText(type);
-        byte[] data = convert ? TextConversion.toHost(read.bytes(), caps) : read.bytes();
-        try {
-            writeAtomically(target, data);
-        } catch (IOException e) {
-            return new Result(Outcome.FAILED, hostName, "can't write " + target + ": " + e.getMessage());
-        }
-        return new Result(Outcome.DONE, hostName, convert ? "text, converted" : "");
+        return saveExport(read, target);
     }
 
     /** Asks the adapter to finish; the session ends when it answers. */

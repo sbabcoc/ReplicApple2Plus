@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Importing and exporting through a real card and session, with the fake adapter on its own thread. */
@@ -247,5 +248,41 @@ class TransferOperationsTest {
         TransferOperations.Result r = ops.exportFile(List.of("VOL", "PROG"), entry, host, new Answer(false));
         assertEquals("PROG#B,0300", r.name(), "READ supplied it");
         assertArrayEquals(new byte[] {9}, Files.readAllBytes(host.resolve("PROG#B,0300")));
+    }
+
+    @Test
+    void readingForExportGivesTheNameThenSavingTakesAnyName() throws Exception {
+        start(FakeAdapter.dosLike());
+        adapter.files.put(List.of("VOL", "PROG"), new FakeAdapter.GuestFile("B", 0x0300, 0, new byte[] {7, 8}));
+        adapter.auxOnRead.add(List.of("VOL", "PROG"));
+        GuestEntry entry = ops.list(VOL).get(0);
+
+        TransferOperations.ExportRead read = ops.readForExport(List.of("VOL", "PROG"), entry);
+        assertTrue(read.succeeded());
+        assertEquals("PROG#B,0300", read.hostName(), "named with the load address READ supplied");
+
+        Path renamed = host.resolve("my program.bin");
+        TransferOperations.Result r = ops.saveExport(read, renamed);
+        assertEquals(TransferOperations.Outcome.DONE, r.outcome());
+        assertEquals("my program.bin", r.name());
+        assertArrayEquals(new byte[] {7, 8}, Files.readAllBytes(renamed), "saved under the name the user chose");
+    }
+
+    @Test
+    void aFailedReadForExportSaysWhy() throws Exception {
+        start(FakeAdapter.dosLike());
+        GuestEntry missing = new GuestEntry("NOPE", false, new FileType("T", 0), 0, 0);
+        TransferOperations.ExportRead read = ops.readForExport(List.of("VOL", "NOPE"), missing);
+        assertFalse(read.succeeded());
+        assertEquals(TransferOperations.Outcome.FAILED, read.failure().outcome());
+    }
+
+    @Test
+    void theDestinationIsCheckedBeforeImporting() throws Exception {
+        start(FakeAdapter.dosLike());
+        assertEquals(ResultCode.OK, ops.checkWritable(VOL));
+        adapter.writeProtected.add(VOL);
+        assertEquals(ResultCode.WRITE_PROTECTED, ops.checkWritable(VOL));
+        assertEquals(ResultCode.NOT_FOUND, ops.checkWritable(List.of("GONE")), "no disk, or no such volume");
     }
 }
