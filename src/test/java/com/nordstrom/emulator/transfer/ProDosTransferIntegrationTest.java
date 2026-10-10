@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * The card's real firmware under real ProDOS 2.4.3 and BASIC.SYSTEM: PR#2
+ * The card's real firmware under real ProDOS 2.4.3 and BASIC.SYSTEM: IN#2
  * starts a session, files go both ways, END returns to BASIC with memory --
  * including a BASIC program in the borrowed region -- as it was.
  * <p>
@@ -134,13 +134,13 @@ class ProDosTransferIntegrationTest {
             run(1);
             type("10 PRINT \"KEEP ME\"\n"); // a program at $0801, inside the borrowed RAM
             run(2);
-            type("PR#2\n");
+            type("IN#2\n");
             TransferSession session = null;
             for (double until = seconds + 15; seconds < until && session == null; ) {
                 step();
                 session = sessions.poll();
             }
-            assertNotNull(session, "PR#2 began a session");
+            assertNotNull(session, "IN#2 began a session");
             assertEquals("PRODOS", session.capabilities().osName());
 
             // The host side runs on its own thread while the emulation runs here.
@@ -166,7 +166,7 @@ class ProDosTransferIntegrationTest {
                         }
                     }
                     listing.set(ops.list(volume));
-                    readBack.set(s.read(List.of(volume.get(0), "PROG")).get());
+                    readBack.set(s.read(List.of(volume.get(0), "PROG")).get().bytes());
                     ops.end();
                 } catch (Exception e) {
                     failure.set(e.toString());
@@ -186,8 +186,8 @@ class ProDosTransferIntegrationTest {
             assertEquals(12, hello.size(), "two lines, CR-terminated");
             assertArrayEquals(code, readBack.get());
 
-            assertEquals(0xFDF0, bus.read(0x36) | bus.read(0x37) << 8, "CSW back on the screen");
-            assertEquals(0xFDF0, bus.read(0xBE30) | bus.read(0xBE31) << 8, "VECTOUT back on the screen");
+            assertEquals(0xFD1B, bus.read(0x38) | bus.read(0x39) << 8, "KSW back on the keyboard");
+            assertEquals(0xFD1B, bus.read(0xBE32) | bus.read(0xBE33) << 8, "VECTIN back on the keyboard");
             type("RUN\n");
             run(2);
             // RUN's output is a row reading exactly KEEP ME (the program line itself has the quotes)

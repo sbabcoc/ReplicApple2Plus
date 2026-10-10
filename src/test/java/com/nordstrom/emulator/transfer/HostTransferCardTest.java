@@ -137,9 +137,10 @@ class HostTransferCardTest {
         assertEquals(0xC3, stored.attributes());
         assertArrayEquals(data, stored.data());
 
-        CompletableFuture<byte[]> read = session.read(List.of("VOL", "BIG"));
+        CompletableFuture<GuestData> read = session.read(List.of("VOL", "BIG"));
         adapter.serveNext();
-        assertArrayEquals(data, done(read));
+        assertArrayEquals(data, done(read).bytes());
+        assertEquals(null, done(read).type(), "flag 0: no type sent, the listing's stands");
     }
 
     @Test
@@ -161,7 +162,7 @@ class HostTransferCardTest {
     @Test
     void errorsComeBackAsResultsWithTheOsOwnCodeWhenGiven() {
         TransferSession session = begin();
-        CompletableFuture<byte[]> missing = session.read(List.of("VOL", "NOPE"));
+        CompletableFuture<GuestData> missing = session.read(List.of("VOL", "NOPE"));
         adapter.serveNext();
         assertEquals(ResultCode.NOT_FOUND, failure(missing).result());
 
@@ -294,5 +295,44 @@ class HostTransferCardTest {
         card.writeIoSwitch(Protocol.REG_DATA, 3); // ...and is still sending its reply
         assertTrue(session.nanosSinceAdapterActivity() < beforeData,
             "a data byte is activity, not only polls and completions");
+    }
+
+    @Test
+    void aListingCanLeaveTheAuxValueToReadAndSayTheSizeIsApproximate() throws Exception {
+        TransferSession session = begin();
+        adapter.files.put(List.of("VOL", "PROG"), new FakeAdapter.GuestFile("B", 0x0300, 0, new byte[] {1, 2, 3}));
+        adapter.auxOnRead.add(List.of("VOL", "PROG"));
+
+        CompletableFuture<List<GuestEntry>> list = session.list(List.of("VOL"));
+        adapter.serveNext();
+        GuestEntry entry = done(list).get(0);
+        assertFalse(entry.auxKnown());
+        assertFalse(entry.sizeExact());
+        assertEquals(new FileType("B", 0), entry.type());
+
+        CompletableFuture<GuestData> read = session.read(List.of("VOL", "PROG"));
+        adapter.serveNext();
+        assertEquals(new FileType("B", 0x0300), done(read).type(), "flag 1: the type, learned while reading");
+        assertArrayEquals(new byte[] {1, 2, 3}, done(read).bytes());
+    }
+
+    @Test
+    void printListingEndsTheSessionLikeEnd() throws Exception {
+        TransferSession session = begin();
+        assertTrue(session.capabilities().printsListing());
+        CompletableFuture<Void> listing = session.printListing();
+        assertEquals(Protocol.REQ_PRINT_LISTING, adapter.serveNext());
+        done(listing);
+        assertFalse(session.isOpen());
+        assertEquals(List.of(TransferHost.EndReason.COMPLETED), host.ended);
+    }
+
+    @Test
+    void theTypingRegisterIsTheCardsAndResetClearsIt() {
+        assertEquals(0, card.readIoSwitch(Protocol.REG_TYPING), "power-on: not typing, whatever RAM holds");
+        card.writeIoSwitch(Protocol.REG_TYPING, 7);
+        assertEquals(7, card.readIoSwitch(Protocol.REG_TYPING));
+        card.onReset();
+        assertEquals(0, card.readIoSwitch(Protocol.REG_TYPING), "RESET abandons a recipe mid-way");
     }
 }

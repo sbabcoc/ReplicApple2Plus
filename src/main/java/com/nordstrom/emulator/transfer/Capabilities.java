@@ -27,6 +27,7 @@ public final class Capabilities {
     private FileType defaultBinaryType = new FileType("BIN", 0);
     private int defaultAttributes;
     private boolean textAuxIsRecordLength;
+    private boolean printsListing;
 
     private Capabilities() {
     }
@@ -75,6 +76,7 @@ public final class Capabilities {
             case Protocol.CAP_DEFAULT_BINARY_TYPE -> defaultBinaryType = fileType(value);
             case Protocol.CAP_DEFAULT_ATTRIBUTES -> defaultAttributes = value.length > 0 ? value[0] & 0xFF : 0;
             case Protocol.CAP_TEXT_AUX_IS_RECORD_LENGTH -> textAuxIsRecordLength = value.length > 0 && value[0] != 0;
+            case Protocol.CAP_PRINTS_LISTING -> printsListing = value.length > 0 && value[0] != 0;
             default -> {
                 // unknown: a field from a later protocol revision -- skipped by design
             }
@@ -178,6 +180,11 @@ public final class Capabilities {
      */
     public boolean isConvertibleText(FileType type) {
         return isText(type.tag()) && !(textAuxIsRecordLength && type.aux() != 0);
+    }
+
+    /** @return true if the adapter can end a session by printing the BASIC program's listing */
+    public boolean printsListing() {
+        return printsListing;
     }
 
     /** @return the attribute byte of a file with no special attributes */

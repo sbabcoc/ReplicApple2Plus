@@ -158,7 +158,13 @@ final class TransferWindow implements TransferHost {
         progress.setStringPainted(true);
         progress.setString("");
 
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        // Transfer actions on the left, session actions on the right: one row
+        // that never wraps (a wrapped FlowLayout row is clipped, not shown).
+        JPanel transferActions = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel sessionActions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel buttons = new JPanel(new BorderLayout());
+        buttons.add(transferActions, BorderLayout.WEST);
+        buttons.add(sessionActions, BorderLayout.EAST);
         JButton importButton = new JButton("Import from Host...");
         importButton.addActionListener(e -> chooseImport());
         JButton exportButton = new JButton("Export to Host...");
@@ -167,13 +173,19 @@ final class TransferWindow implements TransferHost {
         refreshButton.addActionListener(e -> refreshSelected());
         doneButton = new JButton("Done");
         doneButton.addActionListener(e -> finish());
+        JButton listingButton = new JButton("Print Program Listing");
+        listingButton.setToolTipText("End the session and print the BASIC program's source to a host text file");
+        listingButton.addActionListener(e -> printListing());
+        listingButton.setVisible(caps.printsListing()); // only if the adapter can
         actions.add(importButton);
         actions.add(exportButton);
         actions.add(refreshButton);
-        buttons.add(importButton);
-        buttons.add(exportButton);
-        buttons.add(refreshButton);
-        buttons.add(doneButton);
+        transferActions.add(importButton);
+        transferActions.add(exportButton);
+        transferActions.add(refreshButton);
+        sessionActions.add(listingButton);
+        sessionActions.add(doneButton);
+        actions.add(listingButton);
 
         silenceLabel = new JLabel();
         JButton keepWaiting = new JButton("Keep Waiting");
@@ -208,7 +220,9 @@ final class TransferWindow implements TransferHost {
 
         window.getContentPane().add(split, BorderLayout.CENTER);
         window.getContentPane().add(south, BorderLayout.SOUTH);
-        window.setSize(560, 520);
+        window.pack(); // wide enough for every button
+        window.setSize(Math.max(window.getWidth(), 640), 520);
+        window.setMinimumSize(new java.awt.Dimension(window.getWidth(), 360));
         window.setLocationRelativeTo(owner);
         window.setVisible(true);
 
@@ -253,6 +267,22 @@ final class TransferWindow implements TransferHost {
         doneButton.setEnabled(false);
         appendLog("Finishing -- the Apple is restoring its memory...");
         ops.end();
+    }
+
+    /**
+     * Print Program Listing: the adapter ends the session and types the
+     * command that prints the BASIC program's listing; it arrives as a print
+     * job, and the print saver asks where to save it.
+     */
+    private void printListing() {
+        if (finishing || !session.isOpen() || busy.get()) {
+            return;
+        }
+        finishing = true;
+        actions.forEach(b -> b.setEnabled(false));
+        doneButton.setEnabled(false);
+        appendLog("Printing the program listing -- the Apple types the command...");
+        session.printListing();
     }
 
     private void closeWindow() {
@@ -307,7 +337,11 @@ final class TransferWindow implements TransferHost {
             if (isContainer()) {
                 return name;
             }
-            return String.format("%s   (%s $%04X, %,d bytes)", name, entry.type().tag(), entry.type().aux(), entry.size());
+            String type = entry.auxKnown()
+                ? String.format("%s $%04X", entry.type().tag(), entry.type().aux())
+                : entry.type().tag(); // known once the file is read
+            String size = String.format(entry.sizeExact() ? "%,d bytes" : "about %,d bytes", entry.size());
+            return String.format("%s   (%s, %s)", name, type, size);
         }
     }
 

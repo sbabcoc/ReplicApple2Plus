@@ -769,6 +769,101 @@ DOS that never saw the card has them, the VideoTerm before and after,
 and the real application's transfer window. ProDOS sessions re-verified
 on the new ROM.
 
+### Host file transfer card: read only what a request needs -- done
+
+The DOS 3.3 listing read two extra sectors for every A, I and B file --
+the T/S list and first data sector -- for exact sizes and B files' load
+addresses: 9.3 seconds for a full System Master. Listings now read only
+directory or catalog structures; nothing inside files.
+
+- **Protocol:** a LIST entry's kind byte gained bits for "size
+  approximate" (`$40`) and "aux not known until read" (`$80`); a READ
+  reply starts with a flag byte, 1 when the adapter sends the file's type
+  (tag, aux) learned while reading. The firmware and the emulator ship
+  together, so protocol version 1 was revised in place.
+- **DOS 3.3:** sizes from the catalog's sector count; a B file's load
+  address arrives with READ, which reads that sector anyway to strip the
+  header. **ProDOS:** unchanged in substance -- its directory already has
+  exact values -- READ just sends flag 0.
+- **Emulator:** `GuestEntry` carries the two flags, `read` returns the
+  bytes plus any type, exports are named from READ's type, and the window
+  shows "about" sizes and omits aux values not yet known.
+
+Listing the System Master now takes 1.7 seconds. Verified with new tests
+of the deferred aux value (headless, through the fake adapter) and both
+integration tests: under real DOS 3.3 an exported B file is named
+`PROG#B,0300` from the load address READ returned.
+
+### Host file transfer card: printing (PR#n) -- done
+
+Printing to the card, chiefly to export BASIC source as host text.
+What was built is in TRANSFER-CARD.md section 7.
+
+- **Investigated before building:** captured every byte LIST sends,
+  for Applesoft and Integer BASIC, with and without the screen cursor
+  moving. Both break long lines by the cursor's column -- Applesoft with
+  a bare break, Integer BASIC with spaces inside string literals -- so
+  the print path never moves the cursor; without that rule the exported
+  source would be corrupt.
+- **`PR#n` prints, `IN#n` starts a session** (the user's choice): the
+  `$Cn00` entry checks which vector points at the card. Sessions now
+  restore the input vectors and continue into KEYIN.
+- **Getting exactly the listing took experiments, not assumptions:**
+  `PR#2: LIST: PR#0` is a syntax error under both DOS 3.3 and
+  BASIC.SYSTEM, which take `PR#` at a line's start as their own command;
+  ProDOS ignores `CHR$(4)` commands in immediate mode; separate commands
+  capture the prompt and echoes, which break EXEC. A leading colon works
+  for Applesoft on both OSes. For Integer BASIC, the user's lead
+  (`PRINT CHR$(4);"PR#4"`) didn't work as written -- Integer BASIC has no
+  `CHR$` -- but Ctrl-D typed inside a string, in a program line at line
+  0, prints exactly the listing.
+- **EXEC is the way back,** not typing: import the printed file as a text
+  file, `NEW`, `EXEC`. Verified to rebuild identical programs.
+- **Host side:** a print spool on the card; `PrintJobSaver` ends a job
+  after 1.5 seconds idle and opens a save dialog (in the real
+  application: shown 2.6 seconds after printing ended, opening in the
+  card's `dir=` folder; the saved file is exactly the listing).
+
+Tests: spool and conversion unit tests, and `PrintIntegrationTest` --
+both recipes print exactly the expected listing under the real systems,
+and the ProDOS Applesoft and DOS Integer BASIC round trips through EXEC
+rebuild identical programs.
+
+### Host file transfer card: Print Program Listing, and screenshots -- done
+
+The card types the export command itself (the user's choice of the
+card-driven design): the transfer window's Print Program Listing button
+sends a new request, PRINT_LISTING; the adapter ends the session and
+stays the input device, returning the recipe's characters on each
+keyboard read, as a real input card supplies typing. The recipe is
+chosen by the Monitor's prompt character at `$33`, verified before
+relying on it. Details in TRANSFER-CARD.md section 7.
+
+Found and fixed before shipping:
+- **A flag bug:** `BIT $CFFF` placed between loading the typing position
+  and testing it -- BIT sets the zero flag itself.
+- **State in random RAM:** the first design kept the typing position in
+  the slot's screen-hole scratch byte; RAM powers up random, so a cold
+  start would usually have "typed" garbage on the first `IN#2`. It's a
+  card register now: 0 at power-on, cleared by RESET.
+- **A stray cursor block,** visible in a screenshot: a session started
+  from an input call left RDKEY's flashed cursor on the `IN#2` line, and
+  resumed input with the old position's character. Fixed by putting the
+  character back at once, and flashing the cursor where it is when input
+  resumes.
+- **Hidden buttons,** also from a screenshot: the new button made the
+  window's single FlowLayout row wrap, and the wrapped buttons -- Done
+  among them -- were clipped. Transfer and session actions now sit on
+  either side of one row, in a window sized to fit.
+- **A test expecting one vector value for every OS:** under DOS 3.3,
+  `KSW` is DOS's own hook after it reconnects; the test now checks that
+  the keyboard works instead.
+
+Verified under the real systems -- Applesoft under ProDOS and DOS 3.3,
+Integer BASIC under DOS 3.3 (whose typed `DEL 0,0` removes the helper
+line) -- and in the real application. The README and TRANSFER-CARD.md
+now carry screenshots (`docs/images/`) captured from the application.
+
 ---
 
 ## Component development history (moved from README.md)

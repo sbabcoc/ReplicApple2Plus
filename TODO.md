@@ -36,14 +36,14 @@ Build phases:
    `DosTransferIntegrationTest` runs the whole session when a System
    Master image (`DOS_3_3_System_Master.woz`/`.dsk`/`.po`) is in its test
    resources.
-
-Open choice: a DOS 3.3 listing of a full System Master takes about 9
-seconds, mostly reading each A, I and B file's header for exact sizes.
-Only B files need theirs (the load address names the host file); A and I
-could report sectors x 256 like the other types, roughly halving the
-time. Works the same on every platform, including Android
+ Works the same on every platform, including Android
 under Termux/PRoot (`/sdcard/...`). Full design, decisions and open
 questions: [TRANSFER-CARD.md](TRANSFER-CARD.md).
+
+Printing to the card is built too (`PR#n`; TRANSFER-CARD.md section 7).
+Later, separately: an emulated printer -- an interface card plus, say, an
+Epson-compatible printer rendering to PDF -- for program output on paper,
+graphics included.
 
 ## Microsoft SoftCard II (Z80, CP/M) -- pinned
 

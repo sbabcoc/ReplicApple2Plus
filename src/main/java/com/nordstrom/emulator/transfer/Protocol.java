@@ -21,6 +21,17 @@ public final class Protocol {
     public static final int REG_DATA = 0x2;
     /** Read: version and host-available bit; write: ROM bank select. */
     public static final int REG_STATUS = 0x3;
+    /** Write: the next printed character (PR#n). */
+    public static final int REG_PRINT = 0x4;
+    /** Read/write: the firmware's place in a recipe it's typing; 0 = not typing. */
+    public static final int REG_TYPING = 0x5;
+
+    /** LIST entry kind bit: a directory. */
+    public static final int KIND_DIRECTORY = 0x01;
+    /** LIST entry kind bit: the size is approximate. */
+    public static final int KIND_SIZE_APPROXIMATE = 0x40;
+    /** LIST entry kind bit: the aux value isn't known until the file is read. */
+    public static final int KIND_AUX_UNKNOWN = 0x80;
 
     /** {@link #REG_STATUS} bit: a host transfer window is available. */
     public static final int STATUS_HOST_AVAILABLE = 0x80;
@@ -48,6 +59,8 @@ public final class Protocol {
     public static final int REQ_DELETE = 0x06;
     /** END: restore borrowed memory and return to BASIC. */
     public static final int REQ_END = 0x07;
+    /** PRINT_LISTING: end the session, then print the BASIC program's listing. */
+    public static final int REQ_PRINT_LISTING = 0x08;
 
     // Capability record field tags.
     /** Capability field: end of the record. */
@@ -78,6 +91,8 @@ public final class Protocol {
     public static final int CAP_DEFAULT_ATTRIBUTES = 0x0C;
     /** Capability field: 1 if a text file's non-zero aux value marks it random-access. */
     public static final int CAP_TEXT_AUX_IS_RECORD_LENGTH = 0x0D;
+    /** Capability field: 1 if the adapter can print the BASIC program's listing (PRINT_LISTING). */
+    public static final int CAP_PRINTS_LISTING = 0x0E;
 
     /** {@link #CAP_NAME_RULES} bit: names are upper case only. */
     public static final int NAME_UPPER_CASE_ONLY = 0x01;

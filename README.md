@@ -24,11 +24,16 @@ through the address-space design described below.
 reads and writes them, runs Applesoft BASIC and machine-language software, and
 displays text, lo-res and hi-res graphics with sound and game
 controllers, and supports the Videx VideoTerm 80-column card and the
-Saturn Systems 128K RAM card.
+Saturn Systems 128K RAM card. A host file transfer card, invented for
+this emulator, moves files between the host and the Apple's own disks
+under ProDOS 8 and DOS 3.3 (see [TRANSFER-CARD.md](TRANSFER-CARD.md)).
 
 Companion documents:
 - [HARDWARE-REFERENCE.md](HARDWARE-REFERENCE.md) -- primary-source
   hardware specs for implemented and planned peripherals.
+- [TRANSFER-CARD.md](TRANSFER-CARD.md) -- design of the host file
+  transfer card: its file API, wire protocol, naming conventions and
+  firmware.
 - [TODO.md](TODO.md) -- open work.
 - [TASK_RETRO.md](TASK_RETRO.md) -- completed work, with the reasoning,
   sources and verification history behind it.
@@ -85,13 +90,15 @@ Companion documents:
   in slots 1-7.
 - Host file transfer card, in any slot 1-7 (`type=hostfiles`): an
   invented card for moving files between the host and the Apple's own
-  disks. Under ProDOS 8 or DOS 3.3, `PR#n` opens a transfer window on
+  disks. Under ProDOS 8 or DOS 3.3, `IN#n` opens a transfer window on
   the host showing the Apple's volumes and folders, or its drives;
   import host files or export Apple ones, with text converted and file
   types kept in the host file names (`GAME#BIN,2000`, `PROG#B,0300`).
   The card's firmware does every file operation through the Apple's own
   OS -- the emulator never touches a disk image -- and returns memory
-  exactly as it found it. Design: [TRANSFER-CARD.md](TRANSFER-CARD.md).
+  exactly as it found it. `PR#n` prints to the card, saving the output
+  as a host text file -- a BASIC program's source, for one.
+  Design: [TRANSFER-CARD.md](TRANSFER-CARD.md).
 - Videx VideoTerm 80-column card in slot 3, running its real firmware
   2.4: 80 x 24 text with lowercase and true descenders, a blinking
   block cursor, and the card's own character set. Four display modes,
@@ -349,8 +356,35 @@ type=hostfiles
 ```
 
 Then, under ProDOS 8 with BASIC.SYSTEM (which needs 64K -- a Language
-Card or Saturn card) or under DOS 3.3, type `PR#2`. The card borrows
-`$0800`-`$1BFF` for the session and puts it back afterwards.
+Card or Saturn card) or under DOS 3.3:
+
+- **`IN#2`** opens the transfer window. The card borrows `$0800`-`$1BFF`
+  for the session and puts it back afterwards. How host file names carry
+  Apple file types, and how text is converted, are in
+  [TRANSFER-CARD.md](TRANSFER-CARD.md) section 4.
+
+  ![The transfer window, showing a ProDOS volume](docs/images/transfer-window.png)
+
+- **Exporting a BASIC program's source:** click **Print Program Listing**
+  in the transfer window. The card ends the session and types the right
+  command for the running BASIC itself -- Applesoft or Integer BASIC --
+  and the listing, exactly, every line whole, arrives as a print job.
+
+  ![The card typing the command after Print Program Listing](docs/images/print-listing-typed.png)
+
+- **`PR#2`** prints to the card. When printing stops, a dialog asks where
+  to save the output as a host text file -- opening in the last folder
+  used, else the card's `dir=` folder.
+
+  ![The save dialog for printed output](docs/images/print-save-dialog.png)
+
+  The commands the card types, to use by hand:
+  - Applesoft (ProDOS or DOS 3.3): `:PR#2: LIST: PR#0` -- the leading
+    colon keeps the OS from taking `PR#` as its own command.
+  - Integer BASIC (DOS 3.3): `0 PRINT "`*Ctrl-D*`PR#2": LIST 1,32767:
+    PRINT "`*Ctrl-D*`PR#0": END`, then `RUN`, then `DEL 0,0`.
+- **To load source back**, import the file as a text file (`IN#2`), then
+  `NEW` and `EXEC` it: BASIC reads it as if typed.
 
 `drive1` and `drive2` are both optional. If drive 1 is empty at startup,
 the emulator offers to insert a boot disk first -- otherwise the
@@ -415,10 +449,12 @@ directory, skipping the installer format).
 - `.../expansion/` -- expansion cards and their ROMs: `Disk2Controller`
   with its logic sequencer and disk image formats (`WozDiskImage`,
   `DskDiskImage`), `LanguageCard`, and `VideoTerm` with its renderer.
-- `.../transfer/` -- the host file transfer card (`HostTransferCard`),
+- `.../transfer/` -- the host file transfer card (`HostTransferCard`; see
+  [TRANSFER-CARD.md](TRANSFER-CARD.md)),
   its session protocol, naming and text conversion; the transfer window
   is `TransferWindow` in the application package.
-- `firmware/hostfiles/` -- the transfer card's 6502 firmware (ca65
+- `firmware/hostfiles/` -- the transfer card's 6502 firmware (TRANSFER-CARD.md
+  section 6; ca65
   source and ld65 layout). The assembled image is committed as a
   resource; `./gradlew assembleHostFilesFirmware` rebuilds it (needs
   ca65 and ld65 from the cc65 suite).

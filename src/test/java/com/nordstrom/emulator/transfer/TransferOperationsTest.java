@@ -236,4 +236,16 @@ class TransferOperationsTest {
         assertTrue(r.detail().contains("RESET"), r.detail());
         resetter.join();
     }
+
+    @Test
+    void anExportIsNamedWithTheTypeLearnedWhileReading() throws Exception {
+        start(FakeAdapter.dosLike());
+        adapter.files.put(List.of("VOL", "PROG"), new FakeAdapter.GuestFile("B", 0x0300, 0, new byte[] {9}));
+        adapter.auxOnRead.add(List.of("VOL", "PROG"));
+        GuestEntry entry = ops.list(VOL).get(0);
+        assertEquals(0, entry.type().aux(), "the listing doesn't know the load address");
+        TransferOperations.Result r = ops.exportFile(List.of("VOL", "PROG"), entry, host, new Answer(false));
+        assertEquals("PROG#B,0300", r.name(), "READ supplied it");
+        assertArrayEquals(new byte[] {9}, Files.readAllBytes(host.resolve("PROG#B,0300")));
+    }
 }

@@ -184,21 +184,24 @@ public final class TransferOperations {
      */
     public Result exportFile(List<String> file, GuestEntry entry, Path folder, Conflicts conflicts) {
         Capabilities caps = session.capabilities();
-        String hostName = HostNames.encode(entry.name(), entry.type(), entry.attributes(), caps);
+        GuestData read;
+        try {
+            read = await(session.read(file));
+        } catch (TransferException e) {
+            return failure(entry.name(), e);
+        } catch (Cancelled c) {
+            return new Result(Outcome.CANCELLED, entry.name(), "cancelled");
+        }
+        // The type as the adapter learned it while reading, if it sent one: a
+        // listing may not have read far enough to know the aux value.
+        FileType type = read.type() != null ? read.type() : entry.type();
+        String hostName = HostNames.encode(entry.name(), type, entry.attributes(), caps);
         Path target = folder.resolve(hostName);
         if (Files.exists(target) && !conflicts.overwriteHostFile(target)) {
             return new Result(Outcome.SKIPPED, hostName, "already exists; kept the host's copy");
         }
-        byte[] bytes;
-        try {
-            bytes = await(session.read(file));
-        } catch (TransferException e) {
-            return failure(hostName, e);
-        } catch (Cancelled c) {
-            return new Result(Outcome.CANCELLED, hostName, "cancelled");
-        }
-        boolean convert = caps.isConvertibleText(entry.type());
-        byte[] data = convert ? TextConversion.toHost(bytes, caps) : bytes;
+        boolean convert = caps.isConvertibleText(type);
+        byte[] data = convert ? TextConversion.toHost(read.bytes(), caps) : read.bytes();
         try {
             writeAtomically(target, data);
         } catch (IOException e) {

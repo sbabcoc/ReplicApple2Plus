@@ -22,6 +22,8 @@ final class FakeAdapter {
     final HostTransferCard card;
     final Map<List<String>, GuestFile> files = new LinkedHashMap<>();
     final List<List<String>> directories = new ArrayList<>();
+    /** Files whose aux value this adapter, like the DOS 3.3 one, reports only when they're read. */
+    final java.util.Set<List<String>> auxOnRead = new java.util.HashSet<>();
     int requestsServed;
 
     FakeAdapter(HostTransferCard card) {
@@ -115,11 +117,12 @@ final class FakeAdapter {
                     List<String> p = e.getKey();
                     if (p.size() == dir.size() + 1 && p.subList(0, dir.size()).equals(dir)) {
                         GuestFile f = e.getValue();
+                        boolean deferred = auxOnRead.contains(p);
                         writeString(p.get(p.size() - 1));
-                        writeData(0);
+                        writeData(deferred ? Protocol.KIND_AUX_UNKNOWN | Protocol.KIND_SIZE_APPROXIMATE : 0);
                         writeString(f.tag());
-                        writeData(f.aux() & 0xFF);
-                        writeData(f.aux() >> 8);
+                        writeData(deferred ? 0 : f.aux() & 0xFF);
+                        writeData(deferred ? 0 : f.aux() >> 8);
                         writeData(f.attributes());
                         int size = f.data().length;
                         writeData(new byte[] {(byte) size, (byte) (size >> 8), (byte) (size >> 16), (byte) (size >> 24)});
@@ -129,10 +132,19 @@ final class FakeAdapter {
                 finish(ResultCode.OK.code());
             }
             case Protocol.REQ_READ -> {
-                GuestFile f = files.get(readPath());
+                List<String> path = readPath();
+                GuestFile f = files.get(path);
                 if (f == null) {
                     finish(ResultCode.NOT_FOUND.code());
                     break;
+                }
+                if (auxOnRead.contains(path)) { // flag 1: the type, learned while reading
+                    writeData(1);
+                    writeString(f.tag());
+                    writeData(f.aux() & 0xFF);
+                    writeData(f.aux() >> 8);
+                } else {
+                    writeData(0); // flag 0: the listing's type stands
                 }
                 writeData(f.data());
                 finish(ResultCode.OK.code());
@@ -165,7 +177,7 @@ final class FakeAdapter {
             case Protocol.REQ_DELETE -> {
                 finish(files.remove(readPath()) != null ? ResultCode.OK.code() : ResultCode.NOT_FOUND.code());
             }
-            case Protocol.REQ_END -> finish(ResultCode.OK.code());
+            case Protocol.REQ_END, Protocol.REQ_PRINT_LISTING -> finish(ResultCode.OK.code());
             default -> finish(ResultCode.IO_ERROR.code());
         }
         requestsServed++;
@@ -199,6 +211,7 @@ final class FakeAdapter {
             .fileType(Protocol.CAP_DEFAULT_BINARY_TYPE, "BIN", 0)
             .field(Protocol.CAP_DEFAULT_ATTRIBUTES, (byte) 0xE3)
             .field(Protocol.CAP_TEXT_AUX_IS_RECORD_LENGTH, (byte) 1)
+            .field(Protocol.CAP_PRINTS_LISTING, (byte) 1)
             .build();
     }
 

@@ -35,7 +35,7 @@ the host dialogs open in first.
 
 ## 3. User flow
 
-1. From BASIC, the user types `PR#n` (n = the card's slot). The Apple
+1. From BASIC, the user types `IN#n` (n = the card's slot). The Apple
    screen shows a one-line status in 40 columns, e.g.
    `HOST TRANSFER: PRODOS 2.4` -- the work happens on the host.
 2. The emulator opens a host window: **Import to Apple** or **Export to
@@ -60,7 +60,7 @@ Every step is either the guest running code or the card reacting to its
 own registers; the emulator never moves the program counter, writes
 guest RAM, or interrupts the guest.
 
-1. **The guest starts it.** `PR#n` (or `CALL` to the card's entry)
+1. **The guest starts it.** `IN#n` (or `CALL` to the card's entry)
    makes the 6502 run the card's ROM through the ordinary slot
    mechanism, as with any real card.
 2. **The firmware announces itself.** After detecting the OS, it writes
@@ -86,8 +86,10 @@ firmware prints a message and returns.
 Interrupts are deliberately not used to start a session: on a II+ the
 interrupt vector belongs to the running software, ProDOS halts on an
 interrupt no handler claims, and under DOS 3.3 the vector is whatever
-is there. An optional menu item could type `PR#n` through the emulated
+is there. An optional menu item could type `IN#n` through the emulated
 keyboard, as Paste does -- faithful, but only useful at a BASIC prompt.
+
+![The transfer window](docs/images/transfer-window.png)
 
 ## 4. The abstract API
 
@@ -251,6 +253,8 @@ happens to it.
 | `$1` | -- | completion code: ends the message the adapter just wrote to `$2` |
 | `$2` | next byte of the current request's arguments (or of recalled memory); `0` once exhausted | next byte of the adapter's message |
 | `$3` | bits 0-6: protocol version; bit 7: a host transfer window is available | ROM bank select |
+| `$4` | -- | the next printed character (`PR#n`, section 7) |
+| `$5` | where the firmware has got to in typing a recipe, plus one; 0 = not typing | the same (section 7) |
 
 **Adapter-initiated messages** -- bytes written to `$2`, then the code to `$1`:
 
@@ -266,11 +270,12 @@ happens to it.
 |---|---|---|---|
 | `$01` | VOLUMES | -- | names, each a string; then an empty string |
 | `$02` | LIST | path | entries; then an empty string |
-| `$03` | READ | path | the file's bytes |
+| `$03` | READ | path | a flag byte -- 1 if a type follows: tag, aux -- then the file's bytes |
 | `$04` | WRITE | path, tag, aux, attr, size, then `size` data bytes | -- |
 | `$05` | MAKE_DIR | path | -- |
 | `$06` | DELETE | path | -- |
 | `$07` | END | -- | -- (session over) |
+| `$08` | PRINT_LISTING | -- | -- (session over; then the adapter prints the BASIC program's listing) |
 
 **Completion codes `$00`-`$7F`** end a request: `$00` OK, `$01`
 NOT_FOUND, `$02` EXISTS, `$03` DISK_FULL, `$04` WRITE_PROTECTED, `$05`
@@ -280,8 +285,16 @@ byte, then a message string).
 **Encodings:** a *string* is a length byte and that many bytes; a
 *path* is a count byte and that many strings; *tag* is a string; *aux*
 is 2 bytes, *size* 4 bytes, little-endian; *attr* is 1 byte. A list
-*entry* is: name (string, never empty), kind (1 byte: 0 file, 1
-directory), tag, aux, attr, size.
+*entry* is: name (string, never empty), kind, tag, aux, attr, size.
+*Kind* is bits: `$01` directory; `$40` size approximate; `$80` aux value
+not known until the file is read.
+
+**Adapters read only what a request needs.** A listing reads directory
+or catalog structures, nothing inside files. Where that leaves an aux
+value unknown -- a DOS 3.3 B file's load address is in its first data
+sector -- the entry says so (`$80`), and READ, which reads the file
+anyway, sends the type with flag 1. The emulator names an exported file
+from READ's type when one comes, else from the listing's.
 
 **Capability record:** fields of tag (1 byte), length (1 byte), value;
 ended by tag `$00`. Readers skip unknown tags.
@@ -301,6 +314,7 @@ ended by tag `$00`. Readers skip unknown tags.
 | `$0B` | default type for other files | tag (string), aux (2 bytes) |
 | `$0C` | default attributes | 1 byte |
 | `$0D` | text aux is a record length | 1 = a text file with a non-zero aux value is random-access, and is never converted |
+| `$0E` | prints the listing | 1 = the adapter handles PRINT_LISTING (the window shows Print Program Listing) |
 
 **Host names** -- the convention of 4.4, plus one rule: characters not
 legal in host file names on every platform (`/ \ : * ? " < > |`,
@@ -317,28 +331,34 @@ import.
   (the ProDOS agent image). The `$Cn00` page is position-independent: it
   runs at `$C100`-`$C700` depending on the slot. Its first bytes match
   neither the Autostart ROM's disk-boot signature nor Pascal 1.1's.
-- **Entry:** `PR#n` makes BASIC.SYSTEM call `$Cn00` with a character to
-  print. The firmware saves the registers, finds its slot (`JSR $FF58`,
-  the return address's high byte), records it in `MSLOT` (`$07F8`),
-  touches `$CFFF` and jumps to `$C800`.
-- **Borrowed memory, fixed:** `$0800`-`$15FF` (agent at `$0800`, ProDOS
-  I/O buffer at `$1000`, data buffer at `$1400`) and zero page
-  `$06`-`$09`. Used only if the ProDOS bit map marks pages `$08`-`$15`
-  free (under BASIC.SYSTEM they are), otherwise the firmware says so.
+- **Entry:** `$Cn00` is called as the output device (`PR#n`, with a
+  character to print) or the input device (`IN#n`). The firmware saves
+  the registers, finds its slot (`JSR $FF58`, the return address's high
+  byte) and records it in `MSLOT` (`$07F8`). If `CSW` points at the card
+  it prints (section 7); otherwise it touches `$CFFF` and jumps to
+  `$C800` to start a session.
+- **Borrowed memory, fixed:** `$0800`-`$1BFF` (agent code from `$0800`;
+  the ProDOS agent's I/O buffer at `$1000`, data buffer at `$1400`) and
+  zero page `$06`-`$09`. Under ProDOS, used only if the bit map marks
+  pages `$08`-`$1B` free (under BASIC.SYSTEM they are), otherwise the
+  firmware says so.
   Saved to the card before use, restored by the finish routine, from ROM,
   at the end.
 - **Code at `$C800` calls nothing but COUT1 (`$FDF0`),** which touches no
   card. All ProDOS calls and all printing during the session come from
   the agent in RAM.
-- **Ending: both output vectors.** BASIC.SYSTEM keeps the output device
-  in `CSW` (`$36`) as well as in its own `VECTOUT` (`$BE30`); restoring
-  only `VECTOUT`, as Tech Note #4 suggests, left `CSW` pointing at the
-  card, so the next character re-entered the firmware. Finish sets both
-  to `$FDF0`.
+- **Ending: the input vectors, both.** A session runs as the input
+  device, so finish returns input to the keyboard: `KSW` (`$38`) and,
+  under ProDOS, BASIC.SYSTEM's `VECTIN` (`$BE32`) both back to KEYIN
+  (`$FD1B`) -- BASIC.SYSTEM keeps the device in `KSW` as well, and would
+  call the card again otherwise -- or under DOS 3.3 `KSW`, then `JSR
+  $3EA`. Then it continues into KEYIN with the registers it was called
+  with, so input carries on as if the card had never been asked. (Before
+  printing existed, sessions ran from `PR#n`, and the same lesson applied
+  to `CSW` and `VECTOUT`.)
 - **Early exits** print one line and return: no host window, memory in
-  use, no ProDOS, or DOS 3.3 -- which is undone the DOS way, `CSW` to
-  `$FDF0` then `JSR $3EA` so DOS reconnects its hooks, until the DOS
-  adapter exists.
+  use, or neither ProDOS nor DOS 3.3 -- undoing `IN#n` the way the
+  running OS needs, as finish does.
 - **Verified** under real ProDOS 2.4.3 and BASIC.SYSTEM 1.7 in the
   emulator: every request, multi-chunk files both ways, subdirectories,
   replacing, deleting, attributes (`CATALOG` shows the lock), and a
@@ -357,12 +377,13 @@ import.
 - **Containers are drives,** `S6,D1` and so on, for each slot whose ROM
   page carries the Disk II signature. The scan touches `$CFFF` before
   reading each page, so it never leaves two cards selected at once.
-- **LIST reads the catalog through RWTS** (`$3E3`/`$3D9`, documented by
-  Apple): the file manager's CATALOG call only prints, and the output
-  device is this card. For B files it reads the first data sector for
-  the exact load address and length; for A and I files, the length.
-  Other types report sectors x 256. A full System Master takes about 9
-  seconds -- real disk speed, mostly those header reads.
+- **LIST reads only the catalog,** through RWTS (`$3E3`/`$3D9`,
+  documented by Apple): the file manager's CATALOG call only prints, and
+  the output device is this card. Sizes are sectors x 256, marked
+  approximate; a B file's load address -- in its first data sector -- is
+  marked unknown and sent by READ, which reads that sector anyway to strip
+  the header. A full System Master lists in about 1.7 seconds (it took 9
+  when LIST also read every file's header).
 - **READ and WRITE use the file manager** (`$3DC`/`$3D6`) with the
   agent's own buffers, and carry plain data: the adapter strips and adds
   DOS's headers (B: load address and length; A, I: length). Text is read
@@ -433,7 +454,92 @@ import.
     file sizes in sectors, so `LIST` sizes are approximate under DOS
     3.3; exact sizes come from reading the file.
 
-## 7. Open questions
+## 7. Printing to the card
+
+**Purpose:** export BASIC program source -- and any other program
+output -- as host text, by printing to the card.
+
+**As built:**
+- **`PR#n` prints; `IN#n` starts a transfer session.** Printing is what
+  `PR#n` means for any card, so it keeps that meaning; the firmware tells
+  the two apart the way real cards did, by checking whether the output
+  vector (`CSW`) points at it.
+- **The print path** is a few instructions in the `$Cn00` page: the
+  character goes to register `$4` and nowhere else -- no echo, the screen
+  cursor never moves (see below), nothing borrowed -- and every register
+  is kept.
+- **Jobs:** the card collects printed characters in a spool. It can't see
+  `PR#0` -- output simply stops arriving -- so a job ends once printing
+  has been idle for 1.5 seconds; then a dialog asks where to save it as a
+  host text file. Anything printed meanwhile goes into the next job.
+- **Conversion:** clear bit 7, CR to LF. Print output is screen output,
+  the same for every OS and BASIC, so no capability record is involved.
+
+**Investigated: what `LIST` actually sends** -- measured by capturing
+every byte sent to an output device under DOS 3.3, with lines longer than
+40 columns, with and without the screen cursor moving:
+
+| | Applesoft | Integer BASIC |
+|---|---|---|
+| cursor doesn't move | every line intact, however long | every line intact, however long |
+| cursor moves (echo) | breaks past column 33, mid-string; the indent is a cursor move, so the text gets a bare break | breaks near column 38 and prints real spaces to indent, putting spaces inside string literals |
+| line format | `10  PRINT ...`: two spaces after the number, spaces around keywords | `   10 PRINT ...`: number right-aligned in 5, statements as typed |
+| characters | bit 7 set, CR line ends | bit 7 set, CR line ends |
+
+Hence the rule above: never move the cursor while printing.
+
+**Investigated: how to print exactly the listing.** Everything sent while
+output points at the card is captured, so `PR#2`, `LIST`, `PR#0` typed
+separately also capture the prompt and the echoed commands -- and those
+lines make EXEC fail to rebuild the program. Typed at the prompt, both
+DOS 3.3 and BASIC.SYSTEM take a line beginning with `PR#` as their own
+command, which can't share the line; ProDOS ignores `CHR$(4)` commands
+typed in immediate mode; Integer BASIC has no `CHR$`, and accepts `LIST`
+after a colon only inside a program. What works, verified under the real
+systems:
+
+| | Print exactly the source |
+|---|---|
+| Applesoft (ProDOS or DOS 3.3) | `:PR#2: LIST: PR#0` -- the leading colon passes the line to Applesoft, whose own `PR#` redirects output for exactly that line |
+| Integer BASIC (DOS 3.3) | `0 PRINT "`*Ctrl-D*`PR#2": LIST 1,32767: PRINT "`*Ctrl-D*`PR#0": END`, then `RUN`, then `DEL 0,0` |
+
+**Print Program Listing: the card types it.** The transfer window's Print
+Program Listing button (shown when the adapter declares capability
+`$0E`) sends PRINT_LISTING. The adapter ends the session, but instead of
+giving input back to the keyboard it stays the input device and *types*
+the recipe: on each keyboard read the firmware returns the next
+character, exactly as a real input card supplies typing. Choosing the
+recipe is BASIC knowledge, so the adapter does it, from the Monitor's
+prompt character at `$33` (verified: `]` Applesoft under both OSes, `>`
+Integer BASIC, `*` the Monitor -- anything but `]` or `>` types nothing).
+The recipe's `PR#n` uses the card's own slot. When the recipe ends, the
+firmware restores the input vectors and resumes waiting for a key.
+
+- **Its state lives on the card** -- register `$5`, the place in the
+  recipe -- not in the slot's screen-hole scratch byte: Apple II RAM
+  powers up random, so a RAM flag would often read "typing" after a cold
+  start. The card's register is 0 at power-on and cleared by RESET.
+- **The cursor:** the Monitor's RDKEY flashes the cursor before calling
+  the input device, and expects the original character put back. The
+  firmware puts it back at once when a session starts (before printing
+  anything), and when input resumes it flashes the cursor where it is
+  *now*, as RDKEY does, before continuing into KEYIN.
+
+![The card typing the command after Print Program Listing](docs/images/print-listing-typed.png)
+
+**Loading source back:** import the file as a text file through `IN#n`,
+then `NEW` and `EXEC` it -- DOS 3.3 and BASIC.SYSTEM both read it as if
+typed. The round trip rebuilds an identical program: verified for
+Applesoft under ProDOS and Integer BASIC under DOS 3.3
+(`PrintIntegrationTest`). The export is each BASIC's own rendering of the
+stored program, not the original keystrokes; typed back in, it rebuilds
+the same program.
+
+**Later, separately:** an emulated printer -- an interface card plus,
+say, an Epson-compatible printer rendering to PDF -- for program output
+on paper, graphics included.
+
+## 8. Open questions
 
 1. **Assembler -- decided: ca65** (cc65 suite; macOS, Windows, Linux),
    with source and assembled ROM both committed, so building the
@@ -465,7 +571,7 @@ import.
    - The API, capability record and register protocol above stay as
      they are: they are meant to cover a CP/M adapter unchanged.
 
-## 8. Testing
+## 9. Testing
 
 - **Card and protocol:** unit tests drive the registers with a scripted
   fake adapter -- requests, replies, results, polling while a dialog is

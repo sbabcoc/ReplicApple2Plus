@@ -555,19 +555,29 @@ public final class Apple2Plus {
     /** The transfer window for the current machine's transfer card, or null if it has none. */
     private static TransferWindow transferWindow;
 
+    /** Saves what's printed to the current machine's transfer card, or null if it has none. */
+    private static PrintJobSaver printJobSaver;
+
     /**
      * Gives the machine's host file transfer card, if it has one, a transfer
-     * window as its host side -- replacing the previous machine's window,
-     * whose card (and any session) went with that machine.
+     * window as its host side (IN#n) and a saver for what's printed to it
+     * (PR#n) -- replacing the previous machine's, whose card (and any session
+     * or print job) went with that machine.
      */
     private static void rewireTransferWindow(JFrame frame, Machine next) {
         if (transferWindow != null) {
             transferWindow.dispose();
             transferWindow = null;
         }
+        if (printJobSaver != null) {
+            printJobSaver.dispose();
+            printJobSaver = null;
+        }
         if (next.transferCard() != null) {
             transferWindow = new TransferWindow(frame, next.transferCard().initialDirectory());
             next.transferCard().setHost(transferWindow);
+            printJobSaver = new PrintJobSaver(frame, next.transferCard().printSpool(),
+                next.transferCard().initialDirectory());
         }
     }
 

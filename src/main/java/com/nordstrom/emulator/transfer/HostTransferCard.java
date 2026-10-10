@@ -17,7 +17,13 @@ import java.util.Set;
  * Registers, at {@code $C0n0}: {@code $0} read = next request ({@code END}
  * whenever no session is open); {@code $1} write = completion code ending the
  * adapter's message; {@code $2} = data port; {@code $3} read = protocol
- * version plus "host available" bit, write = ROM bank select.
+ * version plus "host available" bit, write = ROM bank select; {@code $4}
+ * write = a printed character, for the {@link #printSpool print spool};
+ * {@code $5} = where the firmware has got to in typing a recipe, 0 when not
+ * typing -- kept on the card because RAM powers up random, and cleared by
+ * RESET.
+ * <p>
+ * {@code IN#n} starts a transfer session; {@code PR#n} prints.
  * <p>
  * Its firmware -- the guest OS adapter, built from {@code firmware/hostfiles}
  * with ca65 -- is a committed resource: 256 bytes for the card's own
@@ -35,12 +41,14 @@ public final class HostTransferCard implements SlotCard {
     private volatile TransferHost host; // set on the UI thread, read on the emulation thread
     private Path initialDirectory;
 
+    private final PrintSpool printSpool = new PrintSpool();
     private TransferSession session;
     private final ByteArrayOutputStream fromAdapter = new ByteArrayOutputStream();
     private byte[] toAdapter = new byte[0];
     private int toAdapterPos;
     private byte[] stash = new byte[0];
     private int romBank;
+    private int typing; // the firmware's place in a recipe; 0 = not typing
 
     @Override
     public String getShortName() {
@@ -128,6 +136,8 @@ public final class HostTransferCard implements SlotCard {
                 return toAdapterPos < toAdapter.length ? toAdapter[toAdapterPos++] & 0xFF : 0;
             case Protocol.REG_STATUS:
                 return Protocol.VERSION | (host != null ? Protocol.STATUS_HOST_AVAILABLE : 0);
+            case Protocol.REG_TYPING:
+                return typing;
             default:
                 return 0;
         }
@@ -140,6 +150,8 @@ public final class HostTransferCard implements SlotCard {
             case Protocol.REG_DATA -> fromAdapter.write(value);
             case Protocol.REG_COMPLETE -> complete(value & 0xFF);
             case Protocol.REG_STATUS -> romBank = value & 0xFF;
+            case Protocol.REG_PRINT -> printSpool.append(value & 0xFF);
+            case Protocol.REG_TYPING -> typing = value & 0xFF;
             default -> {
                 // unused register
             }
@@ -154,6 +166,7 @@ public final class HostTransferCard implements SlotCard {
         toAdapter = new byte[0];
         toAdapterPos = 0;
         romBank = 0;
+        typing = 0; // a recipe interrupted by RESET is abandoned
     }
 
     /**
@@ -228,6 +241,11 @@ public final class HostTransferCard implements SlotCard {
         if (host != null) {
             host.sessionEnded(ending, reason);
         }
+    }
+
+    /** @return where characters printed to this card (PR#n) collect */
+    public PrintSpool printSpool() {
+        return printSpool;
     }
 
     /** Package-visible for tests: the ROM bank last selected. */

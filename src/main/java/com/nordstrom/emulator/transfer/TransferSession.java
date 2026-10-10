@@ -67,10 +67,10 @@ public final class TransferSession {
 
     /**
      * @param file a file, as name components
-     * @return its bytes, exactly as the guest stores them
+     * @return its bytes, and its type if the adapter learned it while reading
      */
-    public CompletableFuture<byte[]> read(List<String> file) {
-        return submit(Protocol.REQ_READ, new Wire.Writer().path(file).toByteArray(), reply -> reply);
+    public CompletableFuture<GuestData> read(List<String> file) {
+        return submit(Protocol.REQ_READ, new Wire.Writer().path(file).toByteArray(), TransferSession::data);
     }
 
     /**
@@ -113,6 +113,18 @@ public final class TransferSession {
         return submit(Protocol.REQ_END, new byte[0], reply -> null);
     }
 
+    /**
+     * Asks the adapter to end the session and then print the BASIC program's
+     * listing -- it types the right command for the running BASIC, and the
+     * listing arrives as a print job. Only if the capability record says the
+     * adapter can ({@link Capabilities#printsListing}).
+     *
+     * @return completion: the session has ended and the printing has begun
+     */
+    public CompletableFuture<Void> printListing() {
+        return submit(Protocol.REQ_PRINT_LISTING, new byte[0], reply -> null);
+    }
+
     private <T> CompletableFuture<T> submit(int opcode, byte[] args, Function<byte[], T> parser) {
         Request<T> request = new Request<>(opcode, args, parser);
         if (!open) {
@@ -139,14 +151,26 @@ public final class TransferSession {
         Wire.Reader r = new Wire.Reader(reply);
         List<GuestEntry> out = new ArrayList<>();
         for (String name = r.string(); !name.isEmpty(); name = r.string()) {
-            boolean directory = r.u8() != 0;
+            int kind = r.u8();
             String tag = r.string();
             int aux = r.u16();
             int attributes = r.u8();
             long size = r.u32();
-            out.add(new GuestEntry(name, directory, new FileType(tag, aux), attributes, size));
+            out.add(new GuestEntry(name, (kind & Protocol.KIND_DIRECTORY) != 0, new FileType(tag, aux), attributes,
+                size, (kind & Protocol.KIND_AUX_UNKNOWN) == 0, (kind & Protocol.KIND_SIZE_APPROXIMATE) == 0));
         }
         return out;
+    }
+
+    /** A READ reply: a flag byte -- 1 if a type (tag, aux) follows -- then the file's bytes. */
+    private static GuestData data(byte[] reply) {
+        Wire.Reader r = new Wire.Reader(reply);
+        FileType type = null;
+        if (r.u8() == 1) {
+            String tag = r.string();
+            type = new FileType(tag, r.u16());
+        }
+        return new GuestData(r.rest(), type);
     }
 
     // ---- card side: emulation thread only ----
@@ -178,7 +202,7 @@ public final class TransferSession {
      *
      * @param code    the completion code, $00-$7F
      * @param payload the adapter's reply
-     * @return true if that request was END, which ends the session
+     * @return true if that request was END or PRINT_LISTING, which end the session
      */
     boolean complete(int code, byte[] payload) {
         Request<?> request = current;
@@ -201,7 +225,8 @@ public final class TransferSession {
             }
             request.future.completeExceptionally(new TransferException(result, nativeCode, message));
         }
-        return request.opcode == Protocol.REQ_END && result == ResultCode.OK;
+        boolean ending = request.opcode == Protocol.REQ_END || request.opcode == Protocol.REQ_PRINT_LISTING;
+        return ending && result == ResultCode.OK;
     }
 
     /** Ends the session, failing everything outstanding. */

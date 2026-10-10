@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * The card's real firmware under real DOS 3.3: PR#2 starts a session,
+ * The card's real firmware under real DOS 3.3: IN#2 starts a session,
  * files go both ways with DOS's headers handled by the adapter, END returns
  * to BASIC with memory -- including the BASIC program in the borrowed
  * region -- as it was, and DOS still catches printed commands.
@@ -132,13 +132,13 @@ class DosTransferIntegrationTest {
             run(25); // the System Master loads Integer BASIC into the Language Card
             type("10 PRINT \"KEEP ME\"\n20 END\n"); // in the borrowed region
             run(2);
-            type("PR#2\n");
+            type("IN#2\n");
             TransferSession session = null;
             for (double until = seconds + 15; seconds < until && session == null; ) {
                 step();
                 session = sessions.poll();
             }
-            assertNotNull(session, "PR#2 began a session");
+            assertNotNull(session, "IN#2 began a session");
             assertEquals("DOS", session.capabilities().osName());
 
             TransferOperations ops = new TransferOperations(session);
@@ -149,6 +149,8 @@ class DosTransferIntegrationTest {
             AtomicReference<byte[]> notes = new AtomicReference<>();
             AtomicReference<List<GuestEntry>> listing = new AtomicReference<>();
             AtomicReference<List<String>> volumes = new AtomicReference<>();
+            AtomicReference<String> exported = new AtomicReference<>();
+            Files.createDirectories(host.resolve("out"));
             TransferSession s = session;
             Thread hostThread = new Thread(() -> {
                 try {
@@ -161,8 +163,10 @@ class DosTransferIntegrationTest {
                             failure.set(r.toString());
                         }
                     }
-                    notes.set(s.read(List.of("S6,D1", "NOTES")).get());
+                    notes.set(s.read(List.of("S6,D1", "NOTES")).get().bytes());
                     listing.set(ops.list(drive));
+                    GuestEntry prog = listing.get().stream().filter(e -> e.name().equals("PROG")).findFirst().orElseThrow();
+                    exported.set(ops.exportFile(List.of("S6,D1", "PROG"), prog, host.resolve("out"), null).name());
                     ops.end();
                 } catch (Exception e) {
                     failure.set(e.toString());
@@ -183,9 +187,13 @@ class DosTransferIntegrationTest {
                 expected[i] |= (byte) 0x80; // DOS text: high bit set
             }
             assertArrayEquals(expected, notes.get());
+            // The listing reads only catalog sectors: a B file's load address is
+            // in its first data sector, so it arrives with READ instead.
             GuestEntry prog = listing.get().stream().filter(e -> e.name().equals("PROG")).findFirst().orElseThrow();
-            assertEquals(new FileType("B", 0x0300), prog.type(), "the load address, from the file's own header");
-            assertEquals(6, prog.size());
+            assertEquals("B", prog.type().tag());
+            assertTrue(!prog.auxKnown() && !prog.sizeExact());
+            assertEquals("PROG#B,0300", exported.get(), "named from the load address READ returned");
+            assertArrayEquals(code, Files.readAllBytes(host.resolve("out").resolve("PROG#B,0300")));
 
             type("RUN\n");
             run(2);
