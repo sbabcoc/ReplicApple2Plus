@@ -311,9 +311,28 @@ Artifact publishing (Sonatype Central Portal, GPG signing) is configured in
 
 ## Running
 
+After building, from the repository root -- on macOS and Linux:
+
 ```
-java -cp build/classes/java/main:build/resources/main com.nordstrom.emulator.Apple2Plus [options]
+java -cp "build/classes/java/main:build/resources/main" com.nordstrom.emulator.Apple2Plus [options]
 ```
+
+On Windows -- Command Prompt, PowerShell, or Git Bash (MINGW) -- the class
+path separator is a semicolon, because `java.exe` is a Windows program
+however it's started. Keep the quotes: in Git Bash and PowerShell an
+unquoted semicolon ends the command.
+
+```
+java -cp "build/classes/java/main;build/resources/main" com.nordstrom.emulator.Apple2Plus [options]
+```
+
+Or, the same on every platform, through Gradle:
+
+```
+./gradlew run --args="[options]"
+```
+
+(`gradlew.bat run --args="[options]"` from Command Prompt.)
 
 | Option | Meaning |
 |---|---|
