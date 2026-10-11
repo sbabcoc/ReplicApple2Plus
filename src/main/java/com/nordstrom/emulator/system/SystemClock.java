@@ -26,8 +26,8 @@ import java.util.function.IntConsumer;
  * {@link Cpu6502#step} already returns, not an approximation.
  * <p>
  * {@link #addCycleListener} exists because it now has real, concrete
- * consumers -- {@link PaddleTimers}' RC countdowns, and
- * {@code Disk2Controller}'s still-not-yet-wired LSS ticking -- not
+ * consumers -- {@link PaddleTimers}' RC countdowns, and slot cards
+ * through {@link SlotCard#tick}, such as the Disk II's LSS -- not
  * because peripherals in general might someday want one. It's
  * deliberately a plain list of callbacks, not a full registration
  * system with names, priorities, or removal: nothing here needs any of

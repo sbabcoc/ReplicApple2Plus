@@ -111,6 +111,20 @@ public interface SlotCard {
     void writeIoSwitch(int offset, int value);
 
     /**
+     * Advances this card by the CPU cycles the last instruction took.
+     * {@code Apple2Plus} registers every installed card with
+     * {@link SystemClock#addCycleListener}, so a card whose hardware runs
+     * on its own (a disk controller's sequencer, a coprocessor) can keep
+     * time with the 6502 by overriding this. Most cards have nothing that
+     * runs between bus accesses, which is the default.
+     *
+     * @param cycles CPU cycles elapsed since the last tick
+     */
+    default void tick(int cycles) {
+        // most cards have no clocked hardware of their own
+    }
+
+    /**
      * The RESET line was asserted. On real hardware the slot connector
      * carries RESET to every card; most cards ignore it, which is the
      * default. Called on the emulation thread as the line goes active.

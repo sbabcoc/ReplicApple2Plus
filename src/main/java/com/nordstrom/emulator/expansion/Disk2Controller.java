@@ -27,15 +27,11 @@ import java.util.Set;
  * bitstream data through Q6/Q7 -- all wired together and verified
  * end-to-end, not just individually.
  * <p>
- * {@link #tick} is what actually drives disk reading -- it needs to be
- * registered with {@code SystemClock.addCycleListener} by whatever
- * assembles the real machine, the same way {@code PaddleTimers} and
- * {@code VideoScanner} already are, reached via
- * {@code MotherboardBus.slotCard(int)} and a cast (this class
- * deliberately isn't referenced generically through {@code SlotCard}
- * itself -- see {@code MotherboardBus.slotCard}'s own Javadoc for why).
- * Without that registration, this controller's switches and boot ROM
- * still work, but no bits ever actually move: the LSS simply never
+ * {@link #tick} is what actually drives disk reading. It overrides
+ * {@link SlotCard#tick}, which whatever assembles the real machine
+ * registers with {@code SystemClock.addCycleListener} for every installed
+ * card. Without that registration, this controller's switches and boot
+ * ROM still work, but no bits ever actually move: the LSS simply never
  * advances.
  * <p>
  * Real hardware detail worth being explicit about: EVERY access to
@@ -229,6 +225,7 @@ public final class Disk2Controller implements SlotCard {
      *
      * @param cycles CPU cycles elapsed since the last tick
      */
+    @Override
     public void tick(int cycles) {
         if (motorOn && motorOffCountdownCycles > 0) {
             motorOffCountdownCycles -= cycles;

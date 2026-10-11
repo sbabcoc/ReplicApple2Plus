@@ -292,17 +292,10 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
 
     /**
      * The card occupying slot {@code slotNum}, or {@code null} if that
-     * slot is empty. Exists for the same reason as this class's other
-     * peripheral accessors -- so whatever assembles the real machine
-     * can reach a specific card (a {@code Disk2Controller}, say) to
-     * wire its own cycle-driven ticking into
-     * {@link SystemClock#addCycleListener}, the same way it wires this
-     * class's own {@link #videoScanner} and {@link #paddleTimers}.
-     * Deliberately not a generic hook on {@link SlotCard} itself --
-     * only one kind of card currently needs cycle ticking at all, so a
-     * type-specific check by whoever assembles the machine is simpler
-     * than a no-op default method every other card would have to
-     * ignore.
+     * slot is empty. Clocked cards don't need this: every card is ticked
+     * through {@link SlotCard#tick}, which needs no knowledge of a card's
+     * type -- a plugin card loaded from a jar can't be known by type at
+     * all.
      *
      * @param slotNum 0-7
      * @return that slot's card, or {@code null} if empty

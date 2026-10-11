@@ -373,8 +373,10 @@ public final class Apple2Plus {
         clock.addCycleListener(bus.scanlineModes()::tick);
         clock.addCycleListener(bus.speakerOutput()::tick);
         clock.addCycleListener(bus.paddleTimers()::tick);
-        if (disk != null) {
-            clock.addCycleListener(disk::tick);
+        for (SlotCard card : slots) {
+            if (card != null) {
+                clock.addCycleListener(card::tick);
+            }
         }
         TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
         clock.addCycleListener(typing::tick);

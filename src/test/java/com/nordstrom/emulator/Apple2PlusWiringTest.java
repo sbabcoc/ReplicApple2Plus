@@ -76,6 +76,7 @@ class Apple2PlusWiringTest {
             "bus.scanlineModes()::tick",
             "bus.speakerOutput()::tick",
             "bus.paddleTimers()::tick",
+            "card::tick",
         };
         for (String listener : requiredListeners) {
             assertTrue(source.contains("clock.addCycleListener(" + listener + ")"),
