@@ -1,7 +1,6 @@
 package com.nordstrom.emulator.system;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ServiceLoader;
@@ -18,12 +17,12 @@ import java.util.Set;
  * <p>
  * Runnable directly:
  * <pre>
- *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.CardCatalog [--plugins DIR]
+ *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.CardCatalog [--plugins DIR[:DIR...]]
  * </pre>
- * With no argument, lists only this project's own built-in cards. With a
- * plugins directory argument, also lists every card in any {@code .jar}
- * found there (via {@link PluginLoader}), exactly as they'd appear to a
- * real motherboard boot using the same directory.
+ * With no argument, lists only this project's own built-in cards. With
+ * plugins directories, also lists every card in any {@code .jar} found
+ * there (via {@link PluginLoader}), exactly as they'd appear to a real
+ * motherboard boot using the same directories.
  */
 public final class CardCatalog {
 
@@ -79,16 +78,16 @@ public final class CardCatalog {
     /**
      * Prints every available card's config-file type value and recognized parameters to stdout.
      *
-     * @param args {@code [--plugins DIR]}, see class Javadoc
-     * @throws IOException if the plugins directory can't be scanned
+     * @param args {@code [--plugins DIR[:DIR...]]}, see class Javadoc
+     * @throws IOException if a plugins directory can't be scanned
      */
     public static void main(String[] args) throws IOException {
         CliArgs cli = CliArgs.parse(args);
 
         ClassLoader classLoader = CardCatalog.class.getClassLoader();
-        String pluginsDir = cli.get("plugins");
-        if (pluginsDir != null) {
-            classLoader = PluginLoader.load(Path.of(pluginsDir), classLoader);
+        String pluginsPath = cli.get("plugins");
+        if (pluginsPath != null) {
+            classLoader = PluginLoader.load(pluginsPath, classLoader);
         }
 
         List<CardDescription> cards = list(classLoader);

@@ -164,8 +164,8 @@ recognized parameters as real methods on the class itself, not as
 comments in a separate file that could drift out of sync with the code —
 and if a card's own declared parameters and what it actually reads ever
 disagree, that's caught automatically rather than silently tolerated.
-Around this: `PluginLoader` builds a classloader from a directory of
-external `.jar` files (the actual mechanism that lets a new peripheral be
+Around this: `PluginLoader` builds a classloader from one or more directories
+of external `.jar` files (the actual mechanism that lets a new peripheral be
 added without recompiling this project), `Install` is a minimal
 installer any peripheral jar can use as its own `Main-Class`,
 `CardCatalog` lists every available card and what it needs, and
@@ -337,7 +337,7 @@ Or, the same on every platform, through Gradle:
 | Option | Meaning |
 |---|---|
 | `--config FILE` | Slot configuration (INI). Without it every slot stays empty and the machine boots to Applesoft. |
-| `--plugins DIR` | Directory of external peripheral jars to load. |
+| `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. |
 | `--input FILE` | Game controller mapping; defaults apply without it. |
 | `--network-input PORT` | Take controller input from PadBridge over UDP on this port, instead of a local gamepad. |
 
@@ -412,9 +412,9 @@ created, ejected and write-protected at any time from the Disk menu.
 
 ### Useful Gradle tasks
 
-- `./gradlew runCardCatalog [-PpluginsDir=DIR]` — list every available
+- `./gradlew runCardCatalog [-PpluginsDir=DIR[:DIR...]]` — list every available
   peripheral and what it needs.
-- `./gradlew runSlotConfigTemplate [-PpluginsDir=DIR] [-PoutputFile=FILE]` —
+- `./gradlew runSlotConfigTemplate [-PpluginsDir=DIR[:DIR...]] [-PoutputFile=FILE]` —
   generate a starter slot configuration file.
 - `./gradlew assembleHostFilesFirmware` — rebuild the host file transfer
   card's firmware image from source (needs ca65 and ld65 on the PATH).

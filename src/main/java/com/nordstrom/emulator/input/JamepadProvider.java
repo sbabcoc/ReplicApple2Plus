@@ -57,7 +57,7 @@ public final class JamepadProvider implements PadProvider {
     private static final String MARKER_CLASS = "com/studiohartman/jamepad/ControllerManager.class";
     private static final String HOOK_NAME = JamepadNativeHook.class.getName();
     private static final String JAR_HINT = "Gamepad support is off: the Jamepad jar was not found. To enable it, "
-        + "put jamepad-2.30.0.0.jar (com.badlogicgames.jamepad:jamepad) in the directory given with --plugins, "
+        + "put jamepad-2.30.0.0.jar (com.badlogicgames.jamepad:jamepad) in a directory given with --plugins, "
         + "or add it to the class path.";
 
     private final Object manager;

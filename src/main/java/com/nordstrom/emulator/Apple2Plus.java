@@ -135,12 +135,12 @@ public final class Apple2Plus {
     private static final long PAD_POLL_INTERVAL_MS = 10; // 100 Hz: far faster than any game reads a paddle
     private static final long SHUTDOWN_JOIN_MS = 300; // longest the exit hook (or a reboot) waits for the loop to stop
     private static final int FLASH_TOGGLE_EVERY_N_TICKS = 15; // roughly twice a second at 50 Hz
-    private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR] [--input input.ini] [--network-input PORT]";
+    private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR[:DIR...]] [--input input.ini] [--network-input PORT]";
 
     /**
      * Application entry point.
      *
-     * @param args {@code [--config slots.ini] [--plugins DIR] [--input input.ini] [--network-input PORT]},
+     * @param args {@code [--config slots.ini] [--plugins DIR[:DIR...]] [--input input.ini] [--network-input PORT]},
      *             all optional and independent -- see this class's own
      *             Javadoc for what happens with neither
      */
@@ -180,10 +180,10 @@ public final class Apple2Plus {
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
-        String pluginsDir = cli.get("plugins");
-        if (pluginsDir != null) {
+        String pluginsPath = cli.get("plugins");
+        if (pluginsPath != null) {
             try {
-                classLoader = PluginLoader.load(Path.of(pluginsDir), classLoader);
+                classLoader = PluginLoader.load(pluginsPath, classLoader);
             } catch (IOException | IllegalArgumentException e) {
                 System.err.println("Could not load plugins: " + e.getMessage());
                 System.exit(1);

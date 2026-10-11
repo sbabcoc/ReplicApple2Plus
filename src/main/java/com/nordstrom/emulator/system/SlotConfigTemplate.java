@@ -29,28 +29,28 @@ import java.util.List;
  * <p>
  * Usage:
  * <pre>
- *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.SlotConfigTemplate [--plugins DIR] [--output FILE]
+ *   java -cp ReplicApple2Plus.jar com.nordstrom.emulator.system.SlotConfigTemplate [--plugins DIR[:DIR...]] [--output FILE]
  * </pre>
  * Both flags are optional and independent of each other -- with no
  * {@code --output}, writes to stdout instead. Named flags, not
  * positional arguments: this way, supplying only {@code --output} can
- * never be misread as supplying a plugins directory instead.
+ * never be misread as supplying plugins directories instead.
  */
 public final class SlotConfigTemplate {
 
     /**
      * Parses {@code --plugins}/{@code --output} (see class Javadoc), generates the snapshot, and writes it to the given file or stdout.
      *
-     * @param args {@code [--plugins DIR] [--output FILE]}, see class Javadoc
-     * @throws IOException if {@code --output} is given and can't be written, or {@code --plugins} can't be scanned
+     * @param args {@code [--plugins DIR[:DIR...]] [--output FILE]}, see class Javadoc
+     * @throws IOException if {@code --output} is given and can't be written, or a {@code --plugins} directory can't be scanned
      */
     public static void main(String[] args) throws IOException {
         CliArgs cli = CliArgs.parse(args);
 
         ClassLoader classLoader = SlotConfigTemplate.class.getClassLoader();
-        String pluginsDir = cli.get("plugins");
-        if (pluginsDir != null) {
-            classLoader = PluginLoader.load(Path.of(pluginsDir), classLoader);
+        String pluginsPath = cli.get("plugins");
+        if (pluginsPath != null) {
+            classLoader = PluginLoader.load(pluginsPath, classLoader);
         }
 
         String text = render(CardCatalog.list(classLoader));

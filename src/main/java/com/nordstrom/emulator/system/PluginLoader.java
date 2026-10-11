@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.system;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -9,10 +10,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
- * Builds a {@link ClassLoader} that adds every {@code .jar} file in a
- * plugins directory to the classpath, on top of the normal application
+ * Builds a {@link ClassLoader} that adds every {@code .jar} file in one or
+ * more plugins directories to the classpath, on top of the normal application
  * classpath -- the actual mechanism that lets a new peripheral card be
  * added to a running ReplicApple2Plus without recompiling or even
  * rebuilding it.
@@ -42,16 +44,49 @@ public final class PluginLoader {
      * @throws IOException if {@code pluginsDirectory} can't be scanned
      */
     public static ClassLoader load(Path pluginsDirectory, ClassLoader parent) throws IOException {
-        if (!Files.isDirectory(pluginsDirectory)) {
-            return parent;
-        }
-        List<URL> jarUrls = new ArrayList<>();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(pluginsDirectory, "*.jar")) {
-            for (Path jar : stream) {
-                jarUrls.add(toUrl(jar));
+        return load(List.of(pluginsDirectory), parent);
+    }
+
+    /**
+     * Returns a {@link ClassLoader} covering every {@code .jar} in every
+     * directory of {@code pluginsPath}, a list of directories separated by
+     * the platform's path separator ({@link File#pathSeparator}: {@code :}
+     * on macOS and Linux, {@code ;} on Windows), the same form as a class
+     * path. Directories are searched in the order given, so if two of them
+     * supply the same class, the earlier one wins. Empty entries and
+     * directories that don't exist are skipped, as in
+     * {@link #load(Path, ClassLoader)}.
+     *
+     * @param pluginsPath directories to scan for {@code .jar} files
+     * @param parent the classloader to fall back to for everything else
+     * @return a classloader covering both {@code parent} and any jars found
+     * @throws IOException if a directory in {@code pluginsPath} can't be scanned
+     */
+    public static ClassLoader load(String pluginsPath, ClassLoader parent) throws IOException {
+        List<Path> directories = new ArrayList<>();
+        for (String entry : pluginsPath.split(Pattern.quote(File.pathSeparator))) {
+            if (!entry.isEmpty()) {
+                directories.add(Path.of(entry));
             }
         }
-        return new URLClassLoader(jarUrls.toArray(new URL[0]), parent);
+        return load(directories, parent);
+    }
+
+    private static ClassLoader load(List<Path> pluginsDirectories, ClassLoader parent) throws IOException {
+        List<URL> jarUrls = new ArrayList<>();
+        boolean anyDirectory = false;
+        for (Path directory : pluginsDirectories) {
+            if (!Files.isDirectory(directory)) {
+                continue;
+            }
+            anyDirectory = true;
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*.jar")) {
+                for (Path jar : stream) {
+                    jarUrls.add(toUrl(jar));
+                }
+            }
+        }
+        return anyDirectory ? new URLClassLoader(jarUrls.toArray(new URL[0]), parent) : parent;
     }
 
     /** Converts a jar's {@link Path} to the {@link URL} form {@link URLClassLoader} needs. */
