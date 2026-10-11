@@ -28,6 +28,14 @@ Saturn Systems 128K RAM card. A host file transfer card, invented for
 this emulator, moves files between the host and the Apple's own disks
 under ProDOS 8 and DOS 3.3 (see [TRANSFER-CARD.md](TRANSFER-CARD.md)).
 
+**CP/M, through the Microsoft SoftCard II.** The SoftCard II Z80 card is
+emulated in a separate project, [SoftCard2](https://github.com/sbabcoc/SoftCard2),
+and loads into this emulator as a plugin. It boots the SoftCard II CP/M
+2.28B master disk and runs CP/M, with the VideoTerm as its 80-column
+console. Its hardware model was reconstructed from the boot disk's own
+code and photographs of the board. See
+[Running CP/M](#running-cpm-on-the-softcard-ii) below.
+
 Companion documents:
 - [HARDWARE-REFERENCE.md](HARDWARE-REFERENCE.md) -- primary-source
   hardware specs for implemented and planned peripherals.
@@ -409,6 +417,44 @@ Card or Saturn card) or under DOS 3.3:
 the emulator offers to insert a boot disk first -- otherwise the
 Autostart ROM would wait forever for one. Disks can be inserted,
 created, ejected and write-protected at any time from the Disk menu.
+
+### Running CP/M on the SoftCard II
+
+The Microsoft SoftCard II comes from the
+[SoftCard2](https://github.com/sbabcoc/SoftCard2) project as a plugin jar
+(short name `softcard2`). Build it there, then give its `build/libs`
+directory to `--plugins`, alone or alongside other plugin directories.
+
+On an Apple II+ the SoftCard II needs an 80-column card for its console:
+CP/M's built-in console driver is written for the Apple IIe's 80-column
+memory and garbles a 40-column II+ screen. A slot configuration that
+boots the CP/M master disk:
+
+```
+[0]
+type=languageCard
+
+[3]
+type=videoterm
+display=separate
+
+[4]
+type=softcard2
+
+[6]
+type=disk2
+drive1=/path/to/Microsoft Softcard II CPM 2.28B.DSK
+```
+
+```
+./gradlew run --args="--config cpm.ini --plugins /path/to/SoftCard2/build/libs"
+```
+
+The host file transfer card can join this configuration in slot 2. Keep
+it below the SoftCard II's slot: the CP/M loader probes unrecognized cards
+from slot 7 downward, and its probe writes the transfer card's
+ROM-bank register. Under CP/M the transfer card is idle, since its
+firmware serves ProDOS 8 and DOS 3.3.
 
 ### Useful Gradle tasks
 
