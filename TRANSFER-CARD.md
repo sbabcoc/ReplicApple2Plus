@@ -140,7 +140,7 @@ length-prefixed fields; a reader skips fields it doesn't know. New
 fields can therefore be added later -- for an OS not yet supported --
 without changing anything that reads the record today. The fields
 defined now are the ones ProDOS and DOS 3.3 need; the CP/M column below
-is a check that the scheme can grow, not work to do.
+is the basis for the CP/M adapter (section 8).
 
 | Field | ProDOS | DOS 3.3 | CP/M (future) |
 |---|---|---|---|
@@ -536,28 +536,126 @@ typed, and the program rebuilt is identical. The export is each BASIC's
 own rendering of the stored program, not the original keystrokes; typed
 back in, it rebuilds the same program.
 
-## 8. Open question: CP/M, for the Microsoft SoftCard II
+## 8. CP/M, for the Microsoft SoftCard II
 
-Pinned: see TODO.md (SoftCard II, and Transfer card: CP/M import/export).
-The target card is the SoftCard II, not the original Z-80 SoftCard, and
-the difference matters here. On the original, the Z80 runs in the
-Apple's own RAM and can reach the Apple's I/O space through address
-translation -- so it could use this card's registers directly. The
-SoftCard II has a 6 MHz Z80 with its own 64K of RAM as CP/M's execution
-space, so the Z80 most likely cannot address the Apple's I/O at all:
-disk, screen and keyboard go through a channel to CP/M's 6502-side code.
-A CP/M adapter would then be Z80 code talking to that 6502 side, which
-relays to this card:
-`Z80 adapter -> SoftCard II channel -> CP/M's 6502 host code -> this card`.
+Designed, not built. The SoftCard II is emulated by the separate
+[SoftCard2](https://github.com/sbabcoc/SoftCard2) project, whose
+`HARDWARE-REFERENCE.md` documents the card and the command protocol
+between its Z80 and the 6502. The addresses below come from the
+SoftCard II CP/M 2.28B master disk (64K), read from its code and
+confirmed by running it unless marked otherwise.
 
-- **Needed first:** the SoftCard II emulated, and the rest of how its Z80
-  and 6502 exchange data, from the master disk's Z80 code. The 6502 side
-  is known: two latches and two flags at `$C0n0`/`$C0n1`, with the 6502
-  acting as a server for the Z80.
-- **Unconfirmed:** release date, CP/M version numbers and recommended
-  slots, from an unsourced summary.
-- The API, capability record and register protocol above are meant to
-  cover a CP/M adapter unchanged.
+### 8.1 How the Z80 reaches this card
+
+The SoftCard II's Z80 runs from its own 64K and can't address the
+Apple's I/O space. Everything it does on the Apple side goes through
+commands to CP/M's 6502-side server -- and two of those commands are
+generic memory access:
+
+- **Command 1** reads any 6502 address; **command 2** writes one. Both
+  reach I/O space: command 2 throws soft switches as readily as it
+  writes RAM.
+- The Z80 BIOS exposes all the commands through one entry, `$FBA0`: the
+  command number in `$0049`, an address in `$004A`/`$004B` (low byte
+  first), and for these two commands the byte written, or the byte read
+  back, in `$0045`.
+
+So a CP/M adapter is Z80 code that uses this card's registers (section
+5) one access at a time through commands 1 and 2. The path -- Z80
+adapter, SoftCard II mailbox, 6502 server, this card -- needs no new
+6502 code and no change to the SoftCard II: the server already relays.
+Each register access costs one command over the mailbox, so transfers
+are slower than the 6502 adapters' copy loops.
+
+`$FBA0` and the page-zero locations belong to this BIOS, found in the
+running system rather than in documentation. A SoftCard II
+*Programmer's Manual* exists (Trailing Edge hosts a scan) and may
+document this interface; the adapter should be checked against it.
+
+### 8.2 Delivering the adapter: the card as CP/M's reader
+
+"The software ships with the card" holds under CP/M too: the card
+supplies its own Z80 adapter, and CP/M's own programs write it to disk.
+
+- **CP/M's reader is slot 2.** CP/M boots with IOBYTE `$95`, which
+  assigns `RDR:` to `PTR:` and `PUN:` to `PTP:`. The BIOS serves both
+  with slot 2: reader input as command 5, punch output as command 6.
+  (`LST:` goes to slot 1.) The card therefore goes in slot 2.
+- **The card presents a 6850 serial interface** (the Apple
+  Communications Card's identity), so the server reads and writes it
+  with no firmware involved:
+  - identification bytes `$Cn05` = `$18`, `$Cn07` = `$38`;
+  - `$C0nE` read: status -- bit 0 receive register full, bit 1 transmit
+    register empty; write: control (the server writes `$03`, master
+    reset, then `$15` at startup);
+  - `$C0nF` read: received byte; write: byte to transmit.
+
+  These registers sit beside the protocol registers at `$C0n0`-`$C0n7`.
+  The server's input routine waits on bit 0 and its output routine on
+  bit 1, so the card keeps bit 1 set and, when it has nothing else to
+  send, offers `^Z` (end of file) rather than leaving a reader read
+  waiting forever.
+- **The reader delivers the adapter**, as Intel HEX ending in `^Z`. On
+  the master disk's own programs:
+
+  ```
+  A>PIP XFER.HEX=RDR:
+  A>LOAD XFER
+  ```
+
+  Punch output is accepted and discarded.
+- **The `$Cn00` entry must be rearranged** so its bytes 5 and 7 are
+  `$18` and `$38` (`CLC` and `SEC`, as on the Communications Card),
+  without changing what `IN#n` and `PR#n` do under ProDOS and DOS 3.3.
+- A side effect: the CP/M loader probes only empty or unrecognized
+  slots when it looks for the SoftCard II, so a recognized serial card is
+  never probed.
+
+The server's 6850 routines were read from the disk but have not yet run.
+
+### 8.3 The adapter
+
+`XFER.COM`, run from the CCP, plays the part of `IN#n`: it begins the
+session, sends `DESCRIBE`, and polls the request register, all through
+commands 1 and 2. It implements section 4.1 with BDOS calls, so the
+guest OS still owns its disks:
+
+| Request | CP/M |
+|---|---|
+| `VOLUMES` | drives A-P present in the system, each with user areas 0-15 |
+| `LIST` | directory search (BDOS 17/18) within a drive and user area |
+| `READ` | open, sequential read by 128-byte record |
+| `WRITE` | make, sequential write, close |
+| `DELETE` | delete (BDOS 19) |
+| `CHECK_WRITABLE` | the drive selects, and isn't read-only (BDOS 29) |
+| `MAKE_DIR` | not offered -- CP/M isn't hierarchical |
+| `END` | return to the CCP |
+
+It runs in the TPA, so nothing is borrowed or restored.
+
+### 8.4 The file model
+
+The CP/M column of the capability record (4.3) applies, and its fields
+marked *future* become real: the record pad byte (`$1A`), two-part names
+with their forbidden characters, the `^Z` end marker, and 128-byte size
+granularity. The record's tagged encoding takes the new fields without
+disturbing the ProDOS and DOS 3.3 adapters; the emulator gains the
+conversions in 4.5 that it already lists as future.
+
+BASIC-80 programs need no counterpart to `PR#n` (section 7): `SAVE
+"NAME",A` writes the program as text, which exports like any other file.
+
+### 8.5 Open questions
+
+- **Which files are text.** Conversions apply to files whose type tag
+  marks them as text (4.5), but CP/M files have no type. The adapter
+  could tag by extension, or the user could choose at export.
+- **Host names for two-part names.** A CP/M text file `READ.ME`
+  exports as `READ.ME.TXT` under 4.4's convention; the rule for the
+  extension needs stating, and checking against import.
+- **The reader after the adapter.** Whether the reader always
+  restarts the adapter image after its `^Z`, or offers `^Z` alone until
+  the next session.
 
 ## 9. Testing
 

@@ -15,6 +15,33 @@ current.
 
 ## Completed tasks (moved from TODO.md)
 
+### Microsoft SoftCard II (Z80, CP/M) -- done, as the SoftCard2 project
+
+Built as a separate plugin project,
+[SoftCard2](https://github.com/sbabcoc/SoftCard2), because the card is a
+single-board computer in its own right: a Z80B with 64K of its own RAM
+and its own clock, sharing nothing with the Apple but a two-register
+mailbox. Its `HARDWARE-REFERENCE.md` has the full reconstruction, with
+every claim tagged by its evidence.
+
+- **Sources:** the SoftCard II CP/M 2.28B master disk (both the 6502
+  server and the Z80 BIOS) and two photographs of a REV A board. No
+  manual or schematic was consulted; a scanned manual has since been
+  found online and hasn't yet been compared.
+- **Corrections to the pinned notes:** the card's Z80 talks only to the
+  mailbox (ports 0 and 1); after reset it executes code fed through the
+  mailbox until its first I/O write; the 6502 server's command loop is
+  at `$0D44`, dispatching 17 commands through `$0D63`; interrupts are
+  unused.
+- **Verification:** the Z80 core passes zexdoc and all of zexall except
+  `bit n,(hl)`, whose flags depend on the unmodeled MEMPTR latch. The
+  card boots the master disk in this emulator with the VideoTerm as
+  console, and all 17 commands have been run.
+- **Here:** cards are now clocked through `SlotCard.tick`, registered for
+  every installed card, replacing the Disk II-only cycle listener -- a
+  plugin card can't be recognized by its class. `--plugins` also gained
+  a path form, several directories in one value.
+
 ### Type-from-file keystroke injection -- done, as the Edit menu
 
 Built as an "Edit" menu rather than a CLI option (a command-line option

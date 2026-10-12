@@ -10,39 +10,16 @@ PDF, for program output on paper, graphics included. Text export is
 already covered by printing to the transfer card (TRANSFER-CARD.md
 section 7).
 
-## Microsoft SoftCard II (Z80, CP/M) -- pinned
-
-Not started; recorded so the groundwork isn't lost. No manual or
-schematic is available, but the SoftCard II CP/M 2.28B master disk
-(64K, 1984) carries both halves of the card's protocol -- the 6502 BIOS
-and the Z80 BIOS -- so the card's behavior can be reverse-engineered
-from code. Found by booting that disk with logging probe cards (card in
-slot 4, registers `$C0C0`-`$C0CF`):
-
-- `$C0n0`: read = next byte from the Z80; write = next byte to the Z80.
-- `$C0n1`: bit 7 = a byte from the Z80 is waiting (`LDA`/`BPL` loops);
-  bit 0 = the byte sent to the Z80 hasn't been taken yet (`ROR`/`BCS`).
-- Startup: the Z80 executes instructions fed through the latch -- the
-  6502 plants a 61-byte Z80 loader at `$8000` (`LD (HL),n` / `INC HL`
-  pairs from the table at `$DAC1`), then sends `JP $8000`. The loader
-  starts with `OUT (0),A`.
-- Running: the 6502 serves the Z80 -- its loop at `$1444` waits for a
-  command byte and dispatches through the table at `$0D63` (disk,
-  screen, keyboard).
-
-Still to establish, from the Z80 code: its I/O port assignments, what
-starts and ends instruction feeding, and any reliance on interrupts or
-timing. Needs a Z80 core (validated with a standard instruction
-exerciser) plus the card itself.
-
 ## Transfer card: CP/M import/export -- pinned
 
 A CP/M adapter for the host file transfer card, so CP/M files can be
-imported and exported like ProDOS and DOS 3.3 ones. Depends on the
-SoftCard II above. Because CP/M runs in the card's own RAM, the Z80
-likely can't reach the transfer card's registers directly; the adapter
-would go through CP/M's 6502-side server. Design notes in
-[TRANSFER-CARD.md](TRANSFER-CARD.md) section 8.
+imported and exported like ProDOS and DOS 3.3 ones, on the Microsoft
+SoftCard II emulated by the [SoftCard2](https://github.com/sbabcoc/SoftCard2)
+project. Designed in [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8: the
+card presents a 6850 serial interface in slot 2, delivers its own Z80
+adapter through CP/M's reader device, and the adapter reaches the
+card's registers through the SoftCard II's memory-access commands.
+Section 8.5 lists the decisions still open.
 
 ## Known issues and leads
 
