@@ -7,6 +7,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 /**
  * Covers the {@code --plugins} path form: several directories in one value,
  * separated by the platform path separator, each contributing its jars.
+ * <p>
+ * Each test closes the loader it gets: a {@link URLClassLoader} keeps the
+ * jars it has read open, and Windows won't delete an open file -- so an
+ * unclosed loader makes the {@code @TempDir} cleanup fail there.
  */
 class PluginLoaderTest {
 
@@ -30,10 +35,11 @@ class PluginLoaderTest {
         jarWith(first.resolve("a.jar"), "only-in-first.txt", "first");
         jarWith(second.resolve("b.jar"), "only-in-second.txt", "second");
 
-        ClassLoader loader = PluginLoader.load(first + File.pathSeparator + second, ClassLoader.getPlatformClassLoader());
-
-        assertEquals("first", read(loader, "only-in-first.txt"));
-        assertEquals("second", read(loader, "only-in-second.txt"));
+        try (URLClassLoader loader = (URLClassLoader) PluginLoader.load(first + File.pathSeparator + second,
+                ClassLoader.getPlatformClassLoader())) {
+            assertEquals("first", read(loader, "only-in-first.txt"));
+            assertEquals("second", read(loader, "only-in-second.txt"));
+        }
     }
 
     @Test
@@ -43,9 +49,10 @@ class PluginLoaderTest {
         jarWith(first.resolve("a.jar"), "shared.txt", "first");
         jarWith(second.resolve("b.jar"), "shared.txt", "second");
 
-        ClassLoader loader = PluginLoader.load(first + File.pathSeparator + second, ClassLoader.getPlatformClassLoader());
-
-        assertEquals("first", read(loader, "shared.txt"));
+        try (URLClassLoader loader = (URLClassLoader) PluginLoader.load(first + File.pathSeparator + second,
+                ClassLoader.getPlatformClassLoader())) {
+            assertEquals("first", read(loader, "shared.txt"));
+        }
     }
 
     @Test
@@ -55,9 +62,9 @@ class PluginLoaderTest {
         String path = File.pathSeparator + root.resolve("missing") + File.pathSeparator + File.pathSeparator
                 + present + File.pathSeparator;
 
-        ClassLoader loader = PluginLoader.load(path, ClassLoader.getPlatformClassLoader());
-
-        assertEquals("found", read(loader, "found.txt"));
+        try (URLClassLoader loader = (URLClassLoader) PluginLoader.load(path, ClassLoader.getPlatformClassLoader())) {
+            assertEquals("found", read(loader, "found.txt"));
+        }
     }
 
     @Test
