@@ -27,8 +27,9 @@ delivered through `PIP` and `LOAD` (SoftCard2's `XferDeliveryTest`); the
 host side's CP/M capability fields (`$0E`-`$11`), end-marker and record
 conversions, untyped host names, and the per-file text override, with
 the transfer window's controls for it and for naming files CP/M can't
-hold. Next: the adapter itself; then the File menu's **Start CP/M
-Transfer**. Section 8.6 lists what
+hold; and the adapter, XFER (`firmware/xfer/xfer.asm`), with whole
+sessions tested in SoftCard2's `XferSessionTest`. Next: the File menu's
+**Start CP/M Transfer**. Section 8.6 lists what
 remains to establish.
 
 ## Known issues and leads

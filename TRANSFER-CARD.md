@@ -643,9 +643,12 @@ with `PIP` and `LOAD`, and runs it.
 
 ### 8.3 The adapter
 
-`XFER.COM`, run from the CCP, plays the part of `IN#n`: it begins the
-session, sends `DESCRIBE`, and polls the request register, all through
-commands 1 and 2. It implements section 4.1 with BDOS calls, so the
+`XFER.COM` (source `firmware/xfer/xfer.asm`), run from the CCP, plays
+the part of `IN#n`: it begins the session with its capability record,
+then polls the request register, all through commands 1 and 2. It
+prints `HOST TRANSFER: CP/M 2.2` while it serves, and `HOST TRANSFER
+ENDED` when the session ends; with no transfer window to serve, it
+prints `HOST TRANSFER IS NOT AVAILABLE` and returns at once. It implements section 4.1 with BDOS calls, so the
 guest OS still owns its disks:
 
 | Request | CP/M |
@@ -655,20 +658,24 @@ guest OS still owns its disks:
 | `READ` | open, sequential read by 128-byte record |
 | `WRITE` | make, sequential write, close |
 | `DELETE` | delete (BDOS 19) |
-| `CHECK_WRITABLE` | the drive selects, and isn't read-only (BDOS 29) |
+| `CHECK_WRITABLE` | the drive holds a readable disk (below), and isn't read-only (BDOS 29) |
 | `MAKE_DIR` | not offered -- CP/M isn't hierarchical |
 | `END` | return to the CCP |
 
 It runs in the TPA, so nothing is borrowed or restored.
 
-**Which drives exist** comes from the BIOS, not BDOS: asking BDOS to
-select a drive that isn't there stops with `Bdos Err On d: Select`. The
-adapter calls the BIOS's `SELDSK` entry through its jump table (the
-table's address follows from the warm-boot vector at `$0001`), which
-returns 0 for a drive beyond those present -- in this BIOS, past the
-drive count it keeps at `$F3B8`, 2 with one Disk II controller. It then
-reselects the current drive through BDOS, so BDOS and the BIOS agree
-again.
+**Which drives exist** comes from the BIOS, not BDOS: BDOS stops and
+waits for a key on a drive that isn't there (`Bdos Err On d: Select`) or
+holds no readable disk (`Bad Sector`). The adapter calls the BIOS's jump
+table directly -- its address follows from the warm-boot vector at
+`$0001`. `SELDSK` returns 0 for a drive beyond those present (in this
+BIOS, past the drive count it keeps at `$F3B8`, 2 with one Disk II
+controller); for a drive that is there, the adapter reads the first
+directory sector, from the track after the disk parameter block's
+reserved tracks, with the BIOS's own `READ`, which reports a failure
+instead of stopping. An empty drive's read fails, and the drive isn't
+offered. The adapter then points the BIOS back at the drive BDOS has
+selected.
 
 **User areas.** CP/M 2.2 divides each drive's directory into sixteen
 numbered *user areas*, 0 to 15: separate sets of file names on the same
@@ -836,8 +843,6 @@ and an end record, which LOAD accepts.
   Communications Card differently: `ProDosTransferIntegrationTest` and
   `DosTransferIntegrationTest`, run with their system disks, show that
   sessions still work.
-- The BIOS's `SELDSK` returning 0 for an absent drive, and the
-  reselection afterward, by running them.
 
 ## 9. Testing
 
