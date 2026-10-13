@@ -30,6 +30,18 @@ public final class Protocol {
     /** Write: trim the captured listing to its non-blank lines (blank lines, BASIC's prompt after it). */
     public static final int REG_TRIM = 0x7;
 
+    // The 6850 serial interface CP/M serves as its reader device (TRANSFER-CARD.md 8.2).
+    /** Read: 6850 status; write: 6850 control. */
+    public static final int REG_SERIAL_STATUS = 0xE;
+    /** Read: the next byte from the reader; write: a byte transmitted, discarded. */
+    public static final int REG_SERIAL_DATA = 0xF;
+    /** {@link #REG_SERIAL_STATUS} bit: a received byte is waiting. */
+    public static final int SERIAL_RECEIVE_FULL = 0x01;
+    /** {@link #REG_SERIAL_STATUS} bit: the transmit register can take a byte. */
+    public static final int SERIAL_TRANSMIT_EMPTY = 0x02;
+    /** {@link #REG_SERIAL_STATUS} control value (low two bits): master reset. */
+    public static final int SERIAL_MASTER_RESET = 0x03;
+
     /** LIST entry kind bit: a directory. */
     public static final int KIND_DIRECTORY = 0x01;
     /** LIST entry kind bit: the size is approximate. */

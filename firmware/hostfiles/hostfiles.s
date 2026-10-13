@@ -125,6 +125,11 @@ entry:  pha                     ; the character BASIC asked us to print
         pha
         tya
         pha
+        clc                     ; $Cn05 = $18 and $Cn07 = $38: the Apple
+        nop                     ;   Communications Card's identification,
+        sec                     ;   so CP/M serves the card's 6850 serial
+                                ;   registers as its reader (TRANSFER-CARD.md
+                                ;   8.2). Executed, they change nothing used.
         jsr     IORTS           ; find our slot: the high byte of the
         tsx                     ; return address just left on the stack
         lda     $0100,x         ;   is $Cn

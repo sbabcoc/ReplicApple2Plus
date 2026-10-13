@@ -25,6 +25,15 @@ import java.util.Set;
  * {@code $5} and {@code $6} are kept on the card because RAM powers up
  * random, and RESET clears them.
  * <p>
+ * Beside them, {@code $E} and {@code $F} are a 6850 serial interface's
+ * status/control and data registers, and the slot page identifies the card
+ * as an Apple Communications Card. That is for CP/M on the Microsoft
+ * SoftCard II (TRANSFER-CARD.md 8.2): its 6502 server reads such a card as
+ * CP/M's reader device, and this card's reader delivers the CP/M adapter,
+ * {@code XFER}, as Intel HEX followed by {@code ^Z}. The reader starts the
+ * adapter over after each {@code ^Z} and on each 6850 master reset; there is
+ * always a byte to read, and transmitted bytes are discarded.
+ * <p>
  * {@code IN#n} starts a transfer session; {@code PR#n} prints.
  * <p>
  * Its firmware -- the guest OS adapter, built from {@code firmware/hostfiles}
@@ -35,10 +44,14 @@ import java.util.Set;
 public final class HostTransferCard implements SlotCard {
 
     private static final String FIRMWARE = "hostfiles-firmware.rom";
+    private static final String CPM_ADAPTER = "xfer.hex";
+    private static final int CPM_END_OF_FILE = 0x1A; // ^Z
     private static final int SLOT_PAGE = 0x100;
     private static final int BANK_SIZE = 0x800;
 
     private final byte[] firmware = loadFirmware();
+    private final byte[] reader = loadReader();
+    private int readerPos;
 
     private volatile TransferHost host; // set on the UI thread, read on the emulation thread
     private Path initialDirectory;
@@ -114,6 +127,21 @@ public final class HostTransferCard implements SlotCard {
         return index < firmware.length ? firmware[index] & 0xFF : 0xFF;
     }
 
+    /** The CP/M adapter's Intel HEX, then ^Z: what CP/M's reader delivers. */
+    private static byte[] loadReader() {
+        try (var in = HostTransferCard.class.getResourceAsStream(CPM_ADAPTER)) {
+            if (in == null) {
+                throw new IllegalStateException("hostfiles: CP/M adapter resource " + CPM_ADAPTER + " is missing");
+            }
+            byte[] hex = in.readAllBytes();
+            byte[] stream = java.util.Arrays.copyOf(hex, hex.length + 1);
+            stream[hex.length] = CPM_END_OF_FILE;
+            return stream;
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("hostfiles: can't read the CP/M adapter", e);
+        }
+    }
+
     private static byte[] loadFirmware() {
         try (var in = HostTransferCard.class.getResourceAsStream(FIRMWARE)) {
             if (in == null) {
@@ -131,6 +159,14 @@ public final class HostTransferCard implements SlotCard {
 
     @Override
     public int readIoSwitch(int offset) {
+        if (offset == Protocol.REG_SERIAL_STATUS) {
+            return Protocol.SERIAL_RECEIVE_FULL | Protocol.SERIAL_TRANSMIT_EMPTY; // always a byte to read, always room
+        }
+        if (offset == Protocol.REG_SERIAL_DATA) {
+            int value = reader[readerPos] & 0xFF;
+            readerPos = (readerPos + 1) % reader.length; // after the ^Z, the adapter again
+            return value;
+        }
         noteActivity();
         switch (offset) {
             case Protocol.REG_REQUEST:
@@ -150,6 +186,15 @@ public final class HostTransferCard implements SlotCard {
 
     @Override
     public void writeIoSwitch(int offset, int value) {
+        if (offset == Protocol.REG_SERIAL_STATUS) {
+            if ((value & Protocol.SERIAL_MASTER_RESET) == Protocol.SERIAL_MASTER_RESET) {
+                readerPos = 0; // CP/M's server master-resets the 6850 at every cold boot
+            }
+            return;
+        }
+        if (offset == Protocol.REG_SERIAL_DATA) {
+            return; // CP/M's punch device: accepted and discarded
+        }
         noteActivity();
         switch (offset) {
             case Protocol.REG_DATA -> fromAdapter.write(value);

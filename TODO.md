@@ -18,8 +18,15 @@ SoftCard II emulated by the [SoftCard2](https://github.com/sbabcoc/SoftCard2)
 project. Designed in [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8: the
 card presents a 6850 serial interface in slot 2, delivers its own Z80
 adapter through CP/M's reader device, and the adapter reaches the
-card's registers through the SoftCard II's memory-access commands.
-Section 8.5 lists the decisions still open.
+card's registers through the SoftCard II's memory-access commands. A
+menu item installs and starts the adapter. The CP/M integration test
+lives in the SoftCard2 project.
+
+Done: the card's 6850 identity and reader, with a placeholder adapter
+delivered through `PIP` and `LOAD` (SoftCard2's `XferDeliveryTest`).
+Next: the capability encoding and conversions, then the adapter itself,
+then the File menu's **Start CP/M Transfer**. Section 8.6 lists what
+remains to establish.
 
 ## Known issues and leads
 

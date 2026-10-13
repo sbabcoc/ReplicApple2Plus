@@ -217,6 +217,8 @@ Z80 under a CP/M card some day) talks to the same registers.
 | `$1` | -- | result register: completes the current request |
 | `$2` | data port: next byte from the emulator | data port: next byte to the emulator |
 | `$3` | card signature / protocol version | ROM bank select (`$C800`-`$CFFF`) |
+| `$E` | 6850 status: CP/M's reader (8.2) | 6850 control |
+| `$F` | 6850 data: the next reader byte | 6850 data: discarded |
 
 - **Requests and replies** are byte streams through the data port:
   strings as a length byte plus characters, numbers little-endian.
@@ -347,7 +349,8 @@ rebuilds it.
 - **The `$Cn00` page:** entry, the listing path, the input entry used
   while typing `LIST`, the copy routine and finish. Position-independent: it runs at `$C100`-`$C700` depending on
   the slot. Its first bytes match neither the Autostart ROM's disk-boot
-  signature nor Pascal 1.1's.
+  signature nor Pascal 1.1's; bytes 5 and 7 (`$18`/`$38`) identify it as
+  an Apple Communications Card, for CP/M (8.2).
 - **Bank 0** (`$C800`): detection, borrowing memory, messages, and
   capturing a listing (section 7).
 - **Bank 1:** the ProDOS agent image. **Banks 2-3:** the DOS 3.3 agent
@@ -555,10 +558,12 @@ generic memory access:
 - **Command 1** reads any 6502 address; **command 2** writes one. Both
   reach I/O space: command 2 throws soft switches as readily as it
   writes RAM.
-- The Z80 BIOS exposes all the commands through one entry, `$FBA0`: the
-  command number in `$0049`, an address in `$004A`/`$004B` (low byte
-  first), and for these two commands the byte written, or the byte read
-  back, in `$0045`.
+- The Z80 BIOS exposes all the commands through one entry, which every
+  warm boot publishes as a jump at `$0040` -- the way CP/M publishes
+  BDOS at `$0005`. A caller puts the command number in `$0049`, an
+  address in `$004A`/`$004B` (low byte first), and for these two
+  commands the byte written, or the byte read back, in `$0045`, then
+  calls `$0040`.
 
 So a CP/M adapter is Z80 code that uses this card's registers (section
 5) one access at a time through commands 1 and 2. The path -- Z80
@@ -567,10 +572,11 @@ adapter, SoftCard II mailbox, 6502 server, this card -- needs no new
 Each register access costs one command over the mailbox, so transfers
 are slower than the 6502 adapters' copy loops.
 
-`$FBA0` and the page-zero locations belong to this BIOS, found in the
-running system rather than in documentation. A SoftCard II
+Calling through `$0040` means the adapter never hard-codes where the
+BIOS is; in this 64K system the jump leads to `$FBA0`. The interface was
+found in the running system rather than in documentation. A SoftCard II
 *Programmer's Manual* exists (Trailing Edge hosts a scan) and may
-document this interface; the adapter should be checked against it.
+document it; the adapter should be checked against it.
 
 ### 8.2 Delivering the adapter: the card as CP/M's reader
 
@@ -603,15 +609,24 @@ supplies its own Z80 adapter, and CP/M's own programs write it to disk.
   A>LOAD XFER
   ```
 
+  The reader starts the adapter over after each `^Z`, and whenever the
+  6850 is master-reset -- which the server does at every CP/M cold boot
+  -- so every `PIP` from the reader gets a complete copy, even after one
+  was interrupted. A truncated copy that slipped through anyway would
+  fail LOAD's checksums rather than produce a bad `XFER.COM`.
+
   Punch output is accepted and discarded.
-- **The `$Cn00` entry must be rearranged** so its bytes 5 and 7 are
-  `$18` and `$38` (`CLC` and `SEC`, as on the Communications Card),
-  without changing what `IN#n` and `PR#n` do under ProDOS and DOS 3.3.
+- **The `$Cn00` entry carries the identification** as instructions:
+  bytes 5 and 7 are `CLC` (`$18`) and `SEC` (`$38`), as on the
+  Communications Card, executed harmlessly after the entry's register
+  pushes, so `IN#n` and `PR#n` behave as before under ProDOS and DOS 3.3.
 - A side effect: the CP/M loader probes only empty or unrecognized
   slots when it looks for the SoftCard II, so a recognized serial card is
   never probed.
 
-The server's 6850 routines were read from the disk but have not yet run.
+This path has run end to end: SoftCard2's `XferDeliveryTest` boots the
+master disk with this card in slot 2, delivers a placeholder adapter
+with `PIP` and `LOAD`, and runs it.
 
 ### 8.3 The adapter
 
@@ -622,7 +637,7 @@ guest OS still owns its disks:
 
 | Request | CP/M |
 |---|---|
-| `VOLUMES` | drives A-P present in the system, each with user areas 0-15 |
+| `VOLUMES` | the drives present, each divided into its user areas (below) |
 | `LIST` | directory search (BDOS 17/18) within a drive and user area |
 | `READ` | open, sequential read by 128-byte record |
 | `WRITE` | make, sequential write, close |
@@ -633,6 +648,22 @@ guest OS still owns its disks:
 
 It runs in the TPA, so nothing is borrowed or restored.
 
+**Which drives exist** comes from the BIOS, not BDOS: asking BDOS to
+select a drive that isn't there stops with `Bdos Err On d: Select`. The
+adapter calls the BIOS's `SELDSK` entry through its jump table (the
+table's address follows from the warm-boot vector at `$0001`), which
+returns 0 for a drive beyond those present -- in this BIOS, past the
+drive count it keeps at `$F3B8`, 2 with one Disk II controller. It then
+reselects the current drive through BDOS, so BDOS and the BIOS agree
+again.
+
+**User areas.** CP/M 2.2 divides each drive's directory into sixteen
+numbered *user areas*, 0 to 15: separate sets of file names on the same
+disk, chosen with the CCP's `USER n` command; area 0 is the default, and
+most disks use nothing else. Each drive appears with area 0 and any
+other area that holds files, each as a flat container (`A0:`, `A3:`,
+...).
+
 ### 8.4 The file model
 
 The CP/M column of the capability record (4.3) applies, and its fields
@@ -642,20 +673,151 @@ granularity. The record's tagged encoding takes the new fields without
 disturbing the ProDOS and DOS 3.3 adapters; the emulator gains the
 conversions in 4.5 that it already lists as future.
 
+**Which files are text.** CP/M files carry no type, so the extension
+supplies a default, and the user can override it for each file, in
+either direction. Text by default:
+
+| Extensions | Contents |
+|---|---|
+| `ASM`, `MAC`, `LIB` | assembler sources and macro libraries |
+| `PRN`, `SYM` | assembler listings and symbol tables |
+| `HEX` | Intel HEX |
+| `SUB` | SUBMIT command files |
+| `DOC`, `TXT`, `ME` | documents (`READ.ME`) |
+| `FOR`, `COB`, `PAS`, `C`, `H` | compiler sources |
+| `BAK` | ED's backup of an edited text file |
+
+Everything else defaults to binary. That includes `BAS`: BASIC-80 saves
+programs tokenized unless told `,A`, so an ASCII-saved program is
+exported as text by override. Conversions (4.5) apply to the files
+treated as text.
+
+**Importing a name CP/M can't hold.** A CP/M name is up to 8 characters,
+optionally a dot and up to 3 more, without spaces or any of
+`< > . , ; : = ? * [ ]`. Lowercase is converted to uppercase, as the CCP
+does. Any other host name that doesn't fit -- too long, or with a
+forbidden character -- isn't shortened or altered: the transfer window
+asks the user for a target name, and checks it against the same rules.
+
+**Host names** follow 4.4 unchanged: a file exported as text gains
+`.TXT`, so `READ.ME` becomes `READ.ME.TXT` and `PROG.ASM` becomes
+`PROG.ASM.TXT`; a binary keeps its CP/M name. CP/M has no type tags or
+attributes to record, so `#tag,aux` never appears. On import, `.TXT`
+marks text as it does for ProDOS and DOS 3.3, and the CP/M name is what
+remains.
+
 BASIC-80 programs need no counterpart to `PR#n` (section 7): `SAVE
 "NAME",A` writes the program as text, which exports like any other file.
 
-### 8.5 Open questions
+### 8.5 Starting a session from the menu
 
-- **Which files are text.** Conversions apply to files whose type tag
-  marks them as text (4.5), but CP/M files have no type. The adapter
-  could tag by extension, or the user could choose at export.
-- **Host names for two-part names.** A CP/M text file `READ.ME`
-  exports as `READ.ME.TXT` under 4.4's convention; the rule for the
-  extension needs stating, and checking against import.
-- **The reader after the adapter.** Whether the reader always
-  restarts the adapter image after its `^Z`, or offers `^Z` alone until
-  the next session.
+Under ProDOS and DOS 3.3 the user starts a session by typing `IN#n`.
+Under CP/M a single menu item, **File > Start CP/M Transfer**, does
+everything:
+it starts the adapter, installing it first if the disk lacks it. It
+works only through the keyboard and what the screen shows -- the same
+`TypingFeeder` behind the Edit menu's **Paste**, and the console's text
+(`VideoTermRenderer.text` for the VideoTerm) -- so the guest still runs
+every program and writes every file itself.
+
+**Knowing CP/M is running.** The card can tell without asking the guest:
+at every cold boot, CP/M's 6502 server initializes each serial card by
+master-resetting its 6850 (`$03` to the control register, then `$15`).
+The menu item is enabled once the card has seen that initialization
+since the last RESET. Other software that drives a Communications Card
+would initialize it the same way; the prompt check below catches that
+case.
+
+The application has no File menu yet -- only Edit and Disk -- so this
+item creates it, first in the menu bar, ahead of Edit.
+
+This automation is the one place that knows CP/M's commands and their
+output. It belongs to the application's UI, beside the transfer window;
+the card stays OS-agnostic.
+
+**The sequence.** Rather than checking conditions in advance, it runs
+each command and reads what CP/M prints. Every step waits for the CCP
+prompt to return before typing the next; nothing is typed ahead.
+
+1. **CP/M is idle at the CCP:** the console's last line is a prompt such
+   as `A>`, with nothing typed after it. Otherwise the item explains and
+   types nothing.
+2. **`^C`** warm-boots CP/M, re-logging its disks. That clears the
+   read-only state BDOS gives a disk changed without a warm boot, a
+   failure that can be avoided rather than recovered from.
+3. **`XFER`.** If the card receives "begin session" within a few
+   seconds, the transfer window opens as in section 3, and the sequence
+   is done. If the CCP answers `XFER?` -- its reply to a command it can't
+   find -- the adapter isn't installed: go on to step 4. If the adapter's
+   `DESCRIBE` reports an older protocol version than the card's, the
+   session ends at once, `ERA XFER.COM` removes it, and step 4 installs
+   the current one.
+4. **Install:** `PIP XFER.HEX=RDR:`, `LOAD XFER`, `ERA XFER.HEX`, then
+   step 3 again.
+
+**Recognizing failure.** Each command has a known successful result: the
+prompt returning with no message, or for LOAD its summary, ending in
+`RECORDS WRITTEN nn`:
+
+```
+FIRST ADDRESS 0100
+LAST  ADDRESS 0132
+BYTES READ    0033
+RECORDS WRITTEN 01
+```
+
+Anything else is a failure, and the item stops and reports it, showing
+what CP/M printed:
+
+- `PIP?` or `LOAD?` -- the tool isn't on the current disk.
+- An error line from PIP or LOAD, such as a full disk.
+- `Bdos Err On d: ...` -- BDOS has stopped and is waiting for a key, so
+  the prompt won't return on its own. The item types `^C`, which
+  warm-boots CP/M back to the prompt, and reports the reason BDOS gave:
+  `R/O` for a write-protected disk, `Bad Sector`, or `Select`.
+
+The exact text of each message is taken from running the cases -- a
+missing tool, a write-protected disk, a full disk -- on the SoftCard II
+master disk, not written from memory; those runs become the item's
+tests.
+
+### 8.6 Testing, and what remains to decide
+
+**The CP/M integration test lives in the SoftCard2 project.** SoftCard2
+already depends on this project, so its test can assemble the whole
+machine: its CP/M harness gains this card in slot 2, given a
+`TransferHost` and driven with `TransferOperations` exactly as
+`ProDosTransferIntegrationTest` does here -- all three are public. The
+test boots the master disk, runs the menu item's sequence (8.5) through
+the harness's keyboard and console, and carries out imports and exports
+in both directions. It also provokes each failure 8.5 recognizes, which
+is where those messages' exact text comes from.
+
+That puts one requirement on the code here: the menu item's logic must
+be a public class independent of Swing, taking a keystroke sink and a
+source of console text. The application wires it to `TypingFeeder` and
+`VideoTermRenderer`; SoftCard2's test wires it to its harness. This
+project's own tests cover what needs no CP/M -- the 6850 registers, the
+reader stream and its restarts, and the capability fields.
+
+**Building the Z80 adapter.** The adapter is assembled with sjasmplus
+(BSD-licensed; Intel HEX output since version 1.22.0), the same way the
+6502 firmware uses ca65: the source is `firmware/xfer/xfer.asm`,
+`./gradlew assembleXferAdapter` rebuilds it, and the assembled
+`xfer.hex` is committed as a resource of the card, so building the
+emulator needs no Z80 toolchain. The reader streams that file as it is,
+followed by `^Z`. Its records are data records ascending from `$0100`
+and an end record, which LOAD accepts.
+
+**Still to establish:**
+
+- The wire encoding (5.2) of the new capability fields.
+- Whether ProDOS or DOS 3.3 treats a card that identifies as a
+  Communications Card differently: `ProDosTransferIntegrationTest` and
+  `DosTransferIntegrationTest`, run with their system disks, show that
+  sessions still work.
+- The BIOS's `SELDSK` returning 0 for an absent drive, and the
+  reselection afterward, by running them.
 
 ## 9. Testing
 

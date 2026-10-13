@@ -29,6 +29,14 @@ class HostTransferCardFirmwareTest {
     }
 
     @Test
+    void theSlotPageIdentifiesTheCardAsACommunicationsCard() {
+        // $Cn05/$Cn07 = $18/$38, which CP/M's SoftCard II loader classifies as a 6850 serial card
+        // and serves as CP/M's reader device (TRANSFER-CARD.md 8.2).
+        assertEquals(0x18, card.readRom(5));
+        assertEquals(0x38, card.readRom(7));
+    }
+
+    @Test
     void theRomBankRegisterSelectsWhatTheExpansionWindowShows() {
         card.writeIoSwitch(Protocol.REG_STATUS, 0);
         int[] bank0 = {card.readExpansionRom(0), card.readExpansionRom(1), card.readExpansionRom(2)};

@@ -346,3 +346,20 @@ tasks.register('assembleHostFilesFirmware', Exec) {
     commandLine 'ld65', '-C', firmwareDir.file('hostfiles.cfg').asFile.path,
         '-o', firmwareImage.asFile.path, firmwareObject.get().asFile.path
 }
+
+// ---------------------------------------------------------------------
+// The transfer card's CP/M adapter, XFER (optional): rebuilds the committed
+// Intel HEX from firmware/xfer with sjasmplus 1.22.0 or later, which must be
+// on the PATH. A normal build never needs this -- it uses the committed
+// src/main/resources/.../transfer/xfer.hex, which the card's reader streams.
+// ---------------------------------------------------------------------
+def xferDir = layout.projectDirectory.dir('firmware/xfer')
+def xferHex = layout.projectDirectory.file('src/main/resources/com/nordstrom/emulator/transfer/xfer.hex')
+
+tasks.register('assembleXferAdapter', Exec) {
+    group = 'firmware'
+    description = 'Assembles the host file transfer card\'s CP/M adapter with sjasmplus.'
+    inputs.file(xferDir.file('xfer.asm'))
+    outputs.file(xferHex)
+    commandLine 'sjasmplus', '--hex=' + xferHex.asFile.path, xferDir.file('xfer.asm').asFile.path
+}
