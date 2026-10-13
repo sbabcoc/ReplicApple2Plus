@@ -129,10 +129,11 @@ Companion documents:
   rebuilding the emulator.
 
 **Application**
-- **File** menu: Type File..., and **Edit** menu: Copy Screen Text, Copy
-  Screen Image, and Paste -- typed or pasted text is fed to the keyboard
-  at exactly the pace the running software reads it, so nothing is
-  dropped.
+- **File** menu: Start CP/M Transfer (see
+  [Running CP/M](#running-cpm-on-the-softcard-ii)) and Type File..., and
+  **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste -- typed
+  or pasted text is fed to the keyboard at exactly the pace the running
+  software reads it, so nothing is dropped.
   Typing that runs longer than a moment shows a progress window, with a
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
@@ -452,11 +453,19 @@ drive1=/path/to/Microsoft Softcard II CPM 2.28B.DSK
 ./gradlew run --args="--config cpm.ini --plugins /path/to/SoftCard2/build/libs"
 ```
 
-The host file transfer card can join this configuration in slot 2. Keep
-it below the SoftCard II's slot: the CP/M loader probes unrecognized cards
-from slot 7 downward, and its probe writes the transfer card's
-ROM-bank register. Under CP/M the transfer card is idle, since its
-firmware serves ProDOS 8 and DOS 3.3.
+With the host file transfer card in slot 2 -- CP/M's reader and punch
+slot -- CP/M files can be imported and exported like ProDOS and DOS 3.3
+ones. At CP/M's `A>` prompt, choose **File > Start CP/M Transfer**: the
+emulator types the commands that install the card's CP/M adapter, XFER,
+if the disk lacks it (with the disk's own PIP and LOAD), then runs it,
+and the transfer window opens. The current disk needs PIP.COM and
+LOAD.COM, and room for XFER.COM, the first time. See
+[TRANSFER-CARD.md](TRANSFER-CARD.md) section 8.
+
+```
+[2]
+type=hostfiles
+```
 
 ### Useful Gradle tasks
 

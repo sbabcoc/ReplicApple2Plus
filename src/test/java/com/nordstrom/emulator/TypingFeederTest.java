@@ -159,4 +159,17 @@ class TypingFeederTest {
         }
         assertEquals("AB", received.toString());
     }
+
+    /** Raw keystrokes reach the keyboard as given -- ^C included, which typed text can't express. */
+    @Test
+    void queuesRawKeystrokes() {
+        KeyboardRegister keyboard = new KeyboardRegister();
+        TypingFeeder feeder = new TypingFeeder(keyboard);
+        feeder.enqueue("\u0003"); // skipped as text
+        assertEquals(0, feeder.queuedCount());
+        feeder.enqueueKeys(0x03);
+        assertTrue(feeder.isTyping());
+        feeder.tick(1);
+        assertEquals(0x83, KeyboardTestAccess.readKbd(keyboard) & 0xFF, "^C with the strobe set");
+    }
 }

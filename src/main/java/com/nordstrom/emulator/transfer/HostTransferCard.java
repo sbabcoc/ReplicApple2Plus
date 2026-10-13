@@ -52,6 +52,8 @@ public final class HostTransferCard implements SlotCard {
     private final byte[] firmware = loadFirmware();
     private final byte[] reader = loadReader();
     private int readerPos;
+    /** Set when CP/M's 6502 server initializes the 6850, at each cold boot; cleared by RESET. */
+    private volatile boolean servedByCpm;
 
     private volatile TransferHost host; // set on the UI thread, read on the emulation thread
     private Path initialDirectory;
@@ -189,6 +191,7 @@ public final class HostTransferCard implements SlotCard {
         if (offset == Protocol.REG_SERIAL_STATUS) {
             if ((value & Protocol.SERIAL_MASTER_RESET) == Protocol.SERIAL_MASTER_RESET) {
                 readerPos = 0; // CP/M's server master-resets the 6850 at every cold boot
+                servedByCpm = true;
             }
             return;
         }
@@ -220,6 +223,19 @@ public final class HostTransferCard implements SlotCard {
         romBank = 0;
         typing = 0; // a capture interrupted by RESET is abandoned
         phase = 0;
+        servedByCpm = false;
+    }
+
+    /**
+     * Whether CP/M is running: its 6502 server initializes every serial
+     * card's 6850 when CP/M boots, and nothing else this card serves does.
+     * Cleared by RESET, after which CP/M, if it boots again, sets it again.
+     * Safe from any thread -- File > Start CP/M Transfer is enabled by it.
+     *
+     * @return true if CP/M has initialized this card since the last RESET
+     */
+    public boolean servedByCpm() {
+        return servedByCpm;
     }
 
     /**

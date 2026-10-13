@@ -168,7 +168,8 @@ public final class TransferOperations {
         } catch (IOException e) {
             return new Result(Outcome.FAILED, guestName, "can't read " + hostFile + ": " + e.getMessage());
         }
-        HostNames.Decoded decoded = HostNames.decode(hostFile.getFileName().toString());
+        String hostName = hostFile.getFileName().toString();
+        HostNames.Decoded decoded = caps.untyped() ? HostNames.decodeUntyped(hostName) : HostNames.decode(hostName);
         boolean untyped = decoded.type() == null;
         boolean contentIsText = untyped && TextConversion.isPlainText(bytes);
         FileType type = caps.untyped() ? UNTYPED : decoded.typeOr(caps, contentIsText);

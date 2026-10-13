@@ -8,6 +8,8 @@ import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
@@ -90,5 +92,14 @@ class HostTransferCardSerialTest {
             out.write(CPM_END_OF_FILE);
             return out.toByteArray();
         }
+    }
+
+    @Test
+    void knowsWhenCpmHasInitializedItUntilReset() {
+        assertFalse(card.servedByCpm());
+        initializeAsCpmDoes();
+        assertTrue(card.servedByCpm());
+        card.onReset();
+        assertFalse(card.servedByCpm(), "RESET: CP/M sets it again only if it boots again");
     }
 }

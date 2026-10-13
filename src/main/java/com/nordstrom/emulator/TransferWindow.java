@@ -563,7 +563,8 @@ final class TransferWindow implements TransferHost {
             }
         };
         for (File f : chosen) {
-            String wanted = HostNames.decode(f.getName()).guestName();
+            String wanted = (caps.untyped() ? HostNames.decodeUntyped(f.getName()) : HostNames.decode(f.getName()))
+                .guestName();
             String name;
             if (userNamesMisfits) {
                 String acceptable = GuestNames.acceptable(wanted, caps);

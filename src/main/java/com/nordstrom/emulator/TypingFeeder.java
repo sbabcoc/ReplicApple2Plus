@@ -76,7 +76,17 @@ final class TypingFeeder {
      * @param text the text to type
      */
     void enqueue(CharSequence text) {
-        int[] keys = toKeystrokes(text);
+        enqueueKeys(toKeystrokes(text));
+    }
+
+    /**
+     * Queues keystrokes as the Apple keyboard produces them, after anything
+     * already queued -- for keys text can't express, such as ^C, which
+     * {@link #enqueue} skips as it does any control character in pasted text.
+     *
+     * @param keys Apple II key codes
+     */
+    void enqueueKeys(int... keys) {
         if (!typing) {
             queued = 0;
             typed = 0;

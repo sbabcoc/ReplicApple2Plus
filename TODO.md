@@ -27,10 +27,13 @@ delivered through `PIP` and `LOAD` (SoftCard2's `XferDeliveryTest`); the
 host side's CP/M capability fields (`$0E`-`$11`), end-marker and record
 conversions, untyped host names, and the per-file text override, with
 the transfer window's controls for it and for naming files CP/M can't
-hold; and the adapter, XFER (`firmware/xfer/xfer.asm`), with whole
-sessions tested in SoftCard2's `XferSessionTest`. Next: the File menu's
-**Start CP/M Transfer**. Section 8.6 lists what
-remains to establish.
+hold; the adapter, XFER (`firmware/xfer/xfer.asm`), with whole sessions
+tested in SoftCard2's `XferSessionTest`; and **File > Start CP/M
+Transfer** (`CpmTransferStarter`), tested in SoftCard2's `XferStartTest`.
+
+Left: a disk-full install hasn't been run; and when the protocol
+version changes, the menu item gains the reinstall of an older XFER
+(TRANSFER-CARD.md 8.5).
 
 ## Known issues and leads
 

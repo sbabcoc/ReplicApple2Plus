@@ -137,6 +137,18 @@ class TransferOperationsTest {
     }
 
     @Test
+    void aCpmTxtFileKeepsItsNameBothWays() throws Exception {
+        start(FakeAdapter.cpmLike());
+        Path file = hostFile("README.TXT", "HELLO\n");
+        ops.importFile(file, VOL, "README.TXT", new Answer(false));
+        GuestEntry entry = ops.list(VOL).get(0);
+        assertEquals("README.TXT", entry.name());
+        TransferOperations.ExportRead back = ops.readForExport(List.of("VOL", "README.TXT"), entry);
+        assertEquals("README.TXT", back.hostName(), ".TXT isn't doubled");
+        assertArrayEquals("HELLO\n".getBytes(StandardCharsets.US_ASCII), back.data());
+    }
+
+    @Test
     void cpmExportCanBeOverriddenEitherWay() throws Exception {
         start(FakeAdapter.cpmLike());
         adapter.files.put(List.of("VOL", "NOTES.DAT"), new FakeAdapter.GuestFile("", 0, 0, "X\r\n\u001A".getBytes()));

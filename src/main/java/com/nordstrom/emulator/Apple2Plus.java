@@ -176,7 +176,7 @@ public final class Apple2Plus {
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
                             EightyColumnView eightyColumns, DisplayModeSelector displayModes,
-                            HostTransferCard transferCard) {}
+                            HostTransferCard transferCard, VideoTerm videoTerm) {}
 
     private static void createAndRun(CliArgs cli) {
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
@@ -428,7 +428,7 @@ public final class Apple2Plus {
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
-            transferCard);
+            transferCard, videoTerm);
     }
 
     /**
@@ -606,7 +606,7 @@ public final class Apple2Plus {
         frame.getContentPane().add(next.toolbar(), BorderLayout.NORTH);
 
         JMenuBar menuBar = new JMenuBar();
-        menuBar.add(FileMenu.build(next.typing(), frame, next.loop()));
+        menuBar.add(FileMenu.build(next.typing(), frame, next.loop(), next.transferCard(), next.videoTerm()));
         menuBar.add(EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()));
         if (next.disk() != null) {
             menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));

@@ -1,15 +1,25 @@
 package com.nordstrom.emulator;
 
+import com.nordstrom.emulator.expansion.VideoTerm;
+import com.nordstrom.emulator.expansion.VideoTermRenderer;
+import com.nordstrom.emulator.transfer.CpmTransferStarter;
+import com.nordstrom.emulator.transfer.HostTransferCard;
+
 import javax.swing.JFileChooser;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
+import javax.swing.event.MenuEvent;
+import javax.swing.event.MenuListener;
 import java.awt.Component;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.prefs.Preferences;
 
 /**
@@ -18,8 +28,15 @@ import java.util.prefs.Preferences;
  * Type File... reads a text file and hands it to the {@link TypingFeeder},
  * which types it at whatever pace the running software reads the keyboard
  * -- the same feeder as the Edit menu's Paste. The typing progress
- * window's Stop Typing button discards whatever hasn't been typed yet. Deliberately no keyboard
- * shortcuts: these are menu actions only.
+ * window's Stop Typing button discards whatever hasn't been typed yet.
+ * <p>
+ * Start CP/M Transfer starts a host file transfer session under CP/M on
+ * the Microsoft SoftCard II, installing the card's CP/M adapter, XFER,
+ * first if the disk lacks it -- all by typing at CP/M's prompt and reading
+ * what it prints on the VideoTerm (TRANSFER-CARD.md 8.5). It's enabled
+ * once CP/M has initialized the transfer card since the last RESET.
+ * <p>
+ * Deliberately no keyboard shortcuts: these are menu actions only.
  */
 final class FileMenu {
 
@@ -29,22 +46,105 @@ final class FileMenu {
 
     private FileMenu() {}
 
+    /** How long one CP/M command may run while starting a transfer: PIP copying XFER is the longest. */
+    private static final long COMMAND_TIMEOUT_MILLIS = 120_000;
+    /** How long the screen must stay unchanged for a command to count as finished. */
+    private static final long SETTLE_MILLIS = 500;
+
     /**
      * Builds the menu.
      *
-     * @param feeder          types the chosen file's text into the machine's keyboard
+     * @param feeder          types into the machine's keyboard
      * @param parent          the component to anchor dialogs to (typically the main frame)
      * @param emulationThread runs everything that touches machine state -- queueing typing
+     * @param transferCard    the machine's host file transfer card, or null if it has none
+     * @param videoTerm       the machine's VideoTerm, CP/M's console on a II+, or null if it has none
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
-    static JMenu build(TypingFeeder feeder, Component parent, Executor emulationThread) {
+    static JMenu build(TypingFeeder feeder, Component parent, Executor emulationThread,
+                       HostTransferCard transferCard, VideoTerm videoTerm) {
         JMenu menu = new JMenu("File");
+
+        JMenuItem startCpmTransfer = new JMenuItem("Start CP/M Transfer");
+        AtomicBoolean starting = new AtomicBoolean();
+        startCpmTransfer.addActionListener(event ->
+            startCpmTransfer(feeder, parent, emulationThread, videoTerm, starting));
+        menu.add(startCpmTransfer);
 
         JMenuItem typeFile = new JMenuItem("Type File...");
         typeFile.addActionListener(event -> promptAndTypeFile(feeder, parent, emulationThread));
         menu.add(typeFile);
 
+        menu.addMenuListener(new MenuListener() {
+            @Override
+            public void menuSelected(MenuEvent e) {
+                startCpmTransfer.setEnabled(transferCard != null && videoTerm != null
+                    && transferCard.servedByCpm() && !starting.get());
+            }
+
+            @Override
+            public void menuDeselected(MenuEvent e) {
+            }
+
+            @Override
+            public void menuCanceled(MenuEvent e) {
+            }
+        });
         return menu;
+    }
+
+    /** Runs the start on a thread of its own: it waits on the machine, command by command. */
+    private static void startCpmTransfer(TypingFeeder feeder, Component parent, Executor emulationThread,
+                                         VideoTerm videoTerm, AtomicBoolean starting) {
+        if (!starting.compareAndSet(false, true)) {
+            return;
+        }
+        AtomicInteger submitted = new AtomicInteger(); // typing handed over but not yet queued
+        CpmTransferStarter.Keyboard keyboard = new CpmTransferStarter.Keyboard() {
+            @Override
+            public void type(String text) {
+                submit(() -> feeder.enqueue(text));
+            }
+
+            @Override
+            public void press(int key) {
+                submit(() -> feeder.enqueueKeys(key));
+            }
+
+            @Override
+            public boolean isTyping() {
+                return submitted.get() > 0 || feeder.isTyping();
+            }
+
+            private void submit(Runnable queueing) {
+                submitted.incrementAndGet();
+                emulationThread.execute(() -> {
+                    queueing.run();
+                    submitted.decrementAndGet();
+                });
+            }
+        };
+        CpmTransferStarter starter = new CpmTransferStarter(keyboard, () -> VideoTermRenderer.text(videoTerm),
+            COMMAND_TIMEOUT_MILLIS, SETTLE_MILLIS);
+        Thread worker = new Thread(() -> {
+            CpmTransferStarter.Result result;
+            try {
+                result = starter.run();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                result = new CpmTransferStarter.Result(false, "Interrupted.");
+            } finally {
+                starting.set(false);
+            }
+            if (!result.started()) {
+                String message = result.message();
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(parent, message,
+                    "Start CP/M Transfer", JOptionPane.WARNING_MESSAGE));
+            }
+            // On success the transfer window opens by itself, as the session begins.
+        }, "Start CP/M Transfer");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private static void promptAndTypeFile(TypingFeeder feeder, Component parent, Executor emulationThread) {

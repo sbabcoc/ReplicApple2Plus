@@ -47,8 +47,9 @@ public final class HostNames {
     /**
      * The host name for a guest file from a file system whose files carry no
      * type (capability $11): the guest name, plus {@code .TXT} if it was
-     * converted as text. There is no type to record, and the attribute byte
-     * isn't carried either: {@code ,attr} only ever follows a type.
+     * converted as text -- unless its own extension is already {@code TXT},
+     * which isn't doubled. There is no type to record, and the attribute
+     * byte isn't carried either: {@code ,attr} only ever follows a type.
      *
      * @param guestName the guest's name for the file
      * @param text      true if the file was converted as text
@@ -56,7 +57,31 @@ public final class HostNames {
      */
     public static String encodeUntyped(String guestName, boolean text) {
         String name = escape(guestName, false);
-        return text ? name + TEXT_SUFFIX : name;
+        return text && !endsWithTextSuffix(guestName) ? name + TEXT_SUFFIX : name;
+    }
+
+    /**
+     * What a host file name says about a guest file to create from it, for a
+     * file system whose files carry no type (capability $11). As
+     * {@link #decode}, except that {@code .TXT} stays part of the guest name
+     * when nothing else is left to be its extension: {@code README.TXT}
+     * becomes {@code README.TXT}, while {@code PROG.ASM.TXT} becomes
+     * {@code PROG.ASM} -- the inverse of {@link #encodeUntyped}.
+     *
+     * @param hostName the host file's name
+     * @return the guest name, and whether the name marks text
+     */
+    public static Decoded decodeUntyped(String hostName) {
+        Decoded decoded = decode(hostName);
+        if (decoded.text() && decoded.guestName().indexOf('.') < 0) {
+            String suffix = hostName.substring(hostName.length() - TEXT_SUFFIX.length());
+            return new Decoded(decoded.guestName() + suffix, null, -1, true);
+        }
+        return new Decoded(decoded.guestName(), null, -1, decoded.text());
+    }
+
+    private static boolean endsWithTextSuffix(String name) {
+        return name.toUpperCase(Locale.ROOT).endsWith(TEXT_SUFFIX);
     }
 
     /**

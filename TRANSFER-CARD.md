@@ -632,7 +632,10 @@ supplies its own Z80 adapter, and CP/M's own programs write it to disk.
 - **The `$Cn00` entry carries the identification** as instructions:
   bytes 5 and 7 are `CLC` (`$18`) and `SEC` (`$38`), as on the
   Communications Card, executed harmlessly after the entry's register
-  pushes, so `IN#n` and `PR#n` behave as before under ProDOS and DOS 3.3.
+  pushes, so `IN#n` and `PR#n` behave as before under ProDOS and DOS 3.3
+  -- confirmed by `ProDosTransferIntegrationTest`,
+  `DosTransferIntegrationTest` and `PrintIntegrationTest` run with their
+  system disks.
 - A side effect: the CP/M loader probes only empty or unrecognized
   slots when it looks for the SoftCard II, so a recognized serial card is
   never probed.
@@ -727,12 +730,20 @@ against the same rules before anything is transferred, explaining them
 if one doesn't fit. Guests with single-part names (ProDOS, DOS 3.3) keep
 an editable suggestion instead, and their adapter has the final word.
 
-**Host names** follow 4.4 unchanged: a file exported as text gains
-`.TXT`, so `READ.ME` becomes `READ.ME.TXT` and `PROG.ASM` becomes
-`PROG.ASM.TXT`; a binary keeps its CP/M name. CP/M has no type tags or
-attributes to record, so `#tag,aux` never appears. On import, `.TXT`
-marks text as it does for ProDOS and DOS 3.3, and the CP/M name is what
-remains.
+**Host names** follow 4.4: a file exported as text gains `.TXT`, so
+`READ.ME` becomes `READ.ME.TXT` and `PROG.ASM` becomes `PROG.ASM.TXT`;
+a binary keeps its CP/M name. CP/M has no type tags or attributes to
+record, so `#tag,aux` never appears. A file whose extension is already
+`TXT` isn't doubled: `README.TXT` stays `README.TXT`. On import, `.TXT`
+marks text as it does for ProDOS and DOS 3.3, and comes off the name
+when what remains has an extension of its own (`PROG.ASM.TXT` becomes
+`PROG.ASM`); otherwise it stays as the CP/M extension (`README.TXT`
+stays `README.TXT`), so a file round-trips under its own name either
+way.
+
+The one name that can't round-trip is a file with no extension exported
+as text by override: CP/M `NOTES` becomes `NOTES.TXT` on the host, which
+imports back as `NOTES.TXT`. The host name can't say which it was.
 
 BASIC-80 programs need no counterpart to `PR#n` (section 7): `SAVE
 "NAME",A` writes the program as text, which exports like any other file.
@@ -741,31 +752,34 @@ BASIC-80 programs need no counterpart to `PR#n` (section 7): `SAVE
 
 Under ProDOS and DOS 3.3 the user starts a session by typing `IN#n`.
 Under CP/M a single menu item, **File > Start CP/M Transfer**, does
-everything:
-it starts the adapter, installing it first if the disk lacks it. It
-works only through the keyboard and what the screen shows -- the same
-`TypingFeeder` behind the Edit menu's **Paste**, and the console's text
-(`VideoTermRenderer.text` for the VideoTerm) -- so the guest still runs
-every program and writes every file itself.
+everything: it starts the adapter, installing it first if the disk lacks
+it. It works only through the keyboard and what the screen shows -- the
+same `TypingFeeder` behind the Edit menu's **Paste**, and the console's
+text (`VideoTermRenderer.text` for the VideoTerm) -- so the guest still
+runs every program and writes every file itself. The logic is
+`CpmTransferStarter`, independent of Swing; `FileMenu` runs it on a
+thread of its own, and shows a message if it fails. On success there's
+nothing to show: the transfer window opens as the session begins.
 
 **Knowing CP/M is running.** The card can tell without asking the guest:
 at every cold boot, CP/M's 6502 server initializes each serial card by
 master-resetting its 6850 (`$03` to the control register, then `$15`).
 The menu item is enabled once the card has seen that initialization
-since the last RESET. Other software that drives a Communications Card
-would initialize it the same way; the prompt check below catches that
-case.
-
-The application has no File menu yet -- only Edit and Disk -- so this
-item creates it, first in the menu bar, ahead of Edit.
+since the last RESET (`HostTransferCard.servedByCpm`), when the machine
+also has a VideoTerm to read CP/M's console from. Other software that
+drives a Communications Card would initialize it the same way; the
+prompt check below catches that case.
 
 This automation is the one place that knows CP/M's commands and their
 output. It belongs to the application's UI, beside the transfer window;
 the card stays OS-agnostic.
 
 **The sequence.** Rather than checking conditions in advance, it runs
-each command and reads what CP/M prints. Every step waits for the CCP
-prompt to return before typing the next; nothing is typed ahead.
+each command and reads what CP/M prints. Every step waits for the
+command's echo to appear after a prompt, the typing to be done, and the
+screen to stay unchanged for half a second, before reading the result;
+nothing is typed ahead. Each command may take up to two minutes, the
+longest being PIP copying XFER from the reader.
 
 1. **CP/M is idle at the CCP:** the console's last line is a prompt such
    as `A>`, with nothing typed after it. Otherwise the item explains and
@@ -773,13 +787,17 @@ prompt to return before typing the next; nothing is typed ahead.
 2. **`^C`** warm-boots CP/M, re-logging its disks. That clears the
    read-only state BDOS gives a disk changed without a warm boot, a
    failure that can be avoided rather than recovered from.
-3. **`XFER`.** If the card receives "begin session" within a few
-   seconds, the transfer window opens as in section 3, and the sequence
-   is done. If the CCP answers `XFER?` -- its reply to a command it can't
-   find -- the adapter isn't installed: go on to step 4. If the adapter's
-   `DESCRIBE` reports an older protocol version than the card's, the
-   session ends at once, `ERA XFER.COM` removes it, and step 4 installs
-   the current one.
+3. **`XFER`.** If XFER prints `HOST TRANSFER: CP/M 2.2`, the session has
+   begun, the transfer window opens as in section 3, and the sequence is
+   done. If the CCP answers `XFER?` -- its reply to a command it can't
+   find -- the adapter isn't installed: go on to step 4. Anything else,
+   such as `HOST TRANSFER IS NOT AVAILABLE`, is reported.
+
+   Only one protocol version exists, so an installed XFER can't yet be
+   older than the card. When the protocol changes, this step gains a
+   check: an adapter whose `DESCRIBE` reports an older version than the
+   card's ends its session at once, `ERA XFER.COM` removes it, and step 4
+   installs the current one.
 4. **Install:** `PIP XFER.HEX=RDR:`, `LOAD XFER`, `ERA XFER.HEX`, then
    step 3 again.
 
@@ -804,10 +822,13 @@ what CP/M printed:
   warm-boots CP/M back to the prompt, and reports the reason BDOS gave:
   `R/O` for a write-protected disk, `Bad Sector`, or `Select`.
 
-The exact text of each message is taken from running the cases -- a
-missing tool, a write-protected disk, a full disk -- on the SoftCard II
-master disk, not written from memory; those runs become the item's
-tests.
+SoftCard2's `XferStartTest` runs the sequence on the real master disk:
+a fresh install and start, a second start that finds XFER installed,
+and a disk without PIP. `CpmTransferStarterTest` here covers every
+branch against a stand-in for the CCP that prints what the real one
+does -- including `Bdos Err On A: R/O` and its ^C recovery, the text
+CP/M printed when SAVE met a write-protected disk on the master disk.
+A full disk has not been run.
 
 ### 8.6 Testing, and what remains to decide
 
@@ -836,13 +857,6 @@ reader stream and its restarts, and the capability fields.
 emulator needs no Z80 toolchain. The reader streams that file as it is,
 followed by `^Z`. Its records are data records ascending from `$0100`
 and an end record, which LOAD accepts.
-
-**Still to establish:**
-
-- Whether ProDOS or DOS 3.3 treats a card that identifies as a
-  Communications Card differently: `ProDosTransferIntegrationTest` and
-  `DosTransferIntegrationTest`, run with their system disks, show that
-  sessions still work.
 
 ## 9. Testing
 

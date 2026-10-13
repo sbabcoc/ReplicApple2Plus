@@ -93,4 +93,34 @@ class HostNamesTest {
         assertTrue(decoded.text());
         assertNull(decoded.type());
     }
+
+    @Test
+    void anUntypedTxtExtensionIsNotDoubled() {
+        assertEquals("README.TXT", HostNames.encodeUntyped("README.TXT", true));
+        assertEquals("README.TXT", HostNames.encodeUntyped("README.TXT", false));
+    }
+
+    @Test
+    void anUntypedDotTxtStaysTheExtensionWhenNothingElseIs() {
+        HostNames.Decoded readme = HostNames.decodeUntyped("README.TXT");
+        assertEquals("README.TXT", readme.guestName());
+        assertTrue(readme.text());
+
+        HostNames.Decoded source = HostNames.decodeUntyped("PROG.ASM.TXT");
+        assertEquals("PROG.ASM", source.guestName(), "an extension of its own: .TXT only marks text");
+        assertTrue(source.text());
+
+        HostNames.Decoded program = HostNames.decodeUntyped("PIP.COM");
+        assertEquals("PIP.COM", program.guestName());
+        assertFalse(program.text());
+        assertNull(program.type());
+    }
+
+    @Test
+    void untypedNamesRoundTrip() {
+        for (String guest : new String[] {"README.TXT", "PROG.ASM", "PIP.COM"}) {
+            boolean text = !guest.endsWith(".COM");
+            assertEquals(guest, HostNames.decodeUntyped(HostNames.encodeUntyped(guest, text)).guestName(), guest);
+        }
+    }
 }
