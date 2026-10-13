@@ -83,4 +83,14 @@ class HostNamesTest {
         assertEquals("ODD#BIN,ZZ", HostNames.decode("ODD#BIN,ZZ").guestName());
         assertEquals(".TXT", HostNames.decode(".TXT").guestName(), "a bare suffix is a name");
     }
+
+    @Test
+    void untypedFilesAreNamedOnlyByTheirTextConversion() {
+        assertEquals("PROG.ASM.TXT", HostNames.encodeUntyped("PROG.ASM", true));
+        assertEquals("PIP.COM", HostNames.encodeUntyped("PIP.COM", false));
+        HostNames.Decoded decoded = HostNames.decode("PROG.ASM.TXT");
+        assertEquals("PROG.ASM", decoded.guestName());
+        assertTrue(decoded.text());
+        assertNull(decoded.type());
+    }
 }

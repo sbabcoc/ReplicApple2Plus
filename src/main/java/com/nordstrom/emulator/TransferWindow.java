@@ -541,42 +541,96 @@ final class TransferWindow implements TransferHost {
         PREFS.put(IMPORT_DIRECTORY_KEY, chosen[0].getParentFile().getAbsolutePath());
 
         Capabilities caps = session.capabilities();
-        DefaultTableModel names = new DefaultTableModel(new Object[] {"Host file", "Name on the Apple"}, 0) {
+        // Where files carry no type, the user decides what is text, file by file.
+        boolean chooseText = caps.untyped();
+        // A two-part name (CP/M's NAME.EXT) that doesn't fit is never shortened
+        // or altered: the user names it, and the names are checked before
+        // anything is transferred (TRANSFER-CARD.md 8.4). Other guests get a
+        // suggestion the user can edit, and their adapter has the final word.
+        boolean userNamesMisfits = caps.twoPartNames();
+        Object[] columns = chooseText
+            ? new Object[] {"Host file", "Name on the Apple", "Text"}
+            : new Object[] {"Host file", "Name on the Apple"};
+        DefaultTableModel names = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return column == 1;
+                return column >= 1;
+            }
+
+            @Override
+            public Class<?> getColumnClass(int column) {
+                return column == 2 ? Boolean.class : String.class;
             }
         };
         for (File f : chosen) {
-            names.addRow(new Object[] {f.getName(), GuestNames.suggest(HostNames.decode(f.getName()).guestName(), caps)});
+            String wanted = HostNames.decode(f.getName()).guestName();
+            String name;
+            if (userNamesMisfits) {
+                String acceptable = GuestNames.acceptable(wanted, caps);
+                name = acceptable != null ? acceptable : "";
+            } else {
+                name = GuestNames.suggest(wanted, caps);
+            }
+            names.addRow(chooseText
+                ? new Object[] {f.getName(), name, TransferOperations.importsAsTextByDefault(f.toPath())}
+                : new Object[] {f.getName(), name});
         }
         JTable table = new JTable(names);
         JScrollPane scroll = new JScrollPane(table);
-        scroll.setPreferredSize(new java.awt.Dimension(460, Math.min(300, 40 + 20 * chosen.length)));
-        int answer = JOptionPane.showConfirmDialog(window, scroll, "Names on the Apple",
-            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-        if (table.isEditing()) {
-            table.getCellEditor().stopCellEditing();
-        }
-        if (answer != JOptionPane.OK_OPTION) {
-            return;
+        scroll.setPreferredSize(new java.awt.Dimension(chooseText ? 520 : 460, Math.min(300, 40 + 20 * chosen.length)));
+        while (true) {
+            int answer = JOptionPane.showConfirmDialog(window, scroll, "Names on the Apple",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+            if (table.isEditing()) {
+                table.getCellEditor().stopCellEditing();
+            }
+            if (answer != JOptionPane.OK_OPTION) {
+                return;
+            }
+            if (!userNamesMisfits) {
+                break;
+            }
+            List<String> unusable = new ArrayList<>();
+            for (int i = 0; i < chosen.length; i++) {
+                String entered = names.getValueAt(i, 1).toString().trim();
+                String name = caps.upperCaseOnly() ? entered.toUpperCase(java.util.Locale.ROOT) : entered;
+                names.setValueAt(name, i, 1);
+                if (!GuestNames.isValid(name, caps)) {
+                    unusable.add(chosen[i].getName() + (name.isEmpty() ? ": needs a name" : ": \"" + name + "\""));
+                }
+            }
+            if (unusable.isEmpty()) {
+                break;
+            }
+            JOptionPane.showMessageDialog(window, "Choose names the Apple can use for:\n  "
+                    + String.join("\n  ", unusable) + "\n\nNames are " + GuestNames.describeRules(caps) + ".",
+                "Names on the Apple", JOptionPane.WARNING_MESSAGE);
         }
         List<Path> files = new ArrayList<>();
         List<String> guestNames = new ArrayList<>();
+        List<Boolean> asText = new ArrayList<>();
         for (int i = 0; i < chosen.length; i++) {
             files.add(chosen[i].toPath());
             guestNames.add(names.getValueAt(i, 1).toString().trim());
+            asText.add(chooseText ? (Boolean) names.getValueAt(i, 2) : null);
         }
-        importFiles(files, target, guestNames);
+        importFiles(files, target, guestNames, asText);
     }
 
-    /** Imports host files into a guest container -- the part after the dialogs. Package-visible for tests. */
-    void importFiles(List<Path> files, DefaultMutableTreeNode target, List<String> guestNames) {
+    /**
+     * Imports host files into a guest container -- the part after the dialogs.
+     *
+     * @param asText for each file, whether to convert it as text, where the
+     *               guest's files carry no type; null elements otherwise
+     */
+    private void importFiles(List<Path> files, DefaultMutableTreeNode target, List<String> guestNames,
+                             List<Boolean> asText) {
         GuestNode container = (GuestNode) target.getUserObject();
         runOnWorker("Importing...", () -> {
             for (int i = 0; i < files.size() && !ops.isCancelled(); i++) {
                 setProgress(i, files.size(), "Importing " + files.get(i).getFileName());
-                TransferOperations.Result r = ops.importFile(files.get(i), container.path, guestNames.get(i), dialogs());
+                TransferOperations.Result r = ops.importFile(files.get(i), container.path, guestNames.get(i),
+                    asText.get(i), dialogs());
                 logResult(files.get(i).getFileName() + " -> " + r.name(), r);
             }
             SwingUtilities.invokeLater(() -> {
@@ -599,8 +653,24 @@ final class TransferWindow implements TransferHost {
             return; // the button is enabled only for one file
         }
         GuestNode file = files.get(0);
+        Boolean asText = null;
+        Capabilities caps = session.capabilities();
+        if (caps.untyped()) {
+            // No type says what this file is: offer the extension's default, and the other choice.
+            boolean textByDefault = caps.defaultsToText(file.entry.name(), file.entry.type());
+            Object[] choices = {"As Text", "As Is", "Cancel"};
+            int choice = JOptionPane.showOptionDialog(window,
+                "Export " + file.entry.name() + " as text, converted for the host, or exactly as it is?",
+                "Export", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices,
+                choices[textByDefault ? 0 : 1]);
+            if (choice != 0 && choice != 1) {
+                return;
+            }
+            asText = choice == 0;
+        }
+        Boolean chosenText = asText;
         runOnWorker("Reading " + file.entry.name() + "...", () -> {
-            TransferOperations.ExportRead read = ops.readForExport(file.path, file.entry);
+            TransferOperations.ExportRead read = ops.readForExport(file.path, file.entry, chosenText);
             SwingUtilities.invokeLater(() -> saveExported(file, read));
         });
     }

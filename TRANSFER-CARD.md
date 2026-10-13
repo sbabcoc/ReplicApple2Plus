@@ -142,7 +142,7 @@ without changing anything that reads the record today. The fields
 defined now are the ones ProDOS and DOS 3.3 need; the CP/M column below
 is the basis for the CP/M adapter (section 8).
 
-| Field | ProDOS | DOS 3.3 | CP/M (future) |
+| Field | ProDOS | DOS 3.3 | CP/M |
 |---|---|---|---|
 | display name, version | ProDOS 2.4 | DOS 3.3 | CP/M 2.2 |
 | structure | hierarchical | flat, per drive | flat, per drive and user area |
@@ -151,17 +151,18 @@ is the basis for the CP/M adapter (section 8).
 | text high bit | clear | set | clear |
 | text end marker | -- | -- | `^Z` |
 | size granularity | byte | byte | 128-byte record |
-| file types | tag + aux | tag (T/I/A/B/S/R) + load address for B | none |
-| attributes | access bits (locked etc.) | locked flag | read-only, system |
+| file types | tag + aux | tag (T/I/A/B/S/R) + load address for B | none: text by extension |
+| attributes | access bits (locked etc.) | locked flag | not carried |
 | default attributes | unlocked | unlocked | none set |
-| *future:* pad byte for partial records | -- | -- | `$1A` |
-| *future:* two-part names, forbidden characters | -- | -- | 8 + 3, `< > . , ; : = ? * [ ]` |
+| pad byte for partial records | -- | -- | `$1A` |
+| two-part names, forbidden characters | -- | -- | 8 + 3, `< > . , ; : = ? * [ ]` |
 
 Rows are the adapters' declarations, not emulator code: the emulator
-only applies whatever a record says. Rows marked *future* are fields
-that would be added with an adapter that needs them; under CP/M they
-mean an exported binary always comes out a whole number of 128-byte
-records -- CP/M doesn't store exact lengths, so none can be preserved.
+only applies whatever a record says. Under CP/M, an exported binary
+always comes out a whole number of 128-byte records -- CP/M doesn't
+store exact lengths, so none can be preserved. CP/M's read-only and
+system attributes aren't carried: the host naming convention records
+attributes only after a type (4.4), and CP/M files have none.
 
 ### 4.4 Types and attributes are opaque
 
@@ -200,7 +201,15 @@ adapter declares how to recognize them (capability `$0D`):
 - line endings: the capability record's, to and from the host's (LF;
   CR LF and lone CR accepted on import);
 - high bit: set or clear as the record says;
-- *future:* end marker and size granularity, for an OS that needs them.
+- end marker: text ends at the first one on export, and one is added
+  after the text on import (capability `$0E`);
+- whole records: an imported file, text or not, is filled out to a
+  whole number of records with the pad byte (capability `$0F`).
+
+Where files carry no type (capability `$11`), what is text comes from
+the name's extension instead of a type, and the user can override it for
+each file in either direction; the host name then carries no type, only
+`.TXT` for converted text.
 
 Everything else is byte-for-byte. Format details inside a file, such
 as DOS 3.3's load-address header on B files, are the adapter's
@@ -329,6 +338,10 @@ ended by tag `$00`. Readers skip unknown tags.
 | `$0B` | default type for other files | tag (string), aux (2 bytes) |
 | `$0C` | default attributes | 1 byte |
 | `$0D` | text aux is a record length | 1 = a text file with a non-zero aux value is random-access, and is never converted |
+| `$0E` | text end marker | 1 byte: text ends at the first one; one follows imported text |
+| `$0F` | whole records | record size (2 bytes), then the pad byte (1 byte) that fills out a file's last record |
+| `$10` | two-part names | longest name part (1 byte), longest extension (1 byte): names are `NAME.EXT`, `.` only as the separator |
+| `$11` | no file types | strings: the name extensions that mean text by default; files carry no type, and host names none |
 
 **Host names** -- the convention of 4.4, plus one rule: characters not
 legal in host file names on every platform (`/ \ : * ? " < > |`,
@@ -674,8 +687,8 @@ disturbing the ProDOS and DOS 3.3 adapters; the emulator gains the
 conversions in 4.5 that it already lists as future.
 
 **Which files are text.** CP/M files carry no type, so the extension
-supplies a default, and the user can override it for each file, in
-either direction. Text by default:
+supplies a default (capability `$11`), and the user can override it for
+each file, in either direction. Text by default:
 
 | Extensions | Contents |
 |---|---|
@@ -692,12 +705,20 @@ programs tokenized unless told `,A`, so an ASCII-saved program is
 exported as text by override. Conversions (4.5) apply to the files
 treated as text.
 
+In the transfer window, the import dialog's **Text** column shows each
+file's default -- text if its host name ends in `.TXT` or its content is
+plain text -- and Export asks **As Text** or **As Is**, with the
+extension's default preselected.
+
 **Importing a name CP/M can't hold.** A CP/M name is up to 8 characters,
 optionally a dot and up to 3 more, without spaces or any of
 `< > . , ; : = ? * [ ]`. Lowercase is converted to uppercase, as the CCP
 does. Any other host name that doesn't fit -- too long, or with a
-forbidden character -- isn't shortened or altered: the transfer window
-asks the user for a target name, and checks it against the same rules.
+forbidden character -- isn't shortened or altered: the import dialog
+leaves its name blank for the user to fill in, and checks every name
+against the same rules before anything is transferred, explaining them
+if one doesn't fit. Guests with single-part names (ProDOS, DOS 3.3) keep
+an editable suggestion instead, and their adapter has the final word.
 
 **Host names** follow 4.4 unchanged: a file exported as text gains
 `.TXT`, so `READ.ME` becomes `READ.ME.TXT` and `PROG.ASM` becomes
@@ -811,7 +832,6 @@ and an end record, which LOAD accepts.
 
 **Still to establish:**
 
-- The wire encoding (5.2) of the new capability fields.
 - Whether ProDOS or DOS 3.3 treats a card that identifies as a
   Communications Card differently: `ProDosTransferIntegrationTest` and
   `DosTransferIntegrationTest`, run with their system disks, show that

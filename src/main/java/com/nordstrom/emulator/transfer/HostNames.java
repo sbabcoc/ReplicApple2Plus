@@ -45,6 +45,21 @@ public final class HostNames {
     }
 
     /**
+     * The host name for a guest file from a file system whose files carry no
+     * type (capability $11): the guest name, plus {@code .TXT} if it was
+     * converted as text. There is no type to record, and the attribute byte
+     * isn't carried either: {@code ,attr} only ever follows a type.
+     *
+     * @param guestName the guest's name for the file
+     * @param text      true if the file was converted as text
+     * @return the host file name
+     */
+    public static String encodeUntyped(String guestName, boolean text) {
+        String name = escape(guestName, false);
+        return text ? name + TEXT_SUFFIX : name;
+    }
+
+    /**
      * What a host file name says about the guest file to create from it.
      *
      * @param guestName  the guest name, unescaped

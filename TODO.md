@@ -23,9 +23,12 @@ menu item installs and starts the adapter. The CP/M integration test
 lives in the SoftCard2 project.
 
 Done: the card's 6850 identity and reader, with a placeholder adapter
-delivered through `PIP` and `LOAD` (SoftCard2's `XferDeliveryTest`).
-Next: the capability encoding and conversions, then the adapter itself,
-then the File menu's **Start CP/M Transfer**. Section 8.6 lists what
+delivered through `PIP` and `LOAD` (SoftCard2's `XferDeliveryTest`); the
+host side's CP/M capability fields (`$0E`-`$11`), end-marker and record
+conversions, untyped host names, and the per-file text override, with
+the transfer window's controls for it and for naming files CP/M can't
+hold. Next: the adapter itself; then the File menu's **Start CP/M
+Transfer**. Section 8.6 lists what
 remains to establish.
 
 ## Known issues and leads

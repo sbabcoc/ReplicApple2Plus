@@ -107,6 +107,17 @@ public final class Protocol {
     public static final int CAP_DEFAULT_ATTRIBUTES = 0x0C;
     /** Capability field: 1 if a text file's non-zero aux value marks it random-access. */
     public static final int CAP_TEXT_AUX_IS_RECORD_LENGTH = 0x0D;
+    /** Capability field: the byte that ends guest text (CP/M's ^Z); nothing after it is text. */
+    public static final int CAP_TEXT_END_MARKER = 0x0E;
+    /** Capability field: files are whole records -- record size (2 bytes), then the pad byte (1 byte). */
+    public static final int CAP_RECORDS = 0x0F;
+    /** Capability field: names are NAME.EXT -- longest name part (1 byte), longest extension (1 byte). */
+    public static final int CAP_TWO_PART_NAMES = 0x10;
+    /**
+     * Capability field: files carry no type; these name extensions mean text
+     * by default (strings). Host names then carry no type either.
+     */
+    public static final int CAP_TEXT_EXTENSIONS = 0x11;
 
     /** {@link #CAP_NAME_RULES} bit: names are upper case only. */
     public static final int NAME_UPPER_CASE_ONLY = 0x01;

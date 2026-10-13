@@ -27,6 +27,12 @@ public final class Capabilities {
     private FileType defaultBinaryType = new FileType("BIN", 0);
     private int defaultAttributes;
     private boolean textAuxIsRecordLength;
+    private int textEndMarker = -1;
+    private int recordSize;
+    private int padByte;
+    private int nameBaseMax;
+    private int nameExtensionMax;
+    private List<String> textExtensions; // null: files carry types
 
     private Capabilities() {
     }
@@ -75,6 +81,20 @@ public final class Capabilities {
             case Protocol.CAP_DEFAULT_BINARY_TYPE -> defaultBinaryType = fileType(value);
             case Protocol.CAP_DEFAULT_ATTRIBUTES -> defaultAttributes = value.length > 0 ? value[0] & 0xFF : 0;
             case Protocol.CAP_TEXT_AUX_IS_RECORD_LENGTH -> textAuxIsRecordLength = value.length > 0 && value[0] != 0;
+            case Protocol.CAP_TEXT_END_MARKER -> textEndMarker = value.length > 0 ? value[0] & 0xFF : -1;
+            case Protocol.CAP_RECORDS -> {
+                if (value.length >= 3) {
+                    recordSize = (value[0] & 0xFF) | (value[1] & 0xFF) << 8;
+                    padByte = value[2] & 0xFF;
+                }
+            }
+            case Protocol.CAP_TWO_PART_NAMES -> {
+                if (value.length >= 2) {
+                    nameBaseMax = value[0] & 0xFF;
+                    nameExtensionMax = value[1] & 0xFF;
+                }
+            }
+            case Protocol.CAP_TEXT_EXTENSIONS -> textExtensions = strings(value);
             default -> {
                 // unknown: a field from a later protocol revision -- skipped by design
             }
@@ -183,6 +203,66 @@ public final class Capabilities {
     /** @return the attribute byte of a file with no special attributes */
     public int defaultAttributes() {
         return defaultAttributes;
+    }
+
+    /** @return the byte that ends guest text (capability $0E), or -1 if text has no end marker */
+    public int textEndMarker() {
+        return textEndMarker;
+    }
+
+    /** @return the record size guest files are made of (capability $0F), or 0 if any length is stored */
+    public int recordSize() {
+        return recordSize;
+    }
+
+    /** @return the byte that fills out a file's last record (capability $0F) */
+    public int padByte() {
+        return padByte;
+    }
+
+    /** @return true if names are a name part and an optional extension, NAME.EXT (capability $10) */
+    public boolean twoPartNames() {
+        return nameBaseMax > 0;
+    }
+
+    /** @return the longest name part of a two-part name */
+    public int nameBaseMax() {
+        return nameBaseMax;
+    }
+
+    /** @return the longest extension of a two-part name */
+    public int nameExtensionMax() {
+        return nameExtensionMax;
+    }
+
+    /**
+     * @return true if files carry no type (capability $11): whether one is
+     *         text comes from its name's extension, and host names carry no type
+     */
+    public boolean untyped() {
+        return textExtensions != null;
+    }
+
+    /** @return the name extensions that mean text, for an untyped file system; empty otherwise */
+    public List<String> textExtensions() {
+        return textExtensions != null ? textExtensions : List.of();
+    }
+
+    /**
+     * Whether a guest file is treated as text unless the user says otherwise:
+     * by its name's extension where files carry no type, else by its type.
+     *
+     * @param guestName the file's guest name
+     * @param type      its type
+     * @return true if it's converted as text by default
+     */
+    public boolean defaultsToText(String guestName, FileType type) {
+        if (!untyped()) {
+            return isConvertibleText(type);
+        }
+        int dot = guestName.lastIndexOf('.');
+        String extension = dot >= 0 ? guestName.substring(dot + 1) : "";
+        return textExtensions.stream().anyMatch(e -> e.equalsIgnoreCase(extension));
     }
 
     /** Builds an encoded capability record -- for adapters written in Java, i.e. tests. */

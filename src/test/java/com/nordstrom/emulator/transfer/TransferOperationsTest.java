@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -69,6 +70,91 @@ class TransferOperationsTest {
     }
 
     private static final List<String> VOL = List.of("VOL");
+
+    // ---- CP/M: files without types, whole records, ^Z-terminated text ----
+
+    @Test
+    void cpmTextImportGetsCrLfAnEndMarkerAndWholeRecords() throws Exception {
+        start(FakeAdapter.cpmLike());
+        Path file = hostFile("PROG.ASM.TXT", "LINE ONE\nLINE TWO\n");
+        TransferOperations.Result r = ops.importFile(file, VOL, "PROG.ASM", new Answer(false));
+        assertEquals(TransferOperations.Outcome.DONE, r.outcome(), r.detail());
+        FakeAdapter.GuestFile f = adapter.files.get(List.of("VOL", "PROG.ASM"));
+        assertEquals("", f.tag(), "CP/M files carry no type");
+        assertEquals(128, f.data().length);
+        assertEquals("LINE ONE\r\nLINE TWO\r\n\u001A", new String(f.data(), 0, 21, StandardCharsets.US_ASCII));
+        for (int i = 21; i < 128; i++) {
+            assertEquals(0x1A, f.data()[i] & 0xFF, "padded with ^Z");
+        }
+    }
+
+    @Test
+    void cpmBinaryImportIsPaddedButNotConverted() throws Exception {
+        start(FakeAdapter.cpmLike());
+        Path file = host.resolve("GAME.COM");
+        Files.write(file, new byte[] {(byte) 0xC3, 0x00, 0x01, 0x0A});
+        ops.importFile(file, VOL, "GAME.COM", new Answer(false));
+        byte[] data = adapter.files.get(List.of("VOL", "GAME.COM")).data();
+        assertEquals(128, data.length);
+        assertArrayEquals(new byte[] {(byte) 0xC3, 0x00, 0x01, 0x0A}, java.util.Arrays.copyOf(data, 4),
+            "the LF byte is code, not a line ending");
+    }
+
+    @Test
+    void cpmImportCanBeForcedToCopyPlainTextAsItIs() throws Exception {
+        start(FakeAdapter.cpmLike());
+        Path file = hostFile("DATA.TXT", "A\n");
+        ops.importFile(file, VOL, "DATA", false, new Answer(false));
+        byte[] data = adapter.files.get(List.of("VOL", "DATA")).data();
+        assertArrayEquals(new byte[] {'A', '\n'}, java.util.Arrays.copyOf(data, 2));
+        assertEquals(0x1A, data[2] & 0xFF, "only padding follows -- no added end marker");
+    }
+
+    @Test
+    void cpmExportTreatsTextExtensionsAsTextByDefault() throws Exception {
+        start(FakeAdapter.cpmLike());
+        byte[] record = new byte[128];
+        java.util.Arrays.fill(record, (byte) 0x1A);
+        System.arraycopy("A\r\nB\r\n".getBytes(StandardCharsets.US_ASCII), 0, record, 0, 6);
+        adapter.files.put(List.of("VOL", "PROG.ASM"), new FakeAdapter.GuestFile("", 0, 0, record));
+        GuestEntry entry = ops.list(VOL).get(0);
+        TransferOperations.Result r = ops.exportFile(List.of("VOL", "PROG.ASM"), entry, host, new Answer(false));
+        assertEquals("PROG.ASM.TXT", r.name());
+        assertEquals("A\nB\n", Files.readString(host.resolve("PROG.ASM.TXT")));
+    }
+
+    @Test
+    void cpmExportKeepsOtherFilesWholeRecordsUnderTheirOwnName() throws Exception {
+        start(FakeAdapter.cpmLike());
+        byte[] record = new byte[128];
+        record[0] = (byte) 0xC3;
+        adapter.files.put(List.of("VOL", "PIP.COM"), new FakeAdapter.GuestFile("", 0, 0, record));
+        GuestEntry entry = ops.list(VOL).get(0);
+        TransferOperations.Result r = ops.exportFile(List.of("VOL", "PIP.COM"), entry, host, new Answer(false));
+        assertEquals("PIP.COM", r.name());
+        assertArrayEquals(record, Files.readAllBytes(host.resolve("PIP.COM")),
+            "CP/M keeps no exact length: the whole record comes out");
+    }
+
+    @Test
+    void cpmExportCanBeOverriddenEitherWay() throws Exception {
+        start(FakeAdapter.cpmLike());
+        adapter.files.put(List.of("VOL", "NOTES.DAT"), new FakeAdapter.GuestFile("", 0, 0, "X\r\n\u001A".getBytes()));
+        GuestEntry entry = ops.list(VOL).get(0);
+        TransferOperations.ExportRead asText = ops.readForExport(List.of("VOL", "NOTES.DAT"), entry, true);
+        assertEquals("NOTES.DAT.TXT", asText.hostName());
+        assertArrayEquals("X\n".getBytes(), asText.data());
+        TransferOperations.ExportRead asIs = ops.readForExport(List.of("VOL", "NOTES.DAT"), entry, false);
+        assertEquals("NOTES.DAT", asIs.hostName());
+        assertArrayEquals("X\r\n\u001A".getBytes(), asIs.data());
+    }
+
+    @Test
+    void theTextOverrideIsOnlyForFileSystemsWithoutTypes() throws Exception {
+        start(FakeAdapter.proDosLike());
+        Path file = hostFile("NOTES.TXT", "A\n");
+        assertThrows(IllegalStateException.class, () -> ops.importFile(file, VOL, "NOTES", true, new Answer(false)));
+    }
 
     @Test
     void importingADotTxtFileConvertsItsLines() throws Exception {
@@ -284,5 +370,14 @@ class TransferOperationsTest {
         adapter.writeProtected.add(VOL);
         assertEquals(ResultCode.WRITE_PROTECTED, ops.checkWritable(VOL));
         assertEquals(ResultCode.NOT_FOUND, ops.checkWritable(List.of("GONE")), "no disk, or no such volume");
+    }
+
+    @Test
+    void theImportDefaultForUntypedFilesIsTextByNameOrContent() throws Exception {
+        assertTrue(TransferOperations.importsAsTextByDefault(hostFile("PROG.ASM.TXT", "\u0001")), "the name says text");
+        assertTrue(TransferOperations.importsAsTextByDefault(hostFile("NOTES", "plain words\n")), "the content is text");
+        Path binary = host.resolve("GAME.COM");
+        Files.write(binary, new byte[] {(byte) 0xC3, 0});
+        assertFalse(TransferOperations.importsAsTextByDefault(binary));
     }
 }

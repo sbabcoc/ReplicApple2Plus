@@ -223,6 +223,28 @@ final class FakeAdapter {
     }
 
     /** A DOS 3.3-like capability record: flat, high-bit text. */
+    /** CP/M 2.2, as section 8 of TRANSFER-CARD.md declares it. */
+    static byte[] cpmLike() {
+        return new Capabilities.Builder()
+            .field(Protocol.CAP_OS_NAME, "CP/M")
+            .field(Protocol.CAP_OS_VERSION, "2.2")
+            .field(Protocol.CAP_STRUCTURE, (byte) 0)
+            .field(Protocol.CAP_NAME_MAX_LENGTH, (byte) 12)
+            .field(Protocol.CAP_NAME_RULES, (byte) Protocol.NAME_UPPER_CASE_ONLY)
+            .field(Protocol.CAP_NAME_EXTRA_CHARS, "!\"#$%&'()+-/@\\^_`{|}~")
+            .field(Protocol.CAP_TEXT_LINE_END, (byte) 0x0D, (byte) 0x0A)
+            .field(Protocol.CAP_TEXT_HIGH_BIT, (byte) 0)
+            .fileType(Protocol.CAP_DEFAULT_TEXT_TYPE, "", 0)
+            .fileType(Protocol.CAP_DEFAULT_BINARY_TYPE, "", 0)
+            .field(Protocol.CAP_DEFAULT_ATTRIBUTES, (byte) 0)
+            .field(Protocol.CAP_TEXT_END_MARKER, (byte) 0x1A)
+            .field(Protocol.CAP_RECORDS, (byte) 0x80, (byte) 0x00, (byte) 0x1A)
+            .field(Protocol.CAP_TWO_PART_NAMES, (byte) 8, (byte) 3)
+            .strings(Protocol.CAP_TEXT_EXTENSIONS, "ASM", "MAC", "LIB", "PRN", "SYM", "HEX", "SUB", "DOC", "TXT", "ME",
+                "FOR", "COB", "PAS", "C", "H", "BAK")
+            .build();
+    }
+
     static byte[] dosLike() {
         return new Capabilities.Builder()
             .field(Protocol.CAP_OS_NAME, "DOS")

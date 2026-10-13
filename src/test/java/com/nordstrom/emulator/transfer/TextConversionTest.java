@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,5 +59,42 @@ class TextConversionTest {
         assertTrue(TextConversion.isPlainText(ascii("Hello,\tworld\r\n")));
         assertFalse(TextConversion.isPlainText(new byte[] {'A', 0, 'B'}));
         assertFalse(TextConversion.isPlainText("caf\u00e9".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static final Capabilities CPM = Capabilities.parse(FakeAdapter.cpmLike());
+
+    @Test
+    void cpmTextEndsAtItsEndMarker() {
+        byte[] guest = {'A', 0x0D, 0x0A, 'B', 0x0D, 0x0A, 0x1A, 'J', 'U', 'N', 'K'};
+        assertArrayEquals("A\nB\n".getBytes(StandardCharsets.US_ASCII), TextConversion.toHost(guest, CPM));
+    }
+
+    @Test
+    void cpmTextWithoutAnEndMarkerRunsToTheEnd() {
+        byte[] guest = {'A', 0x0D, 0x0A};
+        assertArrayEquals("A\n".getBytes(StandardCharsets.US_ASCII), TextConversion.toHost(guest, CPM));
+    }
+
+    @Test
+    void textForCpmGetsCrLfAndAnEndMarker() {
+        byte[] host = "A\nB\n".getBytes(StandardCharsets.US_ASCII);
+        assertArrayEquals(new byte[] {'A', 0x0D, 0x0A, 'B', 0x0D, 0x0A, 0x1A}, TextConversion.toGuest(host, CPM));
+    }
+
+    @Test
+    void cpmFilesArePaddedToWholeRecords() {
+        byte[] padded = TextConversion.padToRecords(new byte[130], CPM);
+        assertEquals(256, padded.length);
+        for (int i = 130; i < 256; i++) {
+            assertEquals(0x1A, padded[i] & 0xFF);
+        }
+        assertEquals(128, TextConversion.padToRecords(new byte[128], CPM).length, "a whole record is left alone");
+        assertEquals(0, TextConversion.padToRecords(new byte[0], CPM).length, "an empty file stays empty");
+    }
+
+    @Test
+    void otherGuestsFilesAreNeverPadded() {
+        Capabilities proDos = Capabilities.parse(FakeAdapter.proDosLike());
+        assertEquals(130, TextConversion.padToRecords(new byte[130], proDos).length);
     }
 }

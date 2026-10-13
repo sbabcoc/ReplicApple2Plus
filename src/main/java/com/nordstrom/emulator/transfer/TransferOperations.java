@@ -61,6 +61,9 @@ public final class TransferOperations {
         private static final long serialVersionUID = 1L;
     }
 
+    /** The type sent with a file for a guest whose files carry none: an empty tag. */
+    private static final FileType UNTYPED = new FileType("", 0);
+
     private final TransferSession session;
     private volatile boolean cancelled;
 
@@ -135,7 +138,30 @@ public final class TransferOperations {
      * @return how it went
      */
     public Result importFile(Path hostFile, List<String> directory, String guestName, Conflicts conflicts) {
+        return importFile(hostFile, directory, guestName, null, conflicts);
+    }
+
+    /**
+     * Imports a host file into a guest directory, with the user's choice of
+     * whether it is text -- for a file system whose files carry no type
+     * (capability $11), where that choice isn't fixed by a type.
+     *
+     * @param hostFile  the host file
+     * @param directory the guest volume or directory to put it in
+     * @param guestName the name to give it
+     * @param asText    true to convert it as text, false to copy it as it is;
+     *                  null for the default: text if its name says so or its
+     *                  content is plain text
+     * @param conflicts asked if the name is taken
+     * @return how it went
+     * @throws IllegalStateException if {@code asText} is given and the guest's files carry types
+     */
+    public Result importFile(Path hostFile, List<String> directory, String guestName, Boolean asText,
+                             Conflicts conflicts) {
         Capabilities caps = session.capabilities();
+        if (asText != null && !caps.untyped()) {
+            throw new IllegalStateException("files carry types here; their type decides what is text");
+        }
         byte[] bytes;
         try {
             bytes = Files.readAllBytes(hostFile);
@@ -145,10 +171,12 @@ public final class TransferOperations {
         HostNames.Decoded decoded = HostNames.decode(hostFile.getFileName().toString());
         boolean untyped = decoded.type() == null;
         boolean contentIsText = untyped && TextConversion.isPlainText(bytes);
-        FileType type = decoded.typeOr(caps, contentIsText);
-        int attributes = decoded.attributesOr(caps);
-        boolean convert = caps.isConvertibleText(type) && (decoded.text() || contentIsText);
-        byte[] data = convert ? TextConversion.toGuest(bytes, caps) : bytes;
+        FileType type = caps.untyped() ? UNTYPED : decoded.typeOr(caps, contentIsText);
+        int attributes = caps.untyped() ? caps.defaultAttributes() : decoded.attributesOr(caps);
+        boolean convert = caps.untyped()
+            ? (asText != null ? asText : importsAsText(decoded, bytes))
+            : caps.isConvertibleText(type) && (decoded.text() || contentIsText);
+        byte[] data = TextConversion.padToRecords(convert ? TextConversion.toGuest(bytes, caps) : bytes, caps);
 
         List<String> path = new ArrayList<>(directory);
         path.add(guestName);
@@ -171,6 +199,27 @@ public final class TransferOperations {
         } catch (Cancelled c) {
             return new Result(Outcome.CANCELLED, guestName, "cancelled");
         }
+    }
+
+    /**
+     * Whether a host file is imported as text unless the user says otherwise,
+     * where files carry no type (capability $11): if its name says so, or its
+     * content is plain text. For showing the default before the user chooses.
+     *
+     * @param hostFile the host file
+     * @return true if it would be converted as text by default; false if it
+     *         can't be read
+     */
+    public static boolean importsAsTextByDefault(Path hostFile) {
+        try {
+            return importsAsText(HostNames.decode(hostFile.getFileName().toString()), Files.readAllBytes(hostFile));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean importsAsText(HostNames.Decoded decoded, byte[] bytes) {
+        return decoded.text() || TextConversion.isPlainText(bytes);
     }
 
     /**
@@ -220,7 +269,26 @@ public final class TransferOperations {
      * @return the host name and bytes, or why the read failed
      */
     public ExportRead readForExport(List<String> file, GuestEntry entry) {
+        return readForExport(file, entry, null);
+    }
+
+    /**
+     * Reads a guest file for export, with the user's choice of whether it is
+     * text -- for a file system whose files carry no type (capability $11),
+     * where the default comes from the name's extension.
+     *
+     * @param file   the guest file
+     * @param entry  its listing entry
+     * @param asText true to convert it as text, false to copy it as it is;
+     *               null for the default
+     * @return the host name and bytes, or why the read failed
+     * @throws IllegalStateException if {@code asText} is given and the guest's files carry types
+     */
+    public ExportRead readForExport(List<String> file, GuestEntry entry, Boolean asText) {
         Capabilities caps = session.capabilities();
+        if (asText != null && !caps.untyped()) {
+            throw new IllegalStateException("files carry types here; their type decides what is text");
+        }
         GuestData read;
         try {
             read = await(session.read(file));
@@ -230,8 +298,10 @@ public final class TransferOperations {
             return new ExportRead(null, null, false, new Result(Outcome.CANCELLED, entry.name(), "cancelled"));
         }
         FileType type = read.type() != null ? read.type() : entry.type();
-        String hostName = HostNames.encode(entry.name(), type, entry.attributes(), caps);
-        boolean convert = caps.isConvertibleText(type);
+        boolean convert = asText != null ? asText : caps.defaultsToText(entry.name(), type);
+        String hostName = caps.untyped()
+            ? HostNames.encodeUntyped(entry.name(), convert)
+            : HostNames.encode(entry.name(), type, entry.attributes(), caps);
         byte[] data = convert ? TextConversion.toHost(read.bytes(), caps) : read.bytes();
         return new ExportRead(hostName, data, convert, null);
     }

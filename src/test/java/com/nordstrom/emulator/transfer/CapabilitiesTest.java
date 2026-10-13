@@ -55,4 +55,37 @@ class CapabilitiesTest {
         Capabilities dos = Capabilities.parse(FakeAdapter.dosLike());
         assertTrue(dos.isConvertibleText(new FileType("T", 0)));
     }
+
+    @Test
+    void readsTheFieldsForAFileSystemWithoutTypes() {
+        Capabilities caps = Capabilities.parse(FakeAdapter.cpmLike());
+        assertEquals(0x1A, caps.textEndMarker());
+        assertEquals(128, caps.recordSize());
+        assertEquals(0x1A, caps.padByte());
+        assertTrue(caps.twoPartNames());
+        assertEquals(8, caps.nameBaseMax());
+        assertEquals(3, caps.nameExtensionMax());
+        assertTrue(caps.untyped());
+        assertTrue(caps.textExtensions().contains("ASM"));
+    }
+
+    @Test
+    void withoutTheNewFieldsNothingChangesForTypedFileSystems() {
+        Capabilities caps = Capabilities.parse(FakeAdapter.proDosLike());
+        assertEquals(-1, caps.textEndMarker());
+        assertEquals(0, caps.recordSize());
+        assertFalse(caps.twoPartNames());
+        assertFalse(caps.untyped());
+    }
+
+    @Test
+    void anUntypedFileSystemDecidesTextByExtension() {
+        Capabilities caps = Capabilities.parse(FakeAdapter.cpmLike());
+        FileType none = new FileType("", 0);
+        assertTrue(caps.defaultsToText("PROG.ASM", none));
+        assertTrue(caps.defaultsToText("prog.asm", none), "extensions match regardless of case");
+        assertFalse(caps.defaultsToText("PIP.COM", none));
+        assertFalse(caps.defaultsToText("GAME.BAS", none), "BASIC-80 saves tokenized unless told ,A");
+        assertFalse(caps.defaultsToText("NOEXT", none));
+    }
 }
