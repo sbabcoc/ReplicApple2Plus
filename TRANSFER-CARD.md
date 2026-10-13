@@ -142,9 +142,9 @@ What the emulator needs to do its job without knowing the OS.
 **Encoding: extensible.** The record is a sequence of tagged,
 length-prefixed fields; a reader skips fields it doesn't know. New
 fields can therefore be added later -- for an OS not yet supported --
-without changing anything that reads the record today. The fields
-defined now are the ones ProDOS and DOS 3.3 need; the CP/M column below
-is the basis for the CP/M adapter (section 8).
+without changing anything that reads the record today -- as the CP/M
+fields (`$0E`-`$11`) were, after the ProDOS and DOS 3.3 adapters already
+existed (section 8).
 
 | Field | ProDOS | DOS 3.3 | CP/M |
 |---|---|---|---|
@@ -221,8 +221,9 @@ business: the API always carries plain data.
 
 ## 5. Transport: the card's registers
 
-CPU-neutral: whichever processor runs the adapter (the 6502 today, a
-Z80 under a CP/M card some day) talks to the same registers.
+CPU-neutral: whichever processor runs the adapter talks to the same
+registers -- the 6502 under ProDOS and DOS 3.3, and under CP/M the
+SoftCard II's Z80, through CP/M's 6502 server (8.1).
 
 | Offset (`$C0n0`+) | Read | Write |
 |---|---|---|
@@ -558,7 +559,10 @@ back in, it rebuilds the same program.
 
 ## 8. CP/M, for the Microsoft SoftCard II
 
-Designed, not built. The SoftCard II is emulated by the separate
+Built and working: under CP/M, **File > Start CP/M Transfer** installs
+and starts the card's Z80 adapter, XFER, and the transfer window imports
+and exports CP/M files as it does ProDOS and DOS 3.3 ones. The SoftCard
+II is emulated by the separate
 [SoftCard2](https://github.com/sbabcoc/SoftCard2) project, whose
 `HARDWARE-REFERENCE.md` documents the card and the command protocol
 between its Z80 and the 6502. The addresses below come from the
@@ -644,9 +648,9 @@ supplies its own Z80 adapter, and CP/M's own programs write it to disk.
   slots when it looks for the SoftCard II, so a recognized serial card is
   never probed.
 
-This path has run end to end: SoftCard2's `XferDeliveryTest` boots the
-master disk with this card in slot 2, delivers a placeholder adapter
-with `PIP` and `LOAD`, and runs it.
+This path runs end to end in SoftCard2's `XferDeliveryTest`: it boots
+the master disk with this card in slot 2, delivers XFER with `PIP` and
+`LOAD`, and runs it.
 
 ### 8.3 The adapter
 
@@ -695,12 +699,12 @@ other area that holds files, each as a flat container (`A0:`, `A3:`,
 
 ### 8.4 The file model
 
-The CP/M column of the capability record (4.3) applies, and its fields
-marked *future* become real: the record pad byte (`$1A`), two-part names
-with their forbidden characters, the `^Z` end marker, and 128-byte size
-granularity. The record's tagged encoding takes the new fields without
-disturbing the ProDOS and DOS 3.3 adapters; the emulator gains the
-conversions in 4.5 that it already lists as future.
+XFER declares the CP/M column of the capability record (4.3): the
+record pad byte (`$1A`), two-part names with their forbidden characters,
+the `^Z` end marker, 128-byte records, and text by extension
+(capabilities `$0E`-`$11`, 5.2). The record's tagged encoding took these
+fields without disturbing the ProDOS and DOS 3.3 adapters, and the
+emulator applies them with the conversions in 4.5.
 
 **Which files are text.** CP/M files carry no type, so the extension
 supplies a default (capability `$11`), and the user can override it for
