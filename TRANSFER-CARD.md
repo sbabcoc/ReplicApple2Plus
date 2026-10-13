@@ -697,6 +697,16 @@ most disks use nothing else. Each drive appears with area 0 and any
 other area that holds files, each as a flat container (`A0:`, `A3:`,
 ...).
 
+A container's name is the drive letter, then the user-area number --
+the drive-then-user notation later CP/M command processors such as ZCPR
+used; CP/M 2.2's own prompt doesn't accept it. So `A0:` and `A6:` are
+both drive A, not two drives. The SoftCard II master disk shows exactly
+those two: besides area 0, it holds one file in area 6, `APDOS.$$$` --
+the `$$$` extension marks a CP/M temporary file, evidently left over
+when the disk was made -- which plain `DIR` never shows. XFER finds it
+because it scans every directory entry, whatever its area, so a file in
+any area stays reachable.
+
 ### 8.4 The file model
 
 XFER declares the CP/M column of the capability record (4.3): the

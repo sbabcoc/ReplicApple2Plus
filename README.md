@@ -471,7 +471,12 @@ type=hostfiles
   what. After that, typing `XFER` at the prompt does the same.
 - **The tree** shows each drive holding a disk by user area -- `A0:`,
   and any other area with files in it -- each a flat folder of files with
-  their sizes. CP/M files carry no type.
+  their sizes. CP/M files carry no type. A folder's name is the drive
+  letter, then the user-area number: CP/M 2.2 divides each disk's
+  directory into areas 0 to 15, chosen with `USER n`, and nearly
+  everything lives in area 0. So `A0:` and `A6:` are both drive A; the
+  SoftCard II master disk shows `A6:` because it holds one file there,
+  `APDOS.$$$`, a leftover temporary file that plain `DIR` never shows.
 
   ![The transfer window under CP/M](docs/images/transfer-window-cpm.png)
 
