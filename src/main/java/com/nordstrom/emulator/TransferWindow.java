@@ -392,10 +392,13 @@ final class TransferWindow implements TransferHost {
             if (isContainer()) {
                 return name;
             }
+            String size = String.format(entry.sizeExact() ? "%,d bytes" : "about %,d bytes", entry.size());
+            if (entry.type().tag().isEmpty()) {
+                return String.format("%s   (%s)", name, size); // a guest whose files carry no type: CP/M
+            }
             String type = entry.auxKnown()
                 ? String.format("%s $%04X", entry.type().tag(), entry.type().aux())
                 : entry.type().tag(); // known once the file is read
-            String size = String.format(entry.sizeExact() ? "%,d bytes" : "about %,d bytes", entry.size());
             return String.format("%s   (%s, %s)", name, type, size);
         }
     }

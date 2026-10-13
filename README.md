@@ -455,17 +455,47 @@ drive1=/path/to/Microsoft Softcard II CPM 2.28B.DSK
 
 With the host file transfer card in slot 2 -- CP/M's reader and punch
 slot -- CP/M files can be imported and exported like ProDOS and DOS 3.3
-ones. At CP/M's `A>` prompt, choose **File > Start CP/M Transfer**: the
-emulator types the commands that install the card's CP/M adapter, XFER,
-if the disk lacks it (with the disk's own PIP and LOAD), then runs it,
-and the transfer window opens. The current disk needs PIP.COM and
-LOAD.COM, and room for XFER.COM, the first time. See
-[TRANSFER-CARD.md](TRANSFER-CARD.md) section 8.
+ones:
 
 ```
 [2]
 type=hostfiles
 ```
+
+- **Starting:** at CP/M's `A>` prompt, choose **File > Start CP/M
+  Transfer**. The emulator types the commands that install the card's
+  CP/M adapter, XFER, if the disk lacks it -- copying it from the card
+  with the disk's own PIP and LOAD -- then runs it, and the transfer
+  window opens. The first time, the current disk needs PIP.COM and
+  LOAD.COM, and room for XFER.COM; if something's missing, a message says
+  what. After that, typing `XFER` at the prompt does the same.
+- **The tree** shows each drive holding a disk by user area -- `A0:`,
+  and any other area with files in it -- each a flat folder of files with
+  their sizes. CP/M files carry no type.
+
+  ![The transfer window under CP/M](docs/images/transfer-window-cpm.png)
+
+- **Export** asks whether to convert the file as text: the default comes
+  from its extension (`ASM`, `TXT`, `DOC` and the like are text). Text
+  loses its `^Z` end marker and gains LF line endings, and its host name
+  gains `.TXT` -- `PROG.ASM` becomes `PROG.ASM.TXT`, while `README.TXT`
+  stays as it is. Other files come out as CP/M stores them: whole
+128-byte records, since CP/M keeps no exact length.
+
+  ![Exporting under CP/M: as text, or as it is](docs/images/transfer-export-cpm.png)
+
+- **Import** shows the Apple names, with a **Text** column for converting
+  each file. A name CP/M can't hold -- longer than 8 + 3 characters, or
+  with a character CP/M forbids -- is left blank for you to fill in, and
+  checked before anything is copied.
+
+  ![Importing under CP/M: names and text](docs/images/transfer-import-names-cpm.png)
+
+- **Typing** in CP/M clicks the speaker for each key, as on a real
+  SoftCard II: the disk's own 6502 code does it, to confirm a key went
+  into its type-ahead buffer.
+
+See [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8 for the details.
 
 ### Useful Gradle tasks
 

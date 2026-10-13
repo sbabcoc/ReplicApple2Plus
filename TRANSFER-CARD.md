@@ -35,6 +35,10 @@ the host dialogs open in when none has been used yet.
 
 ## 3. User flow
 
+This is the flow under ProDOS and DOS 3.3. Under CP/M the session starts
+from the emulator's File menu instead, and the tree and dialogs differ
+where CP/M's files do; section 8 covers it.
+
 1. From BASIC, the user types `IN#n` (n = the card's slot). The Apple
    screen shows a one-line status in 40 columns, e.g.
    `HOST TRANSFER: PRODOS 2.4` -- the work happens on the host.
@@ -667,6 +671,8 @@ guest OS still owns its disks:
 
 It runs in the TPA, so nothing is borrowed or restored.
 
+![The transfer window under CP/M](docs/images/transfer-window-cpm.png)
+
 **Which drives exist** comes from the BIOS, not BDOS: BDOS stops and
 waits for a key on a drive that isn't there (`Bdos Err On d: Select`) or
 holds no readable disk (`Bad Sector`). The adapter calls the BIOS's jump
@@ -719,6 +725,10 @@ In the transfer window, the import dialog's **Text** column shows each
 file's default -- text if its host name ends in `.TXT` or its content is
 plain text -- and Export asks **As Text** or **As Is**, with the
 extension's default preselected.
+
+![Exporting under CP/M: as text, or as it is](docs/images/transfer-export-cpm.png)
+
+![Importing under CP/M: names and text](docs/images/transfer-import-names-cpm.png)
 
 **Importing a name CP/M can't hold.** A CP/M name is up to 8 characters,
 optionally a dot and up to 3 more, without spaces or any of
