@@ -3,10 +3,11 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.system.KeyboardRegister;
 
 import java.util.ArrayDeque;
+import java.util.function.Consumer;
 
 /**
  * Types text into the machine one keystroke at a time -- the engine behind
- * the Edit menu's Paste and Type File... items.
+ * the Edit menu's Paste and the File menu's Type File....
  * <p>
  * Pacing is gated on the keyboard strobe rather than a fixed delay. The
  * real II+ keyboard is a single-character latch with no buffer, and
@@ -20,13 +21,18 @@ import java.util.ArrayDeque;
  * <p>
  * Threading: {@link #enqueue}, {@link #cancel} and {@link #tick} run on the
  * emulation thread only (post the first two via the emulation loop);
- * {@link #isTyping} is safe from any thread, for menu state.
+ * {@link #isTyping}, {@link #typedCount} and {@link #queuedCount} are safe
+ * from any thread, and the listener given to {@link #setTypingListener} is
+ * told of each change on the emulation thread.
  */
 final class TypingFeeder {
 
     private final KeyboardRegister keyboard;
     private final ArrayDeque<Integer> pending = new ArrayDeque<>(); // emulation thread only
     private volatile boolean typing;
+    private volatile Consumer<Boolean> typingListener = nowTyping -> { };
+    private volatile int queued; // keys queued since typing last started
+    private volatile int typed;  // of those, keys already typed
 
     TypingFeeder(KeyboardRegister keyboard) {
         this.keyboard = keyboard;
@@ -70,16 +76,22 @@ final class TypingFeeder {
      * @param text the text to type
      */
     void enqueue(CharSequence text) {
-        for (int key : toKeystrokes(text)) {
+        int[] keys = toKeystrokes(text);
+        if (!typing) {
+            queued = 0;
+            typed = 0;
+        }
+        for (int key : keys) {
             pending.add(key);
         }
-        typing = !pending.isEmpty();
+        queued += keys.length;
+        setTyping(!pending.isEmpty());
     }
 
     /** Discards everything not yet typed. A key already in the latch stays there. */
     void cancel() {
         pending.clear();
-        typing = false;
+        setTyping(false);
     }
 
     /**
@@ -91,12 +103,41 @@ final class TypingFeeder {
     void tick(int cycles) {
         if (!pending.isEmpty() && !keyboard.isStrobeSet()) {
             keyboard.keyPressed(pending.poll());
-            typing = !pending.isEmpty();
+            typed++;
+            setTyping(!pending.isEmpty());
         }
     }
 
     /** @return true while queued text remains to be typed */
     boolean isTyping() {
         return typing;
+    }
+
+    /** @return keys typed since typing last started, for showing progress */
+    int typedCount() {
+        return typed;
+    }
+
+    /** @return keys queued since typing last started, typed or not, for showing progress */
+    int queuedCount() {
+        return queued;
+    }
+
+    /**
+     * Sets who is told when typing starts and stops -- the typing progress
+     * window, which opens and closes with it.
+     *
+     * @param listener called on the emulation thread with the new state, each
+     *                 time it changes
+     */
+    void setTypingListener(Consumer<Boolean> listener) {
+        typingListener = listener;
+    }
+
+    private void setTyping(boolean nowTyping) {
+        if (nowTyping != typing) {
+            typing = nowTyping;
+            typingListener.accept(nowTyping);
+        }
     }
 }

@@ -129,10 +129,12 @@ Companion documents:
   rebuilding the emulator.
 
 **Application**
-- **Edit** menu: Copy Screen Text, Copy Screen Image, Paste, and Type
-  File... -- pasted or typed text is fed to the keyboard at exactly the
-  pace the running software reads it, so nothing is dropped. Stop Typing
-  cancels.
+- **File** menu: Type File..., and **Edit** menu: Copy Screen Text, Copy
+  Screen Image, and Paste -- typed or pasted text is fed to the keyboard
+  at exactly the pace the running software reads it, so nothing is
+  dropped.
+  Typing that runs longer than a moment shows a progress window, with a
+  Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
   cycle that keeps the inserted disks), and -- with a VideoTerm
   configured -- the display mode drop-down.

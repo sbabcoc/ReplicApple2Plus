@@ -4,6 +4,8 @@ import com.nordstrom.emulator.system.KeyboardRegister;
 import com.nordstrom.emulator.system.KeyboardTestAccess;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -74,6 +76,55 @@ class TypingFeederTest {
         KeyboardTestAccess.clearStrobe(keyboard);
         feeder.tick(1);
         assertEquals('A' | 0x80, KeyboardTestAccess.readKbd(keyboard), "the next key loads as soon as the strobe clears");
+    }
+
+    /**
+     * The typing progress window opens and closes on these notifications, so
+     * each change must be reported exactly once: typing starts on enqueue, stops
+     * when the last key loads or on cancel, and nothing in between repeats.
+     */
+    @Test
+    void reportsEachStartAndStopOfTypingOnce() {
+        KeyboardRegister keyboard = new KeyboardRegister();
+        TypingFeeder feeder = new TypingFeeder(keyboard);
+        List<Boolean> changes = new ArrayList<>();
+        feeder.setTypingListener(changes::add);
+
+        feeder.enqueue("AB");
+        feeder.enqueue("C"); // already typing: no new notification
+        for (int i = 0; i < 3; i++) {
+            feeder.tick(1);
+            KeyboardTestAccess.clearStrobe(keyboard);
+        }
+        assertEquals(List.of(true, false), changes, "start on enqueue, stop when the last key loads");
+
+        feeder.enqueue("DE");
+        feeder.cancel();
+        feeder.cancel(); // already stopped: no new notification
+        assertEquals(List.of(true, false, true, false), changes, "start on enqueue, stop on cancel");
+    }
+
+    /** Progress counts cover one run of typing, including text queued while it runs. */
+    @Test
+    void countsProgressForEachRunOfTyping() {
+        KeyboardRegister keyboard = new KeyboardRegister();
+        TypingFeeder feeder = new TypingFeeder(keyboard);
+        feeder.enqueue("ABC");
+        feeder.tick(1);
+        KeyboardTestAccess.clearStrobe(keyboard);
+        feeder.enqueue("DE"); // joins the run in progress
+        assertEquals(1, feeder.typedCount());
+        assertEquals(5, feeder.queuedCount());
+
+        for (int i = 0; i < 4; i++) {
+            feeder.tick(1);
+            KeyboardTestAccess.clearStrobe(keyboard);
+        }
+        assertEquals(5, feeder.typedCount());
+
+        feeder.enqueue("XY"); // a new run starts the counts over
+        assertEquals(0, feeder.typedCount());
+        assertEquals(2, feeder.queuedCount());
     }
 
     @Test

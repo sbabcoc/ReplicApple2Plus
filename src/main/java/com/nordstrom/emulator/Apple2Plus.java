@@ -566,6 +566,16 @@ public final class Apple2Plus {
      * (PR#n) -- replacing the previous machine's, whose card (and any session
      * or print job) went with that machine.
      */
+    /** The typing progress window following the current machine's typing; replaced on reboot. */
+    private static TypingProgressWindow typingProgress;
+
+    private static void rewireTypingProgress(JFrame frame, Machine next) {
+        if (typingProgress != null) {
+            typingProgress.dispose();
+        }
+        typingProgress = new TypingProgressWindow(frame, next.typing(), next.loop());
+    }
+
     private static void rewireTransferWindow(JFrame frame, Machine next) {
         if (transferWindow != null) {
             transferWindow.dispose();
@@ -596,6 +606,7 @@ public final class Apple2Plus {
         frame.getContentPane().add(next.toolbar(), BorderLayout.NORTH);
 
         JMenuBar menuBar = new JMenuBar();
+        menuBar.add(FileMenu.build(next.typing(), frame, next.loop()));
         menuBar.add(EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()));
         if (next.disk() != null) {
             menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));
@@ -608,6 +619,7 @@ public final class Apple2Plus {
 
         rewireEightyColumnWindow(frame, previous, next, keyboardInput);
         rewireTransferWindow(frame, next);
+        rewireTypingProgress(frame, next);
 
         frame.getContentPane().revalidate();
         frame.getContentPane().repaint();
