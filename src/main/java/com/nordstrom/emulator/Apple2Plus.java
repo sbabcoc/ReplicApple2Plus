@@ -17,11 +17,11 @@ import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.PluginLoader;
 import com.nordstrom.emulator.system.RemovableMediaDrive;
 import com.nordstrom.emulator.system.RomFiles;
+import com.nordstrom.emulator.system.RomImageException;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
 
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenuBar;
 import javax.swing.JOptionPane;
@@ -179,7 +179,11 @@ public final class Apple2Plus {
             } catch (RuntimeException | LinkageError e) {
                 // An installed app has no console: an error printed and left
                 // there would look like a launch that silently did nothing.
-                fatal("ReplicApple2Plus couldn't start: " + rootMessage(e));
+                if (romImageFailure(e)) {
+                    recoverFromRomFailure("ReplicApple2Plus couldn't start: " + rootMessage(e));
+                } else {
+                    fatal("ReplicApple2Plus couldn't start: " + rootMessage(e));
+                }
             }
         });
     }
@@ -192,7 +196,63 @@ public final class Apple2Plus {
     private static void fatal(String message) {
         System.err.println(message);
         if (!GraphicsEnvironment.isHeadless()) {
-            JOptionPane.showMessageDialog(null, message, "ReplicApple2Plus", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(null, wrap(message), "ReplicApple2Plus", JOptionPane.ERROR_MESSAGE);
+        }
+        System.exit(1);
+    }
+
+    /** Breaks a message into lines a dialog can show: JOptionPane doesn't wrap long ones itself. */
+    private static String wrap(String message) {
+        StringBuilder wrapped = new StringBuilder();
+        for (String paragraph : message.split("\n", -1)) {
+            int lineLength = 0;
+            for (String word : paragraph.split(" ")) {
+                if (lineLength > 0 && lineLength + 1 + word.length() > 80) {
+                    wrapped.append('\n');
+                    lineLength = 0;
+                } else if (lineLength > 0) {
+                    wrapped.append(' ');
+                    lineLength++;
+                }
+                wrapped.append(word);
+                lineLength += word.length();
+            }
+            wrapped.append('\n');
+        }
+        return wrapped.toString().stripTrailing();
+    }
+
+    /** Whether a startup failure was a ROM image, missing or corrupt -- which the user can fix. */
+    private static boolean romImageFailure(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RomImageException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Offers the way out of a bad ROM image: choosing a ROM folder that
+     * holds good ones. The failed ROM classes can't load again in this run,
+     * so the choice is remembered for the next start, and this one ends.
+     */
+    private static void recoverFromRomFailure(String message) {
+        System.err.println(message);
+        if (!GraphicsEnvironment.isHeadless()) {
+            Object[] choices = {"Choose ROM Folder...", "Quit"};
+            int choice = JOptionPane.showOptionDialog(null,
+                wrap(message + "\n\nChoose a ROM folder that holds good ROM images; ReplicApple2Plus will use it "
+                    + "the next time it starts."),
+                "ReplicApple2Plus", JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE, null, choices, choices[0]);
+            Path folder = choice == 0 ? RomFolderChooser.choose(null) : null;
+            if (folder != null) {
+                RomFiles.remember(folder);
+                JOptionPane.showMessageDialog(null,
+                    "Start ReplicApple2Plus again to use the ROM images in " + folder + ".\n"
+                        + "(Starting it with --roms DIR uses that folder instead.)",
+                    "ReplicApple2Plus", JOptionPane.INFORMATION_MESSAGE);
+            }
         }
         System.exit(1);
     }
@@ -229,17 +289,11 @@ public final class Apple2Plus {
             if (choice != 0) {
                 return false;
             }
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Choose ROM Folder");
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) {
-                continue;
-            }
-            Path folder = chooser.getSelectedFile().toPath();
-            missing = RomFiles.missingFrom(folder);
-            if (missing.isEmpty()) {
+            Path folder = RomFolderChooser.choose(null);
+            if (folder != null) {
                 RomFiles.setDirectory(folder);
                 RomFiles.remember(folder);
+                missing = RomFiles.missingBaseRoms();
             }
         }
         return true;

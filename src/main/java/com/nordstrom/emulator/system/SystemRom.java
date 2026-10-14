@@ -40,7 +40,7 @@ final class SystemRom {
     private static byte[] load() {
         try (InputStream in = RomFiles.open(SystemRom.class, "system-rom.rom")) {
             if (in == null) {
-                throw new IllegalStateException(RomFiles.missing("system-rom.rom"));
+                throw new RomImageException(RomFiles.missing("system-rom.rom"));
             }
             byte[] data = in.readAllBytes();
             verify(data);

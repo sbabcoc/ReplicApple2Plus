@@ -19,7 +19,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -166,23 +165,8 @@ final class FileMenu {
      * the ROMs it loaded.
      */
     private static void chooseRomFolder(Component parent) {
-        Path current = RomFiles.directory();
-        JFileChooser chooser = new JFileChooser(current != null ? current.toFile() : null);
-        chooser.setDialogTitle("ROM Folder");
-        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        if (current != null) {
-            chooser.setSelectedFile(current.toFile());
-        }
-        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
-            return;
-        }
-        Path folder = chooser.getSelectedFile().toPath();
-        List<String> missing = RomFiles.missingFrom(folder);
-        if (!missing.isEmpty()) {
-            JOptionPane.showMessageDialog(parent,
-                folder + " doesn't hold " + String.join(" or ", missing)
-                    + ", so it can't be the ROM folder. (README.md lists each file.)",
-                "ROM Folder", JOptionPane.WARNING_MESSAGE);
+        Path folder = RomFolderChooser.choose(parent);
+        if (folder == null) {
             return;
         }
         RomFiles.remember(folder);

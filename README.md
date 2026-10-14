@@ -301,7 +301,10 @@ The ROM folder is searched first. Without the files in either place, the
 emulator stops with an error naming the missing file -- by design, not a
 bug to chase further if you see it. Errors that stop the emulator at
 startup appear in a dialog as well as on the console, since an
-installed app has no console.
+installed app has no console. When the problem is a ROM image -- missing,
+or failing its checksum -- that dialog offers **Choose ROM Folder...**:
+pick a folder holding good images, and the emulator uses it from its next
+start.
 
 Each file must match the listed CRC32 exactly (verified automatically at
 class-load time -- a wrong or corrupted file fails loudly with a specific

@@ -2,6 +2,7 @@ package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.RomChecksum;
 import com.nordstrom.emulator.system.RomFiles;
+import com.nordstrom.emulator.system.RomImageException;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -56,11 +57,11 @@ final class VideoTermRoms {
     private static byte[] load(String resource, int size, String crc32, String label) {
         try (InputStream in = RomFiles.open(VideoTermRoms.class, resource)) {
             if (in == null) {
-                throw new IllegalStateException("The VideoTerm card needs " + RomFiles.missing(resource));
+                throw new RomImageException("The VideoTerm card needs " + RomFiles.missing(resource));
             }
             byte[] data = in.readAllBytes();
             if (data.length != size) {
-                throw new IllegalStateException(resource + " is " + data.length + " bytes, expected " + size);
+                throw new RomImageException(resource + " is " + data.length + " bytes, expected " + size);
             }
             RomChecksum.verify(data, 0, size, crc32, label);
             return data;

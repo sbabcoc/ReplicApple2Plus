@@ -43,7 +43,7 @@ public final class CharacterRom {
     private static byte[] load() {
         try (InputStream in = RomFiles.open(CharacterRom.class, "character-rom.rom")) {
             if (in == null) {
-                throw new IllegalStateException(RomFiles.missing("character-rom.rom"));
+                throw new RomImageException(RomFiles.missing("character-rom.rom"));
             }
             byte[] data = in.readAllBytes();
             RomChecksum.verify(data, 0, data.length, "64F415C6", "CharacterRom");

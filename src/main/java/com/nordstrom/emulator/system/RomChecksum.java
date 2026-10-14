@@ -23,14 +23,14 @@ public final class RomChecksum {
      * @param length length of the slice to verify
      * @param expectedCrc32 the expected CRC32, as 8 hex digits
      * @param label what to call this slice in the error message if verification fails
-     * @throws IllegalStateException if the computed CRC32 doesn't match
+     * @throws RomImageException if the computed CRC32 doesn't match
      */
     public static void verify(byte[] data, int offset, int length, String expectedCrc32, String label) {
         CRC32 crc = new CRC32();
         crc.update(data, offset, length);
         String actual = String.format("%08x", crc.getValue());
         if (!actual.equalsIgnoreCase(expectedCrc32)) {
-            throw new IllegalStateException(label + " failed checksum verification: expected CRC32 "
+            throw new RomImageException(label + " failed checksum verification: expected CRC32 "
                 + expectedCrc32 + ", got " + actual + ". The loaded ROM data does not match what was "
                 + "verified against its real hardware source -- this resource is corrupted, truncated, "
                 + "or was substituted for the wrong file.");

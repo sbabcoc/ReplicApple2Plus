@@ -2,6 +2,7 @@ package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.RomChecksum;
 import com.nordstrom.emulator.system.RomFiles;
+import com.nordstrom.emulator.system.RomImageException;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -45,7 +46,7 @@ final class IntegerBasicFirmwareCardRom {
     private static byte[] load() {
         try (InputStream in = RomFiles.open(IntegerBasicFirmwareCardRom.class, "integer-basic-firmware-card.rom")) {
             if (in == null) {
-                throw new IllegalStateException(RomFiles.missing("integer-basic-firmware-card.rom"));
+                throw new RomImageException(RomFiles.missing("integer-basic-firmware-card.rom"));
             }
             byte[] data = in.readAllBytes();
             verify(data);
@@ -63,7 +64,7 @@ final class IntegerBasicFirmwareCardRom {
         RomChecksum.verify(data, 0x2800, 0x800, "020A86D0", "IntegerBasicFirmwareCardRom $F800-$FFFF (341-0004)");
         for (int i = 0x800; i < 0x1000; i++) {
             if (data[i] != 0) {
-                throw new IllegalStateException("IntegerBasicFirmwareCardRom $D800-$DFFF should be empty "
+                throw new RomImageException("IntegerBasicFirmwareCardRom $D800-$DFFF should be empty "
                     + "(matching real base Apple II hardware) but has a non-zero byte at offset $"
                     + Integer.toHexString(i) + " -- this resource is corrupted or was substituted for the wrong file.");
             }
