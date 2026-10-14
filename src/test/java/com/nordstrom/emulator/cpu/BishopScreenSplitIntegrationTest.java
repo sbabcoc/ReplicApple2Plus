@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.cpu;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.ScanlineModes;
 import com.nordstrom.emulator.system.SlotCard;
@@ -34,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * to reproduce the exact same real-hardware infinite loop this
  * shortcut sidesteps if the floating-bus fix isn't in place.
  */
+@RequiresRoms({Rom.SYSTEM})
 class BishopScreenSplitIntegrationTest {
 
     // Bob Bishop's own machine code, POKEd verbatim by the original BASIC

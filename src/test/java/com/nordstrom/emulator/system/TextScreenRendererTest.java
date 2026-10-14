@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.system;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import com.nordstrom.emulator.MemoryBus;
 import org.junit.jupiter.api.Test;
 
@@ -7,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks in TextScreenRenderer's addressing, PAGE2 switching, and flash/inverse rendering rules. */
+@RequiresRoms({Rom.CHARACTER})
 class TextScreenRendererTest {
 
     private static final class FlatBus implements MemoryBus {

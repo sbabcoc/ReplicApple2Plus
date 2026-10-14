@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import org.junit.jupiter.api.Test;
 
 import java.util.Properties;
@@ -45,6 +47,7 @@ class VideoTermRendererTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM)
     void theScreenIsEightyByTwentyFourCellsOfNineLinesEach() {
         boolean[][] dots = VideoTermRenderer.render(card(), true);
         assertEquals(24 * 9, dots.length);
@@ -52,6 +55,7 @@ class VideoTermRendererTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM)
     void aCharacterIsDrawnFromTheCharacterRom() {
         VideoTerm card = card();
         poke(card, 0, 'A');
@@ -63,6 +67,7 @@ class VideoTermRendererTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM)
     void theStartAddressScrollsAndTheScreenWrapsAroundVram() {
         VideoTerm card = card();
         setRegister(card, 12, 0x07); // start at $7F0: 16 cells before the end of VRAM
@@ -75,6 +80,7 @@ class VideoTermRendererTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM)
     void theCursorInvertsItsLinesAndFollowsItsMode() {
         VideoTerm card = card();
         setRegister(card, 14, 0x00);
@@ -107,6 +113,7 @@ class VideoTermRendererTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM)
     void textComesOutPlainWithTrailingSpaceAndBlankRowsTrimmed() {
         VideoTerm card = card();
         String first = "]PRINT \"lowercase too\"";

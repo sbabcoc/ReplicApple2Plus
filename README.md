@@ -268,16 +268,24 @@ Run all tests with:
 ./gradlew test
 ```
 
+Tests that need the ROM files below are skipped, naming the missing
+file, when those files aren't supplied (they're marked
+`@RequiresRoms`), so a fresh clone builds and its other tests run. A
+ROM that is supplied but wrong still fails them: the ROM classes verify
+their checksums when loaded. Tests that need disk images skip the same
+way without them.
+
 ## Required ROM files
 
 Three real Apple II+ ROM dumps are deliberately excluded from this
 repository (`.gitignore`'s `*.rom` rule) rather than committed as
 binary source-controlled assets, since they're copyrighted Apple
 firmware, not this project's own work. This means **a fresh clone
-cannot build or run until these are provisioned manually** -- the
-failure mode is exactly the `IllegalStateException: ... is missing from
-the classpath` each ROM class's own loader throws by design, not a bug
-to chase further if you see it.
+builds, but cannot run the emulator until these are provisioned
+manually** -- the failure mode is exactly the `IllegalStateException:
+... is missing from the classpath` each ROM class's own loader throws by
+design, not a bug to chase further if you see it. The tests that need
+them are skipped until then.
 
 Each file must be placed at the exact path below and match the listed
 CRC32 exactly (verified automatically at class-load time -- a wrong or

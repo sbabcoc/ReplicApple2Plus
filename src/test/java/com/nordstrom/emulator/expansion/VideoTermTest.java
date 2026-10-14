@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import org.junit.jupiter.api.Test;
 
 import java.util.Properties;
@@ -8,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RequiresRoms({Rom.VIDEOTERM})
 class VideoTermTest {
 
     private static VideoTerm configured(String display) {

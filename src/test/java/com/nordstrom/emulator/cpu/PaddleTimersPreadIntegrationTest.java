@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.cpu;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SystemClock;
@@ -22,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code com.nordstrom.emulator.system.PaddleTimersTest} (covering the
  * RC countdown logic itself) doesn't have.
  */
+@RequiresRoms({Rom.SYSTEM})
 class PaddleTimersPreadIntegrationTest {
 
     private static final int[] PREAD_PROGRAM = {

@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.SlotCard;
@@ -20,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * what the card shows, the CRTC setup the firmware programs, and what the
  * Soft Video Switch selects as the program moves between text and graphics.
  */
+@RequiresRoms({Rom.SYSTEM, Rom.VIDEOTERM})
 class VideoTermFirmwareIntegrationTest {
 
     private static final int CYCLES_PER_SECOND = 1_023_000;

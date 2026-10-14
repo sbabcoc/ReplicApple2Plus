@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.system;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * human reading ASCII art isn't something a test suite can do, but the
  * bits it read are exactly reproducible.
  */
+@RequiresRoms({Rom.CHARACTER})
 class CharacterRomTest {
 
     @Test

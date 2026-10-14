@@ -1,5 +1,6 @@
 package com.nordstrom.emulator;
 
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.SlotCard;
@@ -11,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RequiresRoms({Rom.SYSTEM, Rom.VIDEOTERM})
 class DisplayModeSelectorTest {
 
     private static VideoTerm card(String display) {

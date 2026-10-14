@@ -1,5 +1,7 @@
 package com.nordstrom.emulator.system;
 
+import com.nordstrom.emulator.RequiresRoms;
+import com.nordstrom.emulator.RequiresRoms.Rom;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,6 +23,7 @@ class SlotCardLoaderSlotTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM) // loading a VideoTerm loads its ROMs
     void aCardOutsideItsSupportedSlotsIsRefusedWithAClearMessage(@TempDir Path dir) {
         IllegalStateException e = assertThrows(IllegalStateException.class,
             () -> load(dir, "[4]\ntype=videoterm\n"));
@@ -28,6 +31,7 @@ class SlotCardLoaderSlotTest {
     }
 
     @Test
+    @RequiresRoms(Rom.VIDEOTERM) // loading a VideoTerm loads its ROMs
     void aCardInItsSupportedSlotLoads(@TempDir Path dir) throws IOException {
         assertNotNull(load(dir, "[3]\ntype=videoterm\n")[3]);
     }
