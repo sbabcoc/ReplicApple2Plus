@@ -1,6 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.RomChecksum;
+import com.nordstrom.emulator.system.RomFiles;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -53,10 +54,9 @@ final class VideoTermRoms {
     }
 
     private static byte[] load(String resource, int size, String crc32, String label) {
-        try (InputStream in = VideoTermRoms.class.getResourceAsStream(resource)) {
+        try (InputStream in = RomFiles.open(VideoTermRoms.class, resource)) {
             if (in == null) {
-                throw new IllegalStateException(resource + " is missing from the classpath -- the VideoTerm card needs "
-                    + "it; place it in src/main/resources/com/nordstrom/emulator/expansion/");
+                throw new IllegalStateException("The VideoTerm card needs " + RomFiles.missing(resource));
             }
             byte[] data = in.readAllBytes();
             if (data.length != size) {

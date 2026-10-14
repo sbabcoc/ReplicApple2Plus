@@ -1,5 +1,7 @@
 # ReplicApple2Plus
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.nordstrom.ui-tools/ReplicApple2Plus.svg)](https://central.sonatype.com/search?q=com.nordstrom.ui-tools+ReplicApple2Plus&core=gav)
+
 A from-scratch Apple II+ emulator, written in Java, prioritizing hardware
 fidelity over performance. The design goal is to reproduce the real machine's
 behavior down to documented (and, where necessary, undocumented) hardware
@@ -130,8 +132,8 @@ Companion documents:
 
 **Application**
 - **File** menu: Start CP/M Transfer (see
-  [Running CP/M](#running-cpm-on-the-softcard-ii)) and Type File..., and
-  **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste -- typed
+  [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., and ROM
+  Folder... (see [Required ROM files](#required-rom-files)); **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste -- typed
   or pasted text is fed to the keyboard at exactly the pace the running
   software reads it, so nothing is dropped.
   Typing that runs longer than a moment shows a progress window, with a
@@ -277,20 +279,33 @@ way without them.
 
 ## Required ROM files
 
-Three real Apple II+ ROM dumps are deliberately excluded from this
-repository (`.gitignore`'s `*.rom` rule) rather than committed as
-binary source-controlled assets, since they're copyrighted Apple
-firmware, not this project's own work. This means **a fresh clone
-builds, but cannot run the emulator until these are provisioned
-manually** -- the failure mode is exactly the `IllegalStateException:
-... is missing from the classpath` each ROM class's own loader throws by
-design, not a bug to chase further if you see it. The tests that need
-them are skipped until then.
+The real Apple II+ ROM dumps -- and the VideoTerm's -- are copyrighted
+firmware, not this project's own work, so they're in neither this
+repository (`.gitignore`'s `*.rom` rule) nor anything it publishes: the
+build leaves them out of the jars. You supply your own, in either of two
+places:
 
-Each file must be placed at the exact path below and match the listed
-CRC32 exactly (verified automatically at class-load time -- a wrong or
-corrupted file fails loudly with a specific error naming the mismatch,
-rather than silently serving bad data):
+- **A ROM folder**, holding the files directly, under the file names
+  below. This is the way for a released build. Name it with `--roms DIR`
+  when you run the emulator -- or, if you don't, the emulator asks for it
+  when it can't find the ROMs, as on the first start of an installed
+  app, and remembers your choice for next time. **File > ROM Folder...**
+  changes it, taking effect the next time the emulator starts, since the
+  ROMs are loaded once at startup. `--roms` overrides the remembered
+  folder.
+- **The classpath**, at the paths below under `src/main/resources`, for
+  running from source with `./gradlew run`. The tests that need ROMs
+  find them here; without them, those tests are skipped.
+
+The ROM folder is searched first. Without the files in either place, the
+emulator stops with an error naming the missing file -- by design, not a
+bug to chase further if you see it. Errors that stop the emulator at
+startup appear in a dialog as well as on the console, since an
+installed app has no console.
+
+Each file must match the listed CRC32 exactly (verified automatically at
+class-load time -- a wrong or corrupted file fails loudly with a specific
+error naming the mismatch, rather than silently serving bad data):
 
 | File | Path | CRC32 |
 | --- | --- | --- |
@@ -355,6 +370,7 @@ Or, the same on every platform, through Gradle:
 
 | Option | Meaning |
 |---|---|
+| `--roms DIR` | Directory holding the ROM images (see [Required ROM files](#required-rom-files)). Searched before the classpath. |
 | `--config FILE` | Slot configuration (INI). Without it every slot stays empty and the machine boots to Applesoft. |
 | `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. |
 | `--input FILE` | Game controller mapping; defaults apply without it. |

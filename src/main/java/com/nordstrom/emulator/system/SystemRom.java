@@ -38,10 +38,9 @@ final class SystemRom {
     private static final byte[] DATA = load();
 
     private static byte[] load() {
-        try (InputStream in = SystemRom.class.getResourceAsStream("system-rom.rom")) {
+        try (InputStream in = RomFiles.open(SystemRom.class, "system-rom.rom")) {
             if (in == null) {
-                throw new IllegalStateException(
-                    "system-rom.rom is missing from the classpath -- this is a packaging bug");
+                throw new IllegalStateException(RomFiles.missing("system-rom.rom"));
             }
             byte[] data = in.readAllBytes();
             verify(data);

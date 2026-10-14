@@ -104,8 +104,23 @@ java {
 }
 
 application {
-    // adjust once the CPU/bus/scheduler classes have a real entry point
     mainClass = 'com.nordstrom.emulator.Apple2Plus'
+}
+
+/*
+ * The ROM images are copyrighted firmware -- Apple's and Videx's -- so
+ * they're kept out of everything this build publishes, though a local copy
+ * under src/main/resources still serves `./gradlew run` and the tests.
+ * A released build reads them from the directory named by --roms (RomFiles).
+ * The card firmware this project assembles itself ships as usual.
+ */
+def thirdPartyRoms = ['**/system-rom.rom', '**/character-rom.rom', '**/integer-basic-firmware-card.rom',
+                      '**/videx-videoterm-*.rom']
+tasks.named('jar') {
+    exclude thirdPartyRoms
+}
+tasks.named('sourcesJar') {
+    exclude thirdPartyRoms
 }
 
 /*
@@ -140,7 +155,9 @@ application {
 def jpackageSafeVersion = (resolvedVersion =~ /^\d[\d.]*/).with { it.find() ? it.group() : '0.0.1' }
 
 runtime {
-    modules = ['java.desktop'] // Swing; re-run the suggestModules task if new JDK APIs are added later
+    // Swing, and java.util.prefs for the remembered folders and ROM folder;
+    // re-run the suggestModules task if new JDK APIs are added later
+    modules = ['java.desktop', 'java.prefs']
     options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
 
     jpackage {
@@ -259,8 +276,6 @@ publishing {
                         id = 'scoba'
                         name = 'Scott Babcock'
                         email = 'scoba@hotmail.com'
-                        organization = 'Nordstrom'
-                        organizationUrl = 'https://shop.nordstrom.com'
                     }
                 }
             }

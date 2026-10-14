@@ -2,6 +2,7 @@ package com.nordstrom.emulator;
 
 import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.expansion.VideoTermRenderer;
+import com.nordstrom.emulator.system.RomFiles;
 import com.nordstrom.emulator.transfer.CpmTransferStarter;
 import com.nordstrom.emulator.transfer.HostTransferCard;
 
@@ -17,6 +18,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,6 +38,9 @@ import java.util.prefs.Preferences;
  * first if the disk lacks it -- all by typing at CP/M's prompt and reading
  * what it prints on the VideoTerm (TRANSFER-CARD.md 8.5). It's enabled
  * once CP/M has initialized the transfer card since the last RESET.
+ * <p>
+ * ROM Folder... chooses where the ROM images are read from (RomFiles),
+ * for the next start: the ROMs are loaded once, as the emulator starts.
  * <p>
  * Deliberately no keyboard shortcuts: these are menu actions only.
  */
@@ -74,6 +80,12 @@ final class FileMenu {
         JMenuItem typeFile = new JMenuItem("Type File...");
         typeFile.addActionListener(event -> promptAndTypeFile(feeder, parent, emulationThread));
         menu.add(typeFile);
+
+        menu.addSeparator();
+
+        JMenuItem romFolder = new JMenuItem("ROM Folder...");
+        romFolder.addActionListener(event -> chooseRomFolder(parent));
+        menu.add(romFolder);
 
         menu.addMenuListener(new MenuListener() {
             @Override
@@ -145,6 +157,39 @@ final class FileMenu {
         }, "Start CP/M Transfer");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Chooses the folder the ROM images are read from, and remembers it.
+     * The ROMs are loaded once, as the emulator starts, so the choice takes
+     * effect the next time it does -- Reboot rebuilds the machine, but not
+     * the ROMs it loaded.
+     */
+    private static void chooseRomFolder(Component parent) {
+        Path current = RomFiles.directory();
+        JFileChooser chooser = new JFileChooser(current != null ? current.toFile() : null);
+        chooser.setDialogTitle("ROM Folder");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        if (current != null) {
+            chooser.setSelectedFile(current.toFile());
+        }
+        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path folder = chooser.getSelectedFile().toPath();
+        List<String> missing = RomFiles.missingFrom(folder);
+        if (!missing.isEmpty()) {
+            JOptionPane.showMessageDialog(parent,
+                folder + " doesn't hold " + String.join(" or ", missing)
+                    + ", so it can't be the ROM folder. (README.md lists each file.)",
+                "ROM Folder", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        RomFiles.remember(folder);
+        JOptionPane.showMessageDialog(parent,
+            "ReplicApple2Plus will read its ROM images from " + folder + " the next time it starts.\n"
+                + "(Starting it with --roms DIR uses that folder instead, for that run.)",
+            "ROM Folder", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private static void promptAndTypeFile(TypingFeeder feeder, Component parent, Executor emulationThread) {

@@ -41,10 +41,9 @@ public final class CharacterRom {
     private static final byte[] DATA = load();
 
     private static byte[] load() {
-        try (InputStream in = CharacterRom.class.getResourceAsStream("character-rom.rom")) {
+        try (InputStream in = RomFiles.open(CharacterRom.class, "character-rom.rom")) {
             if (in == null) {
-                throw new IllegalStateException(
-                    "character-rom.rom is missing from the classpath -- this is a packaging bug");
+                throw new IllegalStateException(RomFiles.missing("character-rom.rom"));
             }
             byte[] data = in.readAllBytes();
             RomChecksum.verify(data, 0, data.length, "64F415C6", "CharacterRom");

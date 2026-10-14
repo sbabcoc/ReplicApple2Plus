@@ -16,10 +16,12 @@ import com.nordstrom.emulator.system.CliArgs;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.PluginLoader;
 import com.nordstrom.emulator.system.RemovableMediaDrive;
+import com.nordstrom.emulator.system.RomFiles;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
 
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenuBar;
 import javax.swing.JOptionPane;
@@ -27,7 +29,9 @@ import javax.swing.JToolBar;
 import javax.swing.SwingUtilities;
 
 import java.awt.BorderLayout;
+import java.awt.GraphicsEnvironment;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
@@ -135,14 +139,16 @@ public final class Apple2Plus {
     private static final long PAD_POLL_INTERVAL_MS = 10; // 100 Hz: far faster than any game reads a paddle
     private static final long SHUTDOWN_JOIN_MS = 300; // longest the exit hook (or a reboot) waits for the loop to stop
     private static final int FLASH_TOGGLE_EVERY_N_TICKS = 15; // roughly twice a second at 50 Hz
-    private static final String USAGE = "Usage: Apple2Plus [--config slots.ini] [--plugins DIR[:DIR...]] [--input input.ini] [--network-input PORT]";
+    private static final String USAGE = "Usage: Apple2Plus [--roms DIR] [--config slots.ini] [--plugins DIR[:DIR...]] [--input input.ini] [--network-input PORT]";
 
     /**
      * Application entry point.
      *
-     * @param args {@code [--config slots.ini] [--plugins DIR[:DIR...]] [--input input.ini] [--network-input PORT]},
-     *             all optional and independent -- see this class's own
-     *             Javadoc for what happens with neither
+     * @param args {@code [--roms DIR] [--config slots.ini] [--plugins DIR[:DIR...]] [--input input.ini]
+     *             [--network-input PORT]}, all optional and independent --
+     *             see this class's own Javadoc for what happens with neither.
+     *             {@code --roms} names the directory holding the ROM images,
+     *             which aren't distributed with the emulator ({@link RomFiles})
      */
     public static void main(String[] args) {
         CliArgs cli;
@@ -154,7 +160,89 @@ public final class Apple2Plus {
             System.exit(1);
             return;
         }
-        SwingUtilities.invokeLater(() -> createAndRun(cli));
+        String roms = cli.get("roms");
+        if (roms != null) {
+            Path romDirectory = Path.of(roms);
+            if (!Files.isDirectory(romDirectory)) {
+                System.err.println("--roms " + roms + " is not a directory");
+                System.err.println(USAGE);
+                System.exit(1);
+                return;
+            }
+            RomFiles.setDirectory(romDirectory); // before anything loads a ROM
+        } else {
+            RomFiles.setDirectory(RomFiles.rememberedDirectory()); // null if none was ever chosen
+        }
+        SwingUtilities.invokeLater(() -> {
+            try {
+                createAndRun(cli);
+            } catch (RuntimeException | LinkageError e) {
+                // An installed app has no console: an error printed and left
+                // there would look like a launch that silently did nothing.
+                fatal("ReplicApple2Plus couldn't start: " + rootMessage(e));
+            }
+        });
+    }
+
+    /**
+     * Reports an error that ends the emulator, on the console and -- unless
+     * there's no display -- in a dialog, since an app launched from an
+     * installer has no console to read it on, then exits.
+     */
+    private static void fatal(String message) {
+        System.err.println(message);
+        if (!GraphicsEnvironment.isHeadless()) {
+            JOptionPane.showMessageDialog(null, message, "ReplicApple2Plus", JOptionPane.ERROR_MESSAGE);
+        }
+        System.exit(1);
+    }
+
+    /** The innermost message: a failed ROM class surfaces wrapped in class-initialization errors. */
+    private static String rootMessage(Throwable e) {
+        Throwable cause = e;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause.getMessage() != null ? cause.getMessage() : cause.toString();
+    }
+
+    /**
+     * Makes sure the base ROM images can be found before anything needs
+     * them. If they can't -- typically the first start of an installed app --
+     * asks for the folder holding them, and remembers it.
+     *
+     * @return true to go on; false if the user chose to quit
+     */
+    private static boolean ensureRoms() throws IOException {
+        List<String> missing = RomFiles.missingBaseRoms();
+        while (!missing.isEmpty()) {
+            if (GraphicsEnvironment.isHeadless()) {
+                System.err.println(RomFiles.missing(missing.get(0)));
+                return false;
+            }
+            Object[] choices = {"Choose ROM Folder...", "Quit"};
+            int choice = JOptionPane.showOptionDialog(null,
+                "ReplicApple2Plus needs the Apple II+ ROM images, which aren't distributed with it.\n"
+                    + "Choose the folder that holds " + String.join(" and ", missing) + ".\n"
+                    + "(README.md lists each file, and its checksum.)",
+                "ROM Images", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+            if (choice != 0) {
+                return false;
+            }
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Choose ROM Folder");
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) {
+                continue;
+            }
+            Path folder = chooser.getSelectedFile().toPath();
+            missing = RomFiles.missingFrom(folder);
+            if (missing.isEmpty()) {
+                RomFiles.setDirectory(folder);
+                RomFiles.remember(folder);
+            }
+        }
+        return true;
     }
 
     /**
@@ -179,14 +267,22 @@ public final class Apple2Plus {
                             HostTransferCard transferCard, VideoTerm videoTerm) {}
 
     private static void createAndRun(CliArgs cli) {
+        try {
+            if (!ensureRoms()) {
+                System.exit(1);
+                return;
+            }
+        } catch (IOException e) {
+            fatal("Could not read the ROM images: " + e.getMessage());
+            return;
+        }
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
         String pluginsPath = cli.get("plugins");
         if (pluginsPath != null) {
             try {
                 classLoader = PluginLoader.load(pluginsPath, classLoader);
             } catch (IOException | IllegalArgumentException e) {
-                System.err.println("Could not load plugins: " + e.getMessage());
-                System.exit(1);
+                fatal("Could not load plugins: " + e.getMessage());
                 return;
             }
         }
@@ -196,12 +292,10 @@ public final class Apple2Plus {
         try {
             inputMapping = (inputFile != null) ? InputMapping.load(Path.of(inputFile)) : InputMapping.defaults();
         } catch (NoSuchFileException e) {
-            System.err.println("Could not load input configuration: file not found: " + e.getFile());
-            System.exit(1);
+            fatal("Could not load input configuration: file not found: " + e.getFile());
             return;
         } catch (IOException | IllegalArgumentException e) {
-            System.err.println("Could not load input configuration: " + e.getMessage());
-            System.exit(1);
+            fatal("Could not load input configuration: " + e.getMessage());
             return;
         }
 

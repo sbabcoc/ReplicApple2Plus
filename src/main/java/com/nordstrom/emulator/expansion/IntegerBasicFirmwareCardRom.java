@@ -1,6 +1,7 @@
 package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.RomChecksum;
+import com.nordstrom.emulator.system.RomFiles;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,10 +43,9 @@ final class IntegerBasicFirmwareCardRom {
     private static final byte[] DATA = load();
 
     private static byte[] load() {
-        try (InputStream in = IntegerBasicFirmwareCardRom.class.getResourceAsStream("integer-basic-firmware-card.rom")) {
+        try (InputStream in = RomFiles.open(IntegerBasicFirmwareCardRom.class, "integer-basic-firmware-card.rom")) {
             if (in == null) {
-                throw new IllegalStateException(
-                    "integer-basic-firmware-card.rom is missing from the classpath -- this is a packaging bug");
+                throw new IllegalStateException(RomFiles.missing("integer-basic-firmware-card.rom"));
             }
             byte[] data = in.readAllBytes();
             verify(data);
