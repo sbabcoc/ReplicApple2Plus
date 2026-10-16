@@ -3,6 +3,7 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.expansion.VideoTermRenderer;
 import com.nordstrom.emulator.system.RomFiles;
+import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.transfer.CpmTransferStarter;
 import com.nordstrom.emulator.transfer.HostTransferCard;
 
@@ -38,8 +39,13 @@ import java.util.prefs.Preferences;
  * what it prints on the VideoTerm (TRANSFER-CARD.md 8.5). It's enabled
  * once CP/M has initialized the transfer card since the last RESET.
  * <p>
- * ROM Folder... chooses where the ROM images are read from (RomFiles),
- * for the next start: the ROMs are loaded once, as the emulator starts.
+ * Slot Configuration... and Plugins Folder... stand in for {@code --config}
+ * and {@code --plugins}, which an app started from an installer never
+ * gets: the choices are remembered (RememberedFiles), and the options,
+ * when given, take precedence. A slot configuration applies at the next
+ * Reboot; a plugins folder, at the next start. ROM Folder... chooses where
+ * the ROM images are read from (RomFiles), for the next start: the ROMs
+ * are loaded once, as the emulator starts.
  * <p>
  * Deliberately no keyboard shortcuts: these are menu actions only.
  */
@@ -64,10 +70,12 @@ final class FileMenu {
      * @param emulationThread runs everything that touches machine state -- queueing typing
      * @param transferCard    the machine's host file transfer card, or null if it has none
      * @param videoTerm       the machine's VideoTerm, CP/M's console on a II+, or null if it has none
+     * @param startup         how the emulator was started: for checking a slot configuration, and
+     *                        whether the command line overrides what's chosen here
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
     static JMenu build(TypingFeeder feeder, Component parent, Executor emulationThread,
-                       HostTransferCard transferCard, VideoTerm videoTerm) {
+                       HostTransferCard transferCard, VideoTerm videoTerm, Apple2Plus.StartupFiles startup) {
         JMenu menu = new JMenu("File");
 
         JMenuItem startCpmTransfer = new JMenuItem("Start CP/M Transfer");
@@ -81,6 +89,14 @@ final class FileMenu {
         menu.add(typeFile);
 
         menu.addSeparator();
+
+        JMenuItem slotConfiguration = new JMenuItem("Slot Configuration...");
+        slotConfiguration.addActionListener(event -> chooseSlotConfiguration(parent, startup));
+        menu.add(slotConfiguration);
+
+        JMenuItem pluginsFolder = new JMenuItem("Plugins Folder...");
+        pluginsFolder.addActionListener(event -> choosePluginsFolder(parent, startup));
+        menu.add(pluginsFolder);
 
         JMenuItem romFolder = new JMenuItem("ROM Folder...");
         romFolder.addActionListener(event -> chooseRomFolder(parent));
@@ -174,6 +190,54 @@ final class FileMenu {
             "ReplicApple2Plus will read its ROM images from " + folder + " the next time it starts.\n"
                 + "(Starting it with --roms DIR uses that folder instead, for that run.)",
             "ROM Folder", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * Chooses the slot configuration file, and remembers it once it loads
+     * cleanly. It takes effect at the next Reboot, which rebuilds the
+     * machine from it -- with the new configuration's own disks.
+     */
+    private static void chooseSlotConfiguration(Component parent, Apple2Plus.StartupFiles startup) {
+        JFileChooser chooser = new JFileChooser(RememberedFiles.slotConfiguration() != null
+            ? RememberedFiles.slotConfiguration().toFile() : null);
+        chooser.setDialogTitle("Slot Configuration");
+        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path file = chooser.getSelectedFile().toPath();
+        try {
+            SlotCardLoader.load(file, startup.classLoader()); // the cards made only to check it are discarded
+        } catch (IOException | RuntimeException | LinkageError e) {
+            JOptionPane.showMessageDialog(parent, "That slot configuration can't be used:\n" + e.getMessage(),
+                "Slot Configuration", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        RememberedFiles.rememberSlotConfiguration(file);
+        JOptionPane.showMessageDialog(parent, startup.configGiven()
+                ? "Remembered " + file + " for when ReplicApple2Plus starts without --config.\n"
+                    + "This run was started with --config, which Reboot keeps using."
+                : "The machine will use " + file + " when you press Reboot.",
+            "Slot Configuration", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * Chooses the folder plug-in cards are loaded from, and remembers it. Its
+     * jars are loaded as the emulator starts, so it takes effect then.
+     */
+    private static void choosePluginsFolder(Component parent, Apple2Plus.StartupFiles startup) {
+        JFileChooser chooser = new JFileChooser(RememberedFiles.pluginsFolder() != null
+            ? RememberedFiles.pluginsFolder().toFile() : null);
+        chooser.setDialogTitle("Plugins Folder");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        Path folder = chooser.getSelectedFile().toPath();
+        RememberedFiles.rememberPluginsFolder(folder);
+        JOptionPane.showMessageDialog(parent,
+            "ReplicApple2Plus will load plug-in cards from " + folder + " the next time it starts"
+                + (startup.pluginsGiven() ? " without --plugins." : "."),
+            "Plugins Folder", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private static void promptAndTypeFile(TypingFeeder feeder, Component parent, Executor emulationThread) {

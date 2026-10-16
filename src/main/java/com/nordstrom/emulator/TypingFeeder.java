@@ -4,6 +4,7 @@ import com.nordstrom.emulator.system.KeyboardRegister;
 
 import java.util.ArrayDeque;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 
 /**
  * Types text into the machine one keystroke at a time -- the engine behind
@@ -19,6 +20,19 @@ import java.util.function.Consumer;
  * program's own input loop, and never faster -- including while BASIC
  * pauses to tokenize a line, where any fixed delay is a guess.
  * <p>
+ * The strobe alone isn't enough for software that empties the keyboard
+ * into a buffer of its own. CP/M on the SoftCard II does: its 6502 server
+ * reads every key as it arrives into a 256-byte type-ahead ring, and drops
+ * keys once the ring is full -- far sooner than a program like BASIC-80
+ * takes them out, a line at a time. So the feeder also types a line at a
+ * time: after each Return it waits for the screen to settle -- unchanged
+ * for {@link #SETTLE_CYCLES} -- before starting the next line, which keeps
+ * any such buffer to one line's worth. Most software echoes what it's
+ * typed, so a quiet screen means the line has been taken; software that
+ * doesn't echo just costs the settle time per line. A screen that never
+ * settles, such as a program printing steadily, holds the next line for
+ * at most {@link #MAX_LINE_WAIT_CYCLES}.
+ * <p>
  * Threading: {@link #enqueue}, {@link #cancel} and {@link #tick} run on the
  * emulation thread only (post the first two via the emulation loop);
  * {@link #isTyping}, {@link #typedCount} and {@link #queuedCount} are safe
@@ -27,7 +41,21 @@ import java.util.function.Consumer;
  */
 final class TypingFeeder {
 
+    /** How long the screen must stay unchanged after a Return before the next line: 0.1 second. */
+    static final int SETTLE_CYCLES = 100_000;
+    /** The longest the next line waits for the screen to settle: 2 seconds. */
+    static final int MAX_LINE_WAIT_CYCLES = 2_000_000;
+    /** How often the screen is sampled while waiting. */
+    private static final int SAMPLE_CYCLES = 10_000;
+    private static final int RETURN = 0x0D;
+
     private final KeyboardRegister keyboard;
+    private volatile IntSupplier screenSignature; // null: no screen to watch, so no wait
+    private boolean awaitingSettle;   // after a Return: emulation thread only
+    private int waited;               // cycles since that Return
+    private int unchanged;            // cycles the screen has stayed the same
+    private int sinceSample;
+    private int lastSignature;
     private final ArrayDeque<Integer> pending = new ArrayDeque<>(); // emulation thread only
     private volatile boolean typing;
     private volatile Consumer<Boolean> typingListener = nowTyping -> { };
@@ -101,6 +129,7 @@ final class TypingFeeder {
     /** Discards everything not yet typed. A key already in the latch stays there. */
     void cancel() {
         pending.clear();
+        awaitingSettle = false;
         setTyping(false);
     }
 
@@ -111,11 +140,55 @@ final class TypingFeeder {
      * @param cycles CPU cycles elapsed (unused -- the strobe, not time, paces typing)
      */
     void tick(int cycles) {
-        if (!pending.isEmpty() && !keyboard.isStrobeSet()) {
-            keyboard.keyPressed(pending.poll());
-            typed++;
-            setTyping(!pending.isEmpty());
+        if (pending.isEmpty() || keyboard.isStrobeSet()) {
+            return;
         }
+        if (awaitingSettle && !settled(cycles)) {
+            return;
+        }
+        int key = pending.poll();
+        keyboard.keyPressed(key);
+        typed++;
+        if (key == RETURN && screenSignature != null) {
+            awaitingSettle = true;
+            waited = 0;
+            unchanged = 0;
+            sinceSample = 0;
+            lastSignature = screenSignature.getAsInt();
+        }
+        setTyping(!pending.isEmpty());
+    }
+
+    /**
+     * Sets what tells whether the screen is still changing: any value that
+     * differs whenever what's displayed does, such as a hash of the text.
+     * Without one, lines follow each other as fast as the strobe allows.
+     *
+     * @param signature read on the emulation thread
+     */
+    void setScreenSignature(IntSupplier signature) {
+        screenSignature = signature;
+    }
+
+    /** Whether the screen has been quiet long enough since the last Return to start the next line. */
+    private boolean settled(int cycles) {
+        waited += cycles;
+        sinceSample += cycles;
+        if (sinceSample >= SAMPLE_CYCLES) {
+            int signature = screenSignature.getAsInt();
+            if (signature == lastSignature) {
+                unchanged += sinceSample;
+            } else {
+                lastSignature = signature;
+                unchanged = 0;
+            }
+            sinceSample = 0;
+        }
+        if (unchanged >= SETTLE_CYCLES || waited >= MAX_LINE_WAIT_CYCLES) {
+            awaitingSettle = false;
+            return true;
+        }
+        return false;
     }
 
     /** @return true while queued text remains to be typed */

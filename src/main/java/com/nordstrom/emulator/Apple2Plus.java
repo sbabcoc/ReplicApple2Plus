@@ -3,6 +3,7 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.expansion.VideoTerm;
+import com.nordstrom.emulator.expansion.VideoTermRenderer;
 import com.nordstrom.emulator.transfer.HostTransferCard;
 import com.nordstrom.emulator.input.BusInputSink;
 import com.nordstrom.emulator.input.InputMapper;
@@ -35,7 +36,9 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -222,6 +225,21 @@ public final class Apple2Plus {
         return wrapped.toString().stripTrailing();
     }
 
+    /**
+     * What tells typing whether the screen has settled after a line: a
+     * hash of both text pages, and of the VideoTerm's screen if there is
+     * one -- whichever is showing, something typed changes it.
+     */
+    private static IntSupplier screenSignature(MotherboardBus bus, VideoTerm videoTerm) {
+        return () -> {
+            int hash = 1;
+            for (int address = 0x400; address < 0xC00; address++) {
+                hash = 31 * hash + bus.read(address);
+            }
+            return videoTerm != null ? 31 * hash + VideoTermRenderer.text(videoTerm).hashCode() : hash;
+        };
+    }
+
     /** Whether a startup failure was a ROM image, missing or corrupt -- which the user can fix. */
     private static boolean romImageFailure(Throwable e) {
         for (Throwable cause = e; cause != null; cause = cause.getCause()) {
@@ -318,7 +336,22 @@ public final class Apple2Plus {
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
                             EightyColumnView eightyColumns, DisplayModeSelector displayModes,
-                            HostTransferCard transferCard, VideoTerm videoTerm) {}
+                            HostTransferCard transferCard, VideoTerm videoTerm, Path config) {}
+
+    /**
+     * What the File menu needs to know about how the emulator was started:
+     * the class loader cards are made with, and whether the command line
+     * named a slot configuration or plugins, which outrank the remembered ones.
+     */
+    record StartupFiles(ClassLoader classLoader, boolean configGiven, boolean pluginsGiven) {}
+
+    private static StartupFiles startupFiles;
+
+    /** The slot configuration in force: {@code --config}, else the remembered one, else none. */
+    private static Path slotConfiguration(CliArgs cli) {
+        String configFile = cli.get("config");
+        return configFile != null ? Path.of(configFile) : RememberedFiles.slotConfiguration();
+    }
 
     private static void createAndRun(CliArgs cli) {
         try {
@@ -332,6 +365,9 @@ public final class Apple2Plus {
         }
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
         String pluginsPath = cli.get("plugins");
+        if (pluginsPath == null && RememberedFiles.pluginsFolder() != null) {
+            pluginsPath = RememberedFiles.pluginsFolder().toString();
+        }
         if (pluginsPath != null) {
             try {
                 classLoader = PluginLoader.load(pluginsPath, classLoader);
@@ -359,6 +395,7 @@ public final class Apple2Plus {
 
         final ClassLoader finalClassLoader = classLoader;
         final InputMapping finalInputMapping = inputMapping;
+        startupFiles = new StartupFiles(classLoader, cli.get("config") != null, cli.get("plugins") != null);
 
         // Mutable only across a reboot -- read by the shutdown hook from a
         // different thread, hence AtomicReference rather than a plain field.
@@ -382,7 +419,11 @@ public final class Apple2Plus {
             // not be silently lost the same way the whole point of
             // persisting at all is to avoid.
             persistDiskQuietly(old.disk());
-            Machine fresh = buildMachine(cli, finalClassLoader, finalInputMapping, old.disk(), frame, onRebootHolder[0]);
+            // A power cycle keeps the disks in the drives -- unless the slot
+            // configuration has changed (File > Slot Configuration...), whose
+            // own drives then apply.
+            Disk2Controller keepMedia = Objects.equals(old.config(), slotConfiguration(cli)) ? old.disk() : null;
+            Machine fresh = buildMachine(cli, finalClassLoader, finalInputMapping, keepMedia, frame, onRebootHolder[0]);
             rewireFrame(frame, old, fresh);
             current.set(fresh);
             fresh.loop().start();
@@ -463,10 +504,10 @@ public final class Apple2Plus {
     private static Machine buildMachine(CliArgs cli, ClassLoader classLoader, InputMapping inputMapping,
                                          Disk2Controller mediaSource, JFrame frame, Runnable onReboot) {
         SlotCard[] slots;
-        String configFile = cli.get("config");
-        if (configFile != null) {
+        Path config = slotConfiguration(cli);
+        if (config != null) {
             try {
-                slots = SlotCardLoader.load(Path.of(configFile), classLoader);
+                slots = SlotCardLoader.load(config, classLoader);
             } catch (IOException | IllegalArgumentException | IllegalStateException e) {
                 // The same configuration already loaded successfully once
                 // (at initial startup) if mediaSource != null -- a failure
@@ -527,6 +568,7 @@ public final class Apple2Plus {
             }
         }
         TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
+        typing.setScreenSignature(screenSignature(bus, videoTerm));
         clock.addCycleListener(typing::tick);
         if (videoTerm != null && displayChosenAtRuntime != null) {
             videoTerm.setDisplay(displayChosenAtRuntime); // a reboot keeps the mode chosen from the toolbar
@@ -576,7 +618,7 @@ public final class Apple2Plus {
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
-            transferCard, videoTerm);
+            transferCard, videoTerm, config);
     }
 
     /**
@@ -754,7 +796,8 @@ public final class Apple2Plus {
         frame.getContentPane().add(next.toolbar(), BorderLayout.NORTH);
 
         JMenuBar menuBar = new JMenuBar();
-        menuBar.add(FileMenu.build(next.typing(), frame, next.loop(), next.transferCard(), next.videoTerm()));
+        menuBar.add(FileMenu.build(next.typing(), frame, next.loop(), next.transferCard(), next.videoTerm(),
+            startupFiles));
         menuBar.add(EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()));
         if (next.disk() != null) {
             menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));

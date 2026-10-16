@@ -132,10 +132,18 @@ Companion documents:
 
 **Application**
 - **File** menu: Start CP/M Transfer (see
-  [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., and ROM
-  Folder... (see [Required ROM files](#required-rom-files)); **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste -- typed
-  or pasted text is fed to the keyboard at exactly the pace the running
-  software reads it, so nothing is dropped.
+  [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., Slot
+  Configuration..., Plugins Folder..., and ROM Folder... (see
+  [Required ROM files](#required-rom-files)); **Edit** menu: Copy Screen
+  Text, Copy Screen Image, and Paste. Typed or pasted text is fed to the
+  keyboard at exactly the pace the running software reads it, and a line
+  at a time -- after each Return, the next line waits for the screen to
+  settle -- so software that buffers keys, like CP/M, isn't overrun.
+- **Slot Configuration...** and **Plugins Folder...** do what `--config`
+  and `--plugins` do, for an app started without them, as one installed
+  from an installer is: the choices are remembered, and the options, when
+  given, take precedence. A new slot configuration applies at the next
+  Reboot, with its own disks; a plugins folder, at the next start.
   Typing that runs longer than a moment shows a progress window, with a
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
@@ -374,8 +382,8 @@ Or, the same on every platform, through Gradle:
 | Option | Meaning |
 |---|---|
 | `--roms DIR` | Directory holding the ROM images (see [Required ROM files](#required-rom-files)). Searched before the classpath. |
-| `--config FILE` | Slot configuration (INI). Without it every slot stays empty and the machine boots to Applesoft. |
-| `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. |
+| `--config FILE` | Slot configuration (INI). Without it, the one chosen with File > Slot Configuration... if any; else every slot stays empty and the machine boots to Applesoft. |
+| `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. Without it, the folder chosen with File > Plugins Folder..., if any. |
 | `--input FILE` | Game controller mapping; defaults apply without it. |
 | `--network-input PORT` | Take controller input from PadBridge over UDP on this port, instead of a local gamepad. |
 

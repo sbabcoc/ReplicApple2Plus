@@ -172,4 +172,55 @@ class TypingFeederTest {
         feeder.tick(1);
         assertEquals(0x83, KeyboardTestAccess.readKbd(keyboard) & 0xFF, "^C with the strobe set");
     }
+
+    /** Reads keys as fast as they come, like CP/M's server filling its type-ahead ring. */
+    private static String drain(TypingFeeder feeder, KeyboardRegister keyboard, int cycles, int step) {
+        StringBuilder received = new StringBuilder();
+        for (int elapsed = 0; elapsed < cycles; elapsed += step) {
+            feeder.tick(step);
+            if (keyboard.isStrobeSet()) {
+                received.append((char) (KeyboardTestAccess.readKbd(keyboard) & 0x7F));
+                KeyboardTestAccess.clearStrobe(keyboard);
+            }
+        }
+        return received.toString();
+    }
+
+    /**
+     * After each Return, the next line waits until the screen has stayed
+     * unchanged for SETTLE_CYCLES, so a reader that buffers keys never
+     * holds more than one line.
+     */
+    @Test
+    void waitsForTheScreenToSettleBetweenLines() {
+        KeyboardRegister keyboard = new KeyboardRegister();
+        TypingFeeder feeder = new TypingFeeder(keyboard);
+        int[] screen = {0};
+        feeder.setScreenSignature(() -> screen[0]);
+        feeder.enqueue("AB\nCD\n");
+
+        assertEquals("AB\r", drain(feeder, keyboard, 5_000, 100), "the first line, then a wait");
+        screen[0] = 1; // the program echoes the line
+        assertEquals("", drain(feeder, keyboard, TypingFeeder.SETTLE_CYCLES / 2, 100), "still changing recently");
+        assertEquals("CD\r", drain(feeder, keyboard, TypingFeeder.SETTLE_CYCLES * 2, 100), "settled: the next line");
+    }
+
+    @Test
+    void aScreenThatNeverSettlesDelaysTheNextLineOnlySoLong() {
+        KeyboardRegister keyboard = new KeyboardRegister();
+        TypingFeeder feeder = new TypingFeeder(keyboard);
+        int[] screen = {0};
+        feeder.setScreenSignature(() -> screen[0]++); // different at every sample
+        feeder.enqueue("A\nB");
+        assertEquals("A\r", drain(feeder, keyboard, TypingFeeder.MAX_LINE_WAIT_CYCLES - 20_000, 1_000));
+        assertEquals("B", drain(feeder, keyboard, 40_000, 1_000));
+    }
+
+    @Test
+    void withoutAScreenLinesFollowAtOnce() {
+        KeyboardRegister keyboard = new KeyboardRegister();
+        TypingFeeder feeder = new TypingFeeder(keyboard);
+        feeder.enqueue("A\nB\n");
+        assertEquals("A\rB\r", drain(feeder, keyboard, 1_000, 100));
+    }
 }
