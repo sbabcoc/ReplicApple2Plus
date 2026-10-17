@@ -33,7 +33,8 @@ import java.util.Set;
  * A card's {@link SlotCard#getSupportedParameters()}, if non-null, is
  * enforced two ways at {@link #create}: any config-file key not on that
  * list fails, and so does the card's OWN {@link SlotCard#configure}
- * querying a key that isn't on the list either -- catching the declared
+ * querying a key that isn't on the list either (the loader's reserved
+ * {@link SlotCardLoader#CONFIG_DIRECTORY} excepted) -- catching the declared
  * list and the real implementation disagreeing with each other, without
  * needing to know which one is actually wrong.
  */
@@ -121,13 +122,13 @@ public final class CardTypes {
 
         if (declared != null) {
             for (String key : cardProps.stringPropertyNames()) {
-                if (!declared.contains(key)) {
+                if (!declared.contains(key) && !SlotCardLoader.CONFIG_DIRECTORY.equals(key)) {
                     throw new IllegalArgumentException("\"" + key + "\" is not a recognized parameter for "
                         + cardClass.getName() + " -- known parameters: " + declared);
                 }
             }
             for (String queriedKey : tracker.queriedKeys()) {
-                if (!declared.contains(queriedKey)) {
+                if (!declared.contains(queriedKey) && !SlotCardLoader.CONFIG_DIRECTORY.equals(queriedKey)) {
                     throw new IllegalStateException(cardClass.getName() + " queried config key \"" + queriedKey
                         + "\" during configure(), but that key is not in its own getSupportedParameters() ("
                         + declared + "). The card's own code is internally inconsistent between the two "

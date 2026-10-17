@@ -1,6 +1,7 @@
 package com.nordstrom.emulator.transfer;
 
 import com.nordstrom.emulator.system.SlotCard;
+import com.nordstrom.emulator.system.SlotCardLoader;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
@@ -83,7 +84,7 @@ public final class HostTransferCard implements SlotCard {
     public void configure(Properties props) {
         String dir = props.getProperty("dir");
         if (dir != null) {
-            Path path = Path.of(dir.trim());
+            Path path = SlotCardLoader.resolvePath(props, dir); // relative to the configuration file
             if (!Files.isDirectory(path)) {
                 throw new IllegalArgumentException("hostfiles: dir is not a folder: " + dir);
             }

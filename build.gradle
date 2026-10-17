@@ -21,7 +21,6 @@ plugins {
 
     id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
     id 'pl.allegro.tech.build.axion-release' version '1.18.16'
-    id 'org.beryx.runtime' version '1.12.7'
 }
 
 group = 'com.nordstrom.ui-tools'
@@ -124,47 +123,116 @@ tasks.named('sourcesJar') {
 }
 
 /*
- * Packaging: org.beryx.runtime, NOT org.beryx.jlink. This project has no
- * module-info.java anywhere -- and shouldn't get one, since the dynamic
- * plugin-loading architecture (PluginLoader, CardTypes) depends on open
- * class loading that JPMS's strict module boundaries actively work
- * against. org.beryx.jlink targets fully modularized applications;
- * org.beryx.runtime is the sibling plugin built specifically for
- * non-modular ones, and still produces real jlink runtime images and
- * jpackage installers -- see badass-runtime-plugin.beryx.org.
+ * Packaging, with the JDK's own jlink and jpackage, from the Java toolchain
+ * this project builds with. (It used the org.beryx.runtime plugin until
+ * Gradle 9, which removed the Project.exec() method every release of that
+ * plugin calls.)
  *
- * jpackage cannot cross-build: running it produces an installer only
- * for the platform it runs on (.deb/.rpm on Linux, .msi/.exe on
- * Windows, .dmg/.pkg on macOS) -- there is no way to build all three
- * from one machine. Run `./gradlew jpackage` separately on each
- * platform.
+ * The application is deliberately not modular -- no module-info.java --
+ * since plugin loading (PluginLoader, CardTypes) depends on open class
+ * loading that JPMS's module boundaries restrict. jlink builds the
+ * minimal runtime from the JDK's own modules alone; the app's jars go
+ * beside it on the class path.
+ *
+ *   runtime        the minimal runtime image, build/image-runtime
+ *   jpackageImage  the application image, in build/jpackage
+ *   jpackage       the platform's installer, in build/jpackage:
+ *                  .dmg on macOS, .msi on Windows (needs the WiX
+ *                  toolset), .deb or .rpm on Linux; the Windows and
+ *                  Linux installers add a menu entry, and Windows a
+ *                  desktop shortcut
+ *
+ * jpackage cannot cross-build: each installer is built on its own
+ * platform, by running `./gradlew jpackage` there.
  */
 
 /*
  * jpackage's --app-version has real, platform-specific format
  * restrictions -- Windows MSI versioning in particular expects a plain
  * numeric x.y.z(.w) form and rejects a SemVer suffix like "-SNAPSHOT"
- * outright. resolvedVersion legitimately carries that suffix before the
- * first tagged release, so it is NOT safe to pass to jpackage directly
- * -- this is the actual current state of this project, not a
- * hypothetical one. Stripping at the first '-' keeps the numeric part
- * jpackage accepts everywhere; falling back to "0.0.1" (jpackage
- * rejects an all-zero version) covers the case where resolvedVersion
- * doesn't start with a digit at all.
+ * outright. resolvedVersion carries that suffix between releases, so it
+ * is NOT safe to pass to jpackage directly. Stripping at the first '-'
+ * keeps the numeric part jpackage accepts everywhere; falling back to
+ * "0.0.1" (jpackage rejects an all-zero version) covers the case where
+ * resolvedVersion doesn't start with a digit at all.
  */
 def jpackageSafeVersion = (resolvedVersion =~ /^\d[\d.]*/).with { it.find() ? it.group() : '0.0.1' }
 
-runtime {
-    // Swing, and java.util.prefs for the remembered folders and ROM folder;
-    // re-run the suggestModules task if new JDK APIs are added later
-    modules = ['java.desktop', 'java.prefs']
-    options = ['--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages']
+def appName = 'ReplicApple2Plus'
+def appVendor = 'Scott Babcock'
+def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def onWindows = osName.contains('win')
+def onMac = osName.contains('mac')
 
-    jpackage {
-        imageName = 'ReplicApple2Plus'
-        installerName = 'ReplicApple2Plus'
-        appVersion = jpackageSafeVersion
-        installerOptions = ['--vendor', 'Scott Babcock']
+// Swing, and java.util.prefs for the remembered folders and ROM folder.
+// If new JDK APIs are used, `jdeps --print-module-deps` on the classes
+// lists what this needs.
+def runtimeModules = ['java.desktop', 'java.prefs']
+
+def runtimeImageDir = layout.buildDirectory.dir('image-runtime')
+def jpackageDir = layout.buildDirectory.dir('jpackage')
+
+/** A JDK tool from this project's Java toolchain, e.g. 'jlink'. */
+def jdkTool = { String name ->
+    def home = javaToolchains.launcherFor(java.toolchain).get().metadata.installationPath
+    home.file("bin/${name}${onWindows ? '.exe' : ''}").asFile.absolutePath
+}
+
+tasks.register('cleanRuntime', Delete) {
+    delete runtimeImageDir // jlink won't write over an existing image
+}
+
+tasks.register('runtime', Exec) {
+    group = 'distribution'
+    description = 'Builds a minimal Java runtime for the application with jlink.'
+    dependsOn 'cleanRuntime'
+    outputs.dir runtimeImageDir
+    doFirst {
+        commandLine jdkTool('jlink'),
+            '--add-modules', runtimeModules.join(','),
+            '--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages',
+            '--output', runtimeImageDir.get().asFile.absolutePath
+    }
+}
+
+tasks.register('cleanJpackage', Delete) {
+    delete jpackageDir // jpackage won't write over an existing image or installer
+}
+
+tasks.register('jpackageImage', Exec) {
+    group = 'distribution'
+    description = 'Builds the application image -- the app and its runtime -- with jpackage.'
+    dependsOn 'runtime', 'installDist', 'cleanJpackage'
+    outputs.dir jpackageDir
+    doFirst {
+        commandLine jdkTool('jpackage'), '--type', 'app-image',
+            '--name', appName, '--app-version', jpackageSafeVersion, '--vendor', appVendor,
+            '--input', layout.buildDirectory.dir("install/${project.name}/lib").get().asFile.absolutePath,
+            '--main-jar', tasks.named('jar', Jar).get().archiveFileName.get(),
+            '--main-class', application.mainClass.get(),
+            '--runtime-image', runtimeImageDir.get().asFile.absolutePath,
+            '--dest', jpackageDir.get().asFile.absolutePath
+    }
+}
+
+tasks.register('jpackage', Exec) {
+    group = 'distribution'
+    description = "Builds this platform's installer from the application image with jpackage."
+    dependsOn 'jpackageImage'
+    doFirst {
+        def appImage = jpackageDir.get().file(onMac ? "${appName}.app" : appName).asFile.absolutePath
+        def command = [jdkTool('jpackage'), '--app-image', appImage,
+            '--name', appName, '--app-version', jpackageSafeVersion, '--vendor', appVendor,
+            '--dest', jpackageDir.get().asFile.absolutePath]
+        // A Start-menu entry and a desktop shortcut on Windows, and a desktop
+        // menu entry on Linux; jpackage adds none unless asked. macOS has the
+        // .dmg's Applications folder instead.
+        if (onWindows) {
+            command += ['--type', 'msi', '--win-menu', '--win-shortcut']
+        } else if (!onMac) {
+            command += ['--linux-shortcut']
+        }
+        commandLine command
     }
 }
 

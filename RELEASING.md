@@ -183,8 +183,8 @@ invocations. Always run them together in a single command.
 
 **An installed app fails as soon as a menu opens, or never shows its
 window** -- the runtime image lacks a JDK module the code now uses. Check
-with `./gradlew suggestModules`, or `jdeps --print-module-deps` on the
-classes, and add it to `runtime { modules = [...] }` in `build.gradle`.
+with `jdeps --print-module-deps --ignore-missing-deps build/classes/java/main`,
+and add it to `runtimeModules` in `build.gradle`.
 
 **A `.rom` other than `hostfiles-firmware.rom` in a jar** -- a new ROM
 image was added under `src/main/resources` without being added to

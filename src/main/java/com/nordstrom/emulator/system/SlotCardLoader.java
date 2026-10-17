@@ -17,7 +17,7 @@ import java.util.Properties;
  * Example:
  * <pre>
  *   [6]
- *   type=diskII
+ *   type=disk2
  *   drive1=disk1.woz
  *   drive2=disk2.woz
  * </pre>
@@ -35,8 +35,40 @@ import java.util.Properties;
  * key or which slot it's in -- only the properties that are actually its
  * own, so a card stays testable standalone with plain, unprefixed
  * properties.
+ * <p>
+ * <b>Relative paths</b> in a configuration file are relative to the folder
+ * holding the file, not to the emulator's working directory -- which an
+ * app started from an installer doesn't control. So a configuration and
+ * its disk images can live and move together. The loader passes that
+ * folder to every card as the reserved entry {@link #CONFIG_DIRECTORY};
+ * a card with a path setting resolves it with {@link #resolvePath}. The
+ * entry is exempt from the check against a card's declared parameters,
+ * and a card created without a configuration file simply has no such
+ * entry, so its relative paths stay relative to the working directory.
  */
 public final class SlotCardLoader {
+
+    /**
+     * The reserved property naming the folder that holds the configuration
+     * file, as an absolute path. Its {@code @} keeps it apart from any real
+     * setting's name.
+     */
+    public static final String CONFIG_DIRECTORY = "@configDirectory";
+
+    /**
+     * Resolves a path setting the way configuration files mean it: an
+     * absolute path as it is, and a relative one against the folder holding
+     * the configuration file, if the card was loaded from one.
+     *
+     * @param props the card's properties, as {@link SlotCard#configure} received them
+     * @param value the setting's value
+     * @return the path to use
+     */
+    public static Path resolvePath(Properties props, String value) {
+        Path path = Path.of(value.trim());
+        String folder = props.getProperty(CONFIG_DIRECTORY);
+        return path.isAbsolute() || folder == null ? path : Path.of(folder).resolve(path);
+    }
 
     /**
      * Loads and instantiates every configured card, resolving each
@@ -63,6 +95,7 @@ public final class SlotCardLoader {
                 throw new IllegalStateException("Slot " + slotNum + ": missing required \"type\" key");
             }
             cardProps.remove("type"); // the card itself only sees its own settings
+            cardProps.setProperty(CONFIG_DIRECTORY, configFile.toAbsolutePath().getParent().toString());
 
             SlotCard card = CardTypes.create(typeName, cardProps, classLoader);
             if (!card.supportedSlots().contains(slotNum)) {

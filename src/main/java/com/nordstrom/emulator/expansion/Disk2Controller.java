@@ -2,6 +2,7 @@ package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.system.RemovableMediaDrive;
 import com.nordstrom.emulator.system.SlotCard;
+import com.nordstrom.emulator.system.SlotCardLoader;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -135,16 +136,16 @@ public final class Disk2Controller implements SlotCard {
 
     @Override
     public void configure(Properties props) {
-        loadInitial(props.getProperty("drive1"), drives[0]);
-        loadInitial(props.getProperty("drive2"), drives[1]);
+        loadInitial(props, props.getProperty("drive1"), drives[0]);
+        loadInitial(props, props.getProperty("drive2"), drives[1]);
     }
 
-    private void loadInitial(String path, Drive drive) {
+    private void loadInitial(Properties props, String path, Drive drive) {
         if (path == null) {
             return;
         }
         try {
-            drive.insert(Path.of(path));
+            drive.insert(SlotCardLoader.resolvePath(props, path)); // relative to the configuration file
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load initial disk image \"" + path + "\"", e);
         }

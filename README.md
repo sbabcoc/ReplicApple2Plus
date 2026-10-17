@@ -404,6 +404,11 @@ drive1=path/to/disk1.woz
 drive2=path/to/disk2.dsk
 ```
 
+Relative paths in a slot configuration -- disk images, and the transfer
+card's `dir` -- are relative to the folder holding the configuration
+file, not the folder the emulator was started from, so a configuration
+and its disks can be kept and moved together.
+
 `[3]` is optional: it adds the VideoTerm (`PR#3` activates it). It must
 be slot 3 -- the card's firmware is written for it, and any other slot is
 refused at startup.
@@ -553,13 +558,15 @@ See [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8 for the details.
 ```
 
 Produces a native, self-contained installer -- no Java installation
-required on the target machine -- via the `org.beryx.runtime` plugin,
-which wraps `jlink` (custom minimal JRE) and `jpackage` (platform
-installer). **Not** `org.beryx.jlink`: this project has no
-`module-info.java` and shouldn't get one, since the dynamic plugin-loading
-architecture (`PluginLoader`, `CardTypes`) depends on open class loading
-that JPMS's module boundaries actively restrict. `org.beryx.runtime` is
-built specifically for non-modular applications like this one.
+required on the target machine -- with the JDK's own tools: `jlink` builds
+a minimal Java runtime, and `jpackage` the application image and the
+platform's installer. The build runs them directly, from the Java
+toolchain it compiles with. (It used the `org.beryx.runtime` plugin until
+Gradle 9 removed a method every release of that plugin calls.) The
+application isn't modular -- no `module-info.java`, since the dynamic
+plugin-loading architecture (`PluginLoader`, `CardTypes`) depends on open
+class loading that JPMS's module boundaries restrict -- so `jlink` builds
+the runtime from the JDK's own modules, and the app's jars go beside it.
 
 `jpackage` cannot cross-build: it only produces an installer for the
 platform it runs on. Building all three requires running the same command
@@ -567,17 +574,18 @@ on each:
 
 | Platform | Output |
 |---|---|
-| Linux | `.deb` (needs `fakeroot` installed) or `.rpm` |
-| Windows | `.msi` or `.exe` |
-| macOS | `.dmg` or `.pkg` |
+| Linux | `.deb` (needs `fakeroot` installed) or `.rpm`, whichever the system uses |
+| Windows | `.msi` (needs the WiX toolset installed) |
+| macOS | `.dmg` |
 
-The full pipeline -- compiled classes through a `jlink` runtime image,
-`jpackage`, and an actual installed, launched application -- has been
-validated end-to-end for Linux `.deb` output.
+The Windows installer adds a Start-menu entry and a desktop shortcut, and
+the Linux one a desktop menu entry; on macOS, the `.dmg` offers the app
+for the Applications folder.
 
-Related tasks: `./gradlew runtime` (just the custom JRE image, no
-installer) and `./gradlew jpackageImage` (an installable application
-directory, skipping the installer format).
+Related tasks: `./gradlew runtime` (just the minimal runtime image, in
+`build/image-runtime`) and `./gradlew jpackageImage` (the application
+image in `build/jpackage`, skipping the installer format). The installer
+lands in `build/jpackage` too.
 
 ## Project layout
 
