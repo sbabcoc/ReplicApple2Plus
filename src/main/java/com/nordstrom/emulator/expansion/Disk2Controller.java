@@ -681,10 +681,21 @@ public final class Disk2Controller implements SlotCard {
             return diskImage != null && diskImage.isWriteProtected();
         }
 
+        /**
+         * Protecting a disk first saves the writes made while it was
+         * writable: writes are otherwise saved only on a track change, an
+         * eject or a Reboot, and once a DSK image's host file is read-only
+         * its pending writes could no longer be saved at all. If saving
+         * fails, this throws and the protection is left as it was, the same
+         * rule {@link #eject} follows.
+         */
         @Override
         public void setWriteProtected(boolean protect) throws IOException {
             if (diskImage == null) {
                 throw new IllegalStateException("Cannot set write-protect state: no disk is loaded in this drive");
+            }
+            if (protect) {
+                diskImage.persist();
             }
             diskImage.setWriteProtected(protect);
         }

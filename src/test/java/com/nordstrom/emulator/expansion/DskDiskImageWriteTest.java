@@ -254,6 +254,44 @@ class DskDiskImageWriteTest {
         assertArrayEquals(expected, saved, "and every other sector must be unchanged");
     }
 
+    /**
+     * Writes are saved on a track change, an eject or a Reboot -- so a
+     * sector written and then write-protected, with none of those in
+     * between, must be saved by the protection itself. Afterwards the DSK
+     * file is read-only, and a save could no longer write it.
+     */
+    @Test
+    void writeProtectingADiskSavesItsPendingWritesFirst(@TempDir Path dir) throws IOException {
+        byte[] disk = randomDisk(7);
+        Path path = writeDisk(dir, "target.dsk", disk);
+        byte[] replacement = new byte[SECTOR_SIZE];
+        new Random(77).nextBytes(replacement);
+        int physicalSector = 5;
+
+        Disk2Controller controller = new Disk2Controller();
+        controller.drive(0).insert(path);
+        controller.writeIoSwitch(0x9, 0); // motor on
+        controller.writeIoSwitch(0xA, 0); // drive 1
+        controller.writeIoSwitch(0xE, 0); // Q7 low: read mode
+
+        seekToAfterAddressField(controller, physicalSector);
+        controller.writeIoSwitch(0xF, 0); // Q7 high: write mode
+        writeBytes(controller, new int[] {0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, 40);
+        writeBytes(controller, new int[] {0xD5, 0xAA, 0xAD}, 32);
+        writeBytes(controller, encodedDataField(dir, replacement), 32);
+        writeBytes(controller, new int[] {0xDE, 0xAA, 0xEB, 0xFF}, 32);
+        controller.writeIoSwitch(0xE, 0); // Q7 low
+
+        try {
+            controller.drive(0).setWriteProtected(true); // no track change, eject or Reboot before this
+            int logicalSector = PHYSICAL_TO_LOGICAL[physicalSector];
+            assertArrayEquals(replacement, sector(Files.readAllBytes(path), 0, logicalSector),
+                "the write must be in the file once the disk is protected");
+        } finally {
+            controller.drive(0).setWriteProtected(false); // so the temporary directory can be removed everywhere
+        }
+    }
+
     // --- Blank (0-byte) images ---------------------------------------------------------------------
 
     @Test
