@@ -5,16 +5,14 @@ import java.nio.file.Path;
 import java.util.prefs.Preferences;
 
 /**
- * The slot configuration and plugins folder chosen from the File menu,
- * remembered between runs. They stand in for {@code --config} and
- * {@code --plugins} where those aren't given -- an app started from an
- * installer gets no command-line options -- and the options, when given,
- * take precedence.
+ * The slot configuration chosen with File &gt; Slot Configuration...,
+ * remembered between runs. It takes the place of the emulator folder's own
+ * slots.ini (EmulatorFolder); {@code --config}, when given, takes
+ * precedence over both.
  */
 final class RememberedFiles {
 
     private static final String SLOT_CONFIGURATION = "slotConfiguration";
-    private static final String PLUGINS_FOLDER = "pluginsFolder";
 
     private RememberedFiles() {
     }
@@ -27,16 +25,6 @@ final class RememberedFiles {
 
     static void rememberSlotConfiguration(Path file) {
         preferences().put(SLOT_CONFIGURATION, file.toAbsolutePath().toString());
-    }
-
-    /** @return the remembered plugins folder, if it still exists; else null */
-    static Path pluginsFolder() {
-        String remembered = preferences().get(PLUGINS_FOLDER, null);
-        return remembered != null && Files.isDirectory(Path.of(remembered)) ? Path.of(remembered) : null;
-    }
-
-    static void rememberPluginsFolder(Path folder) {
-        preferences().put(PLUGINS_FOLDER, folder.toAbsolutePath().toString());
     }
 
     private static Preferences preferences() {

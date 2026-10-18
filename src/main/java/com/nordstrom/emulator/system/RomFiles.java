@@ -6,15 +6,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.prefs.Preferences;
 
 /**
  * Where the ROM images come from. They're copyrighted firmware, so they
  * aren't part of this project's source or its published artifacts: a
  * released build finds them in a ROM folder -- the one named by
- * {@code --roms}, or else the one the user chose when the emulator first
- * asked, which is remembered -- and a build from source can also keep
- * them on the classpath, under {@code src/main/resources} (README.md lists
+ * {@code --roms}, or else the emulator folder's {@code roms/}
+ * (EmulatorFolder) -- and a build from source can also keep them on the
+ * classpath, under {@code src/main/resources} (README.md lists
  * each file and its place).
  * <p>
  * The folder, if there is one, is searched first, by file name alone;
@@ -25,8 +24,6 @@ public final class RomFiles {
 
     /** The ROM images every machine needs; others belong to particular cards. */
     public static final List<String> BASE_ROMS = List.of("system-rom.rom", "character-rom.rom");
-
-    private static final String REMEMBERED_DIRECTORY = "romDirectory";
 
     private static volatile Path directory;
 
@@ -73,8 +70,9 @@ public final class RomFiles {
     public static String missing(String name) {
         Path dir = directory;
         return name + " wasn't found " + (dir != null ? "in " + dir + " or " : "") + "on the classpath. "
-            + "The ROM images aren't distributed with the emulator: put the file in your ROM folder -- the one "
-            + "chosen at startup, or named with --roms DIR (README.md lists each one).";
+            + "The ROM images aren't distributed with the emulator: put the file in the ROM folder -- roms in "
+            + "the emulator's folder in your home folder, or the one named with --roms DIR (README.md lists each "
+            + "one).";
     }
 
     /**
@@ -94,40 +92,7 @@ public final class RomFiles {
         return missing;
     }
 
-    /**
-     * @param folder a candidate ROM folder
-     * @return the base ROM images it lacks
-     */
-    public static List<String> missingFrom(Path folder) {
-        List<String> missing = new ArrayList<>();
-        for (String name : BASE_ROMS) {
-            if (!Files.isRegularFile(folder.resolve(name))) {
-                missing.add(name);
-            }
-        }
-        return missing;
-    }
 
-    /** @return the ROM folder the user chose before, if it still exists; else null */
-    public static Path rememberedDirectory() {
-        String remembered = preferences().get(REMEMBERED_DIRECTORY, null);
-        if (remembered == null) {
-            return null;
-        }
-        Path folder = Path.of(remembered);
-        return Files.isDirectory(folder) ? folder : null;
-    }
 
-    /**
-     * Remembers a ROM folder the user chose, for the next start.
-     *
-     * @param folder the folder
-     */
-    public static void remember(Path folder) {
-        preferences().put(REMEMBERED_DIRECTORY, folder.toAbsolutePath().toString());
-    }
 
-    private static Preferences preferences() {
-        return Preferences.userNodeForPackage(RomFiles.class);
-    }
 }

@@ -120,10 +120,12 @@ Then attach each to the GitHub release:
 gh release upload v1.0.0 build/jpackage/<installer file>
 ```
 
-Installers carry no ROMs either: an installed app asks for its ROM
-folder on its first start, and remembers it. It gets no command-line
-options, so its slot configuration and plugins folder are chosen from
-the File menu instead, and remembered too. Installers that aren't
+Installers carry no ROMs either. An installed app gets no command-line
+options, so it works from an emulator folder the user chooses on its
+first start: one already set up (it holds `slots.ini`), or a new one,
+which it sets up with `roms/`, `plugins/` and a starter `slots.ini`, then
+asks for the ROM images to be copied into `roms/`.
+Installers that aren't
 code-signed draw a warning from macOS Gatekeeper and Windows SmartScreen
 when first opened.
 

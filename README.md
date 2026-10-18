@@ -133,18 +133,17 @@ Companion documents:
 **Application**
 - **File** menu: Start CP/M Transfer (see
   [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., Slot
-  Configuration..., Plugins Folder..., and ROM Folder... (see
-  [Required ROM files](#required-rom-files)); **Edit** menu: Copy Screen
+  Configuration..., Emulator Folder..., and Open Emulator Folder (see
+  [The emulator folder](#the-emulator-folder)); **Edit** menu: Copy Screen
   Text, Copy Screen Image, and Paste. Typed or pasted text is fed to the
   keyboard at exactly the pace the running software reads it, and a line
   at a time -- after each Return, the next line waits for the screen to
   settle -- so software that buffers keys, like CP/M, isn't overrun.
-- **Slot Configuration...** and **Plugins Folder...** do what `--config`
-  and `--plugins` do, for an app started without them, as one installed
-  from an installer is: the choices are remembered, and the options, when
-  given, take precedence. A new slot configuration applies at the next
-  Reboot, with its own disks; a plugins folder, at the next start.
-  Typing that runs longer than a moment shows a progress window, with a
+- **Slot Configuration...** chooses a slot configuration other than the
+  emulator folder's own `slots.ini` -- one for CP/M, say -- remembered,
+  and applied at the next Reboot, with its own disks. `--config`, when
+  given, takes precedence.
+- Typing that runs longer than a moment shows a progress window, with a
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
   cycle that keeps the inserted disks), and -- with a VideoTerm
@@ -285,6 +284,40 @@ ROM that is supplied but wrong still fails them: the ROM classes verify
 their checksums when loaded. Tests that need disk images skip the same
 way without them.
 
+## The emulator folder
+
+The emulator keeps everything a machine needs that isn't part of the
+emulator itself in one folder of your choosing:
+
+```
+(emulator folder)/
+  slots.ini    the slot configuration
+  roms/        the ROM images (below)
+  plugins/     plug-in card jars, such as SoftCard2
+  disks/       disk images
+```
+
+On its first start it asks for that folder -- an existing one, or a new
+one, which the dialog can create -- and remembers it.
+
+- **A folder that already holds `slots.ini`** is taken as set up, and
+  used as it is: a hierarchy you've prepared, or carried over from
+  another machine.
+- **A folder without `slots.ini`** is set up for you: `roms/`, `plugins/`
+  and `disks/` are created, with a starter `slots.ini` holding a
+  Language Card and a Disk II. The emulator then asks for the ROM images
+  to be copied into `roms/`, offering to open it, until they're there.
+
+Relative paths in `slots.ini` are relative to this folder, so a disk in
+`disks/` is just `drive1=disks/name.dsk`. **File > Open Emulator Folder**
+opens the folder; **File > Emulator Folder...** switches to another one
+from the next start.
+
+Each command-line option takes the place of its part of the folder:
+`--roms` of `roms/`, `--plugins` of `plugins/`, and `--config` of
+`slots.ini` (as does a configuration chosen with **File > Slot
+Configuration...**).
+
 ## Required ROM files
 
 The real Apple II+ ROM dumps -- and the VideoTerm's -- are copyrighted
@@ -293,14 +326,9 @@ repository (`.gitignore`'s `*.rom` rule) nor anything it publishes: the
 build leaves them out of the jars. You supply your own, in either of two
 places:
 
-- **A ROM folder**, holding the files directly, under the file names
-  below. This is the way for a released build. Name it with `--roms DIR`
-  when you run the emulator -- or, if you don't, the emulator asks for it
-  when it can't find the ROMs, as on the first start of an installed
-  app, and remembers your choice for next time. **File > ROM Folder...**
-  changes it, taking effect the next time the emulator starts, since the
-  ROMs are loaded once at startup. `--roms` overrides the remembered
-  folder.
+- **The ROM folder**, holding the files directly, under the file names
+  below: the emulator folder's `roms/`, or the folder named with
+  `--roms DIR`. This is the way for a released build.
 - **The classpath**, at the paths below under `src/main/resources`, for
   running from source with `./gradlew run`. The tests that need ROMs
   find them here; without them, those tests are skipped.
@@ -310,9 +338,8 @@ emulator stops with an error naming the missing file -- by design, not a
 bug to chase further if you see it. Errors that stop the emulator at
 startup appear in a dialog as well as on the console, since an
 installed app has no console. When the problem is a ROM image -- missing,
-or failing its checksum -- that dialog offers **Choose ROM Folder...**:
-pick a folder holding good images, and the emulator uses it from its next
-start.
+or failing its checksum -- that dialog offers to open the ROM folder, to
+replace it; the emulator uses the new file from its next start.
 
 Each file must match the listed CRC32 exactly (verified automatically at
 class-load time -- a wrong or corrupted file fails loudly with a specific
@@ -381,9 +408,9 @@ Or, the same on every platform, through Gradle:
 
 | Option | Meaning |
 |---|---|
-| `--roms DIR` | Directory holding the ROM images (see [Required ROM files](#required-rom-files)). Searched before the classpath. |
-| `--config FILE` | Slot configuration (INI). Without it, the one chosen with File > Slot Configuration... if any; else every slot stays empty and the machine boots to Applesoft. |
-| `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. Without it, the folder chosen with File > Plugins Folder..., if any. |
+| `--roms DIR` | Directory holding the ROM images (see [Required ROM files](#required-rom-files)), in place of the emulator folder's `roms/`. Searched before the classpath. |
+| `--config FILE` | Slot configuration (INI). Without it, the one chosen with File > Slot Configuration..., else the emulator folder's `slots.ini` (see [The emulator folder](#the-emulator-folder)). |
+| `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. Without it, the emulator folder's `plugins/`. |
 | `--input FILE` | Game controller mapping; defaults apply without it. |
 | `--network-input PORT` | Take controller input from PadBridge over UDP on this port, instead of a local gamepad. |
 

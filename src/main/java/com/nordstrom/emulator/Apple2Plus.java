@@ -173,8 +173,6 @@ public final class Apple2Plus {
                 return;
             }
             RomFiles.setDirectory(romDirectory); // before anything loads a ROM
-        } else {
-            RomFiles.setDirectory(RomFiles.rememberedDirectory()); // null if none was ever chosen
         }
         SwingUtilities.invokeLater(() -> {
             try {
@@ -251,25 +249,25 @@ public final class Apple2Plus {
     }
 
     /**
-     * Offers the way out of a bad ROM image: choosing a ROM folder that
-     * holds good ones. The failed ROM classes can't load again in this run,
-     * so the choice is remembered for the next start, and this one ends.
+     * Offers the way out of a bad ROM image: replacing it in the ROM folder.
+     * The failed ROM class can't load again in this run, so this one ends,
+     * after opening the folder if the user asks.
      */
     private static void recoverFromRomFailure(String message) {
         System.err.println(message);
         if (!GraphicsEnvironment.isHeadless()) {
-            Object[] choices = {"Choose ROM Folder...", "Quit"};
+            Path romFolder = RomFiles.directory();
+            if (romFolder == null) { // the image came from the classpath: a build from source
+                fatal(message);
+                return;
+            }
+            Object[] choices = {"Open ROM Folder", "Quit"};
             int choice = JOptionPane.showOptionDialog(null,
-                wrap(message + "\n\nChoose a ROM folder that holds good ROM images; ReplicApple2Plus will use it "
-                    + "the next time it starts."),
+                wrap(message + "\n\nReplace the file in " + romFolder + " with a good image, then start "
+                    + "ReplicApple2Plus again. (README.md lists each file, and its checksum.)"),
                 "ReplicApple2Plus", JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE, null, choices, choices[0]);
-            Path folder = choice == 0 ? RomFolderChooser.choose(null) : null;
-            if (folder != null) {
-                RomFiles.remember(folder);
-                JOptionPane.showMessageDialog(null,
-                    "Start ReplicApple2Plus again to use the ROM images in " + folder + ".\n"
-                        + "(Starting it with --roms DIR uses that folder instead.)",
-                    "ReplicApple2Plus", JOptionPane.INFORMATION_MESSAGE);
+            if (choice == 0) {
+                EmulatorFolder.open(null, romFolder);
             }
         }
         System.exit(1);
@@ -285,9 +283,39 @@ public final class Apple2Plus {
     }
 
     /**
+     * Settles the emulator folder for this run: the one chosen before, or --
+     * on first start -- one the user chooses now, an existing folder or a
+     * new one, which is set up if it holds no slots.ini yet.
+     *
+     * @return true to go on; false if the user chose to quit
+     */
+    private static boolean establishEmulatorFolder() {
+        Path folder = EmulatorFolder.remembered();
+        if (folder == null && !GraphicsEnvironment.isHeadless()) {
+            Object[] choices = {"Choose Folder...", "Quit"};
+            int choice = JOptionPane.showOptionDialog(null,
+                "ReplicApple2Plus keeps its ROM images, plug-ins, disks and slot configuration in one folder.\n"
+                    + "Choose the folder to use: a folder you've already set up, or a new one, which will be set\n"
+                    + "up for you with a starter configuration.",
+                "Emulator Folder", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices,
+                choices[0]);
+            if (choice != 0) {
+                return false;
+            }
+            folder = EmulatorFolder.choose(null);
+            if (folder == null) {
+                return false;
+            }
+            EmulatorFolder.remember(folder);
+        }
+        EmulatorFolder.use(folder); // null only without a display: the command line and classpath then serve
+        return true;
+    }
+
+    /**
      * Makes sure the base ROM images can be found before anything needs
      * them. If they can't -- typically the first start of an installed app --
-     * asks for the folder holding them, and remembers it.
+     * asks for them to be copied into the ROM folder, and opens it.
      *
      * @return true to go on; false if the user chose to quit
      */
@@ -298,21 +326,24 @@ public final class Apple2Plus {
                 System.err.println(RomFiles.missing(missing.get(0)));
                 return false;
             }
-            Object[] choices = {"Choose ROM Folder...", "Quit"};
-            int choice = JOptionPane.showOptionDialog(null,
-                "ReplicApple2Plus needs the Apple II+ ROM images, which aren't distributed with it.\n"
-                    + "Choose the folder that holds " + String.join(" and ", missing) + ".\n"
-                    + "(README.md lists each file, and its checksum.)",
-                "ROM Images", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
-            if (choice != 0) {
+            Path romFolder = RomFiles.directory();
+            if (romFolder == null) {
+                System.err.println(RomFiles.missing(missing.get(0)));
                 return false;
             }
-            Path folder = RomFolderChooser.choose(null);
-            if (folder != null) {
-                RomFiles.setDirectory(folder);
-                RomFiles.remember(folder);
-                missing = RomFiles.missingBaseRoms();
+            Files.createDirectories(romFolder); // a set-up folder might lack it
+            Object[] choices = {"Open ROM Folder", "Check Again", "Quit"};
+            int choice = JOptionPane.showOptionDialog(null,
+                "ReplicApple2Plus needs the Apple II+ ROM images, which aren't distributed with it.\n"
+                    + "Copy " + String.join(" and ", missing) + " into\n    " + romFolder + "\n"
+                    + "then choose Check Again. (README.md lists each file, and its checksum.)",
+                "ROM Images", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, choices, choices[0]);
+            if (choice == 0) {
+                EmulatorFolder.open(null, romFolder);
+            } else if (choice != 1) {
+                return false;
             }
+            missing = RomFiles.missingBaseRoms();
         }
         return true;
     }
@@ -341,19 +372,38 @@ public final class Apple2Plus {
     /**
      * What the File menu needs to know about how the emulator was started:
      * the class loader cards are made with, and whether the command line
-     * named a slot configuration or plugins, which outrank the remembered ones.
+     * named a slot configuration, which outranks the one chosen in the menu.
      */
-    record StartupFiles(ClassLoader classLoader, boolean configGiven, boolean pluginsGiven) {}
+    record StartupFiles(ClassLoader classLoader, boolean configGiven) {}
 
     private static StartupFiles startupFiles;
 
-    /** The slot configuration in force: {@code --config}, else the remembered one, else none. */
+    /**
+     * The slot configuration in force: {@code --config}, else the one chosen
+     * with File &gt; Slot Configuration..., else the emulator folder's
+     * {@code slots.ini}, else none.
+     */
     private static Path slotConfiguration(CliArgs cli) {
         String configFile = cli.get("config");
-        return configFile != null ? Path.of(configFile) : RememberedFiles.slotConfiguration();
+        if (configFile != null) {
+            return Path.of(configFile);
+        }
+        Path chosen = RememberedFiles.slotConfiguration();
+        if (chosen != null) {
+            return chosen;
+        }
+        Path folderConfiguration = EmulatorFolder.slotConfiguration();
+        return folderConfiguration != null && Files.isRegularFile(folderConfiguration) ? folderConfiguration : null;
     }
 
     private static void createAndRun(CliArgs cli) {
+        if (!establishEmulatorFolder()) {
+            System.exit(0);
+            return;
+        }
+        if (cli.get("roms") == null && EmulatorFolder.roms() != null) {
+            RomFiles.setDirectory(EmulatorFolder.roms()); // before anything loads a ROM
+        }
         try {
             if (!ensureRoms()) {
                 System.exit(1);
@@ -365,8 +415,8 @@ public final class Apple2Plus {
         }
         ClassLoader classLoader = Apple2Plus.class.getClassLoader();
         String pluginsPath = cli.get("plugins");
-        if (pluginsPath == null && RememberedFiles.pluginsFolder() != null) {
-            pluginsPath = RememberedFiles.pluginsFolder().toString();
+        if (pluginsPath == null && EmulatorFolder.plugins() != null && Files.isDirectory(EmulatorFolder.plugins())) {
+            pluginsPath = EmulatorFolder.plugins().toString();
         }
         if (pluginsPath != null) {
             try {
@@ -395,7 +445,7 @@ public final class Apple2Plus {
 
         final ClassLoader finalClassLoader = classLoader;
         final InputMapping finalInputMapping = inputMapping;
-        startupFiles = new StartupFiles(classLoader, cli.get("config") != null, cli.get("plugins") != null);
+        startupFiles = new StartupFiles(classLoader, cli.get("config") != null);
 
         // Mutable only across a reboot -- read by the shutdown hook from a
         // different thread, hence AtomicReference rather than a plain field.
@@ -624,11 +674,13 @@ public final class Apple2Plus {
     /**
      * Swaps {@code frame}'s contents from {@code previous} (if any) to
      * {@code next} -- the screen, the toolbar, the keyboard listener, and
-     * the disk menu (if a disk controller is present). Does not call
-     * {@code frame.pack()}: the new screen has the same preferred size as
-     * the old one (same video hardware, unchanged configuration), so
-     * revalidating in place avoids an unnecessary resize/flicker that
-     * {@code pack()} would otherwise cause on every reboot.
+     * the disk menu (if a disk controller is present). On a Reboot it
+     * resizes the window only if the new machine's layout needs a different
+     * size -- a new slot configuration can change the toolbar (the
+     * VideoTerm's display-mode drop-down) or the menus, and a window left
+     * at the old size cuts off the bottom of the screen. An unchanged
+     * configuration needs no resize, so it avoids the flicker a
+     * {@code pack()} on every Reboot would cause.
      *
      * @param frame the single, reused application window
      * @param previous the machine whose components are being removed, or null on initial startup
@@ -813,6 +865,9 @@ public final class Apple2Plus {
         rewireTypingProgress(frame, next);
 
         frame.getContentPane().revalidate();
+        if (previous != null && !frame.getSize().equals(frame.getPreferredSize())) {
+            frame.pack(); // the new machine's layout needs a different window size
+        }
         frame.getContentPane().repaint();
         frame.requestFocusInWindow();
     }

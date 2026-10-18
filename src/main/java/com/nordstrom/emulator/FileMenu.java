@@ -2,7 +2,6 @@ package com.nordstrom.emulator;
 
 import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.expansion.VideoTermRenderer;
-import com.nordstrom.emulator.system.RomFiles;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.transfer.CpmTransferStarter;
 import com.nordstrom.emulator.transfer.HostTransferCard;
@@ -39,13 +38,12 @@ import java.util.prefs.Preferences;
  * what it prints on the VideoTerm (TRANSFER-CARD.md 8.5). It's enabled
  * once CP/M has initialized the transfer card since the last RESET.
  * <p>
- * Slot Configuration... and Plugins Folder... stand in for {@code --config}
- * and {@code --plugins}, which an app started from an installer never
- * gets: the choices are remembered (RememberedFiles), and the options,
- * when given, take precedence. A slot configuration applies at the next
- * Reboot; a plugins folder, at the next start. ROM Folder... chooses where
- * the ROM images are read from (RomFiles), for the next start: the ROMs
- * are loaded once, as the emulator starts.
+ * Slot Configuration... chooses a slot configuration other than the
+ * emulator folder's own slots.ini (EmulatorFolder), remembered, and
+ * applied at the next Reboot; {@code --config}, when given, takes
+ * precedence. Emulator Folder... chooses another emulator folder, for the
+ * next start; Open Emulator Folder shows the current one, where the ROM
+ * images, plug-ins and disks go.
  * <p>
  * Deliberately no keyboard shortcuts: these are menu actions only.
  */
@@ -94,19 +92,20 @@ final class FileMenu {
         slotConfiguration.addActionListener(event -> chooseSlotConfiguration(parent, startup));
         menu.add(slotConfiguration);
 
-        JMenuItem pluginsFolder = new JMenuItem("Plugins Folder...");
-        pluginsFolder.addActionListener(event -> choosePluginsFolder(parent, startup));
-        menu.add(pluginsFolder);
+        JMenuItem emulatorFolder = new JMenuItem("Emulator Folder...");
+        emulatorFolder.addActionListener(event -> chooseEmulatorFolder(parent));
+        menu.add(emulatorFolder);
 
-        JMenuItem romFolder = new JMenuItem("ROM Folder...");
-        romFolder.addActionListener(event -> chooseRomFolder(parent));
-        menu.add(romFolder);
+        JMenuItem openEmulatorFolder = new JMenuItem("Open Emulator Folder");
+        openEmulatorFolder.addActionListener(event -> EmulatorFolder.open(parent, EmulatorFolder.path()));
+        menu.add(openEmulatorFolder);
 
         menu.addMenuListener(new MenuListener() {
             @Override
             public void menuSelected(MenuEvent e) {
                 startCpmTransfer.setEnabled(transferCard != null && videoTerm != null
                     && transferCard.servedByCpm() && !starting.get());
+                openEmulatorFolder.setEnabled(EmulatorFolder.path() != null);
             }
 
             @Override
@@ -175,21 +174,19 @@ final class FileMenu {
     }
 
     /**
-     * Chooses the folder the ROM images are read from, and remembers it.
-     * The ROMs are loaded once, as the emulator starts, so the choice takes
-     * effect the next time it does -- Reboot rebuilds the machine, but not
-     * the ROMs it loaded.
+     * Chooses another emulator folder -- an existing one, or a new one,
+     * which is set up -- and remembers it for the next start, when its ROM
+     * images and plug-ins are loaded.
      */
-    private static void chooseRomFolder(Component parent) {
-        Path folder = RomFolderChooser.choose(parent);
+    private static void chooseEmulatorFolder(Component parent) {
+        Path folder = EmulatorFolder.choose(parent);
         if (folder == null) {
             return;
         }
-        RomFiles.remember(folder);
+        EmulatorFolder.remember(folder);
         JOptionPane.showMessageDialog(parent,
-            "ReplicApple2Plus will read its ROM images from " + folder + " the next time it starts.\n"
-                + "(Starting it with --roms DIR uses that folder instead, for that run.)",
-            "ROM Folder", JOptionPane.INFORMATION_MESSAGE);
+            "ReplicApple2Plus will use " + folder + " the next time it starts.",
+            "Emulator Folder", JOptionPane.INFORMATION_MESSAGE);
     }
 
     /**
@@ -218,26 +215,6 @@ final class FileMenu {
                     + "This run was started with --config, which Reboot keeps using."
                 : "The machine will use " + file + " when you press Reboot.",
             "Slot Configuration", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    /**
-     * Chooses the folder plug-in cards are loaded from, and remembers it. Its
-     * jars are loaded as the emulator starts, so it takes effect then.
-     */
-    private static void choosePluginsFolder(Component parent, Apple2Plus.StartupFiles startup) {
-        JFileChooser chooser = new JFileChooser(RememberedFiles.pluginsFolder() != null
-            ? RememberedFiles.pluginsFolder().toFile() : null);
-        chooser.setDialogTitle("Plugins Folder");
-        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
-            return;
-        }
-        Path folder = chooser.getSelectedFile().toPath();
-        RememberedFiles.rememberPluginsFolder(folder);
-        JOptionPane.showMessageDialog(parent,
-            "ReplicApple2Plus will load plug-in cards from " + folder + " the next time it starts"
-                + (startup.pluginsGiven() ? " without --plugins." : "."),
-            "Plugins Folder", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private static void promptAndTypeFile(TypingFeeder feeder, Component parent, Executor emulationThread) {

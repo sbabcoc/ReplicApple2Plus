@@ -186,11 +186,14 @@ tasks.register('runtime', Exec) {
     group = 'distribution'
     description = 'Builds a minimal Java runtime for the application with jlink.'
     dependsOn 'cleanRuntime'
-    outputs.dir runtimeImageDir
+    // No outputs.dir: Gradle creates a task's declared output directories
+    // before running it, and jlink refuses to write into one that exists.
     doFirst {
         commandLine jdkTool('jlink'),
             '--add-modules', runtimeModules.join(','),
-            '--strip-debug', '--compress', 'zip-6', '--no-header-files', '--no-man-pages',
+            // '2' is ZIP compression; the toolchain's JDK 17 jlink knows only 0-2
+            // (the zip-0..zip-9 levels arrived in JDK 21, which still accepts '2')
+            '--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages',
             '--output', runtimeImageDir.get().asFile.absolutePath
     }
 }
