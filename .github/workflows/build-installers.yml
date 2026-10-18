@@ -54,6 +54,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # setup-java writes a Maven ~/.m2/settings.xml with a 'github' server
+      # whose password is the placeholder ${env.GITHUB_TOKEN}. build.gradle's
+      # credential lookup finds that server, takes the {...} in the
+      # placeholder for an encrypted password, and fails for want of
+      # ~/.m2/settings-security.xml -- confirmed: the first run of this
+      # workflow stopped there, at currentVersion. Building installers needs
+      # no Maven credentials (the version comes from the local tags, and
+      # nothing is pushed), so the generated file is simply removed.
+      - name: Remove setup-java's Maven settings
+        run: rm -f ~/.m2/settings.xml
+
       # jpackage needs fakeroot to build a .deb; dpkg-deb is already there.
       - name: Install fakeroot
         if: runner.os == 'Linux'
