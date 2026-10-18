@@ -31,9 +31,17 @@ jobs:
       fail-fast: false # one platform's failure shouldn't cancel the others
       matrix:
         include:
-          - os: ubuntu-latest   # x86-64 Linux: the amd64 .deb
-          - os: windows-latest  # x86-64 Windows: the .msi
-          - os: macos-latest    # Apple Silicon macOS: the .dmg
+          # Ubuntu 22.04, not the latest: jpackage names each library
+          # package the bundled runtime needs as the build machine names it.
+          # On Ubuntu 24.04 the sound library is libasound2t64, which Debian
+          # 12 and Ubuntu 22.04 don't have, so a package built there won't
+          # install on them -- confirmed in the 1.0.3 packages' Depends. Built
+          # on 22.04 it's libasound2, which the newer systems' libasound2t64
+          # also provides, so the package installs on all of them.
+          - os: ubuntu-22.04       # x86-64 Linux: the amd64 .deb
+          - os: ubuntu-22.04-arm   # ARM Linux: the arm64 .deb
+          - os: windows-latest     # x86-64 Windows: the .msi
+          - os: macos-latest       # Apple Silicon macOS: the .dmg
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}

@@ -106,9 +106,9 @@ users supply their own with `--roms DIR`.
 
 jpackage builds an installer only for the platform it runs on, so the
 **Build Installers** workflow (`.github/workflows/build-installers.yml`)
-builds them on GitHub's runners: the `.deb` on x86-64 Linux, the `.msi`
-on Windows (installing WiX 3 if needed), and the `.dmg` on Apple Silicon
-macOS. Publishing the release in step 4 starts it, and it attaches each
+builds them on GitHub's runners: `.deb` packages on x86-64 and ARM
+Linux (`amd64` and `arm64`), the `.msi` on Windows (installing WiX 3 if
+needed), and the `.dmg` on Apple Silicon macOS. Publishing the release in step 4 starts it, and it attaches each
 installer to the release. Check the Actions tab for its result.
 
 To build installers for an earlier release, or rebuild them, run the
@@ -116,8 +116,8 @@ workflow by hand from the Actions tab (or `gh workflow run build-installers.yml
 -f tag=v1.0.3`); an installer already attached under the same name is
 replaced.
 
-An installer for another platform -- an `arm64` `.deb`, say -- can still
-be built on a machine of that kind and attached by hand:
+An installer for another platform -- an Intel `.dmg`, say -- can still be
+built on a machine of that kind and attached by hand:
 
 ```bash
 git checkout v1.0.0
