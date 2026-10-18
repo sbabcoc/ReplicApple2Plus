@@ -52,12 +52,12 @@ jobs:
     steps:
       # The whole history, with tags: axion-release derives the version from
       # the tag, and a shallow clone would leave it without one.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'

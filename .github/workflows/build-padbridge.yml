@@ -34,9 +34,9 @@ jobs:
       run:
         working-directory: android-bridge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -64,7 +64,7 @@ jobs:
 
       # Provisions Gradle itself on the runner, so no gradlew wrapper
       # needs to be checked into this repo at all.
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
@@ -76,7 +76,7 @@ jobs:
           echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Publish as a Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: padbridge-${{ github.sha }}
           name: PadBridge (${{ github.sha }})
