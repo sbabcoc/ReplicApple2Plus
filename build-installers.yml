@@ -1,0 +1,91 @@
+# Builds ReplicApple2Plus's jpackage installers on GitHub's own runners and
+# attaches them to the release they belong to. jpackage cannot cross-build
+# -- each installer has to be made on its own platform -- and these runners
+# supply the platforms there's no local machine for, x86-64 Linux in
+# particular.
+#
+# It runs by itself when a release is published (RELEASING.md step 4), and
+# can be run by hand from the Actions tab for any existing tag, to fill in
+# installers for an earlier release or rebuild one. An installer already
+# attached under the same name is replaced.
+#
+# The ROM images play no part: the jars leave them out, and jpackage runs
+# no tests.
+name: Build Installers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build installers for, e.g. v1.0.3'
+        required: true
+
+permissions:
+  contents: write # needed to attach the installers to the release
+
+jobs:
+  installer:
+    strategy:
+      fail-fast: false # one platform's failure shouldn't cancel the others
+      matrix:
+        include:
+          - os: ubuntu-latest   # x86-64 Linux: the amd64 .deb
+          - os: windows-latest  # x86-64 Windows: the .msi
+          - os: macos-latest    # Apple Silicon macOS: the .dmg
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash # Git Bash on Windows, so every step reads the same
+    steps:
+      # The whole history, with tags: axion-release derives the version from
+      # the tag, and a shallow clone would leave it without one.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # jpackage needs fakeroot to build a .deb; dpkg-deb is already there.
+      - name: Install fakeroot
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+      # JDK 17's jpackage builds an .msi with WiX 3's candle and light;
+      # later WiX versions changed those tools, and JDK 17 doesn't support
+      # them. Installed only if the runner image doesn't already have it.
+      - name: Install WiX 3
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --version=3.14.1 -y --no-progress
+            $wix = Get-ChildItem 'C:\Program Files (x86)' -Filter 'WiX Toolset v3*' -Directory | Select-Object -First 1
+            Add-Content $env:GITHUB_PATH (Join-Path $wix.FullName 'bin')
+          }
+
+      - name: Check the version
+        run: ./gradlew currentVersion --no-daemon
+
+      - name: Build the installer
+        run: ./gradlew jpackage --no-daemon
+
+      - name: Attach it to the release
+        run: |
+          installer=$(find build/jpackage -maxdepth 1 -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.deb' -o -name '*.rpm' \) | head -1)
+          if [ -z "$installer" ]; then
+            echo "No installer found in build/jpackage" >&2
+            ls -l build/jpackage >&2
+            exit 1
+          fi
+          echo "Attaching $installer to $TAG"
+          gh release upload "$TAG" "$installer" --clobber

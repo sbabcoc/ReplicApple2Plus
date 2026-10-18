@@ -102,21 +102,26 @@ gh release create v1.0.0 build/distributions/ReplicApple2Plus-1.0.0.zip \
 The distribution zip holds the jar and launch scripts, without ROMs; its
 users supply their own with `--roms DIR`.
 
-### 5. Installers (optional)
+### 5. Installers
 
-jpackage builds an installer only for the platform it runs on, so each
-one is built on its own machine -- `.dmg` on macOS, `.msi` on Windows
-(jpackage needs the WiX toolset installed there), `.deb` on Linux --
-from the tagged commit:
+jpackage builds an installer only for the platform it runs on, so the
+**Build Installers** workflow (`.github/workflows/build-installers.yml`)
+builds them on GitHub's runners: the `.deb` on x86-64 Linux, the `.msi`
+on Windows (installing WiX 3 if needed), and the `.dmg` on Apple Silicon
+macOS. Publishing the release in step 4 starts it, and it attaches each
+installer to the release. Check the Actions tab for its result.
+
+To build installers for an earlier release, or rebuild them, run the
+workflow by hand from the Actions tab (or `gh workflow run build-installers.yml
+-f tag=v1.0.3`); an installer already attached under the same name is
+replaced.
+
+An installer for another platform -- an `arm64` `.deb`, say -- can still
+be built on a machine of that kind and attached by hand:
 
 ```bash
 git checkout v1.0.0
 ./gradlew jpackage
-```
-
-Then attach each to the GitHub release:
-
-```bash
 gh release upload v1.0.0 build/jpackage/<installer file>
 ```
 
