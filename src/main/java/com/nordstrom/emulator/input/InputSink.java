@@ -25,10 +25,19 @@ public interface InputSink {
     void disconnectPaddle(int channel);
 
     /**
-     * Sets one pushbutton.
+     * Sets one pushbutton, plugging it in if it wasn't.
      *
      * @param button 0-2
      * @param pressed true while held
      */
     void setButton(int button, boolean pressed);
+
+    /**
+     * Unplugs one pushbutton: nothing attached, so its input floats high
+     * and software reading it sees it pressed, as on a real II+ with
+     * nothing in the game port.
+     *
+     * @param button 0-2
+     */
+    void disconnectButton(int button);
 }

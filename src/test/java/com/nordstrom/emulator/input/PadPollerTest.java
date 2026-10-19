@@ -22,6 +22,7 @@ class PadPollerTest {
         @Override public void setPaddle(int channel, int position) { events.add("P" + channel + "=" + position); }
         @Override public void disconnectPaddle(int channel) { events.add("P" + channel + "=open"); }
         @Override public void setButton(int button, boolean pressed) { events.add("B" + button + "=" + pressed); }
+        @Override public void disconnectButton(int button) { events.add("B" + button + "=open"); }
     }
 
     private static final class ScriptedProvider implements PadProvider {
@@ -105,7 +106,8 @@ class PadPollerTest {
 
         poller.stop(2000);
 
-        assertEquals("B0=false", lastEventFor(sink, "B0"), "no button may stay pressed after polling stops");
+        assertEquals("B0=open", lastEventFor(sink, "B0"),
+            "no button may stay pressed after polling stops: the pad is gone, so the button is unplugged");
         assertEquals("P0=open", lastEventFor(sink, "P0"),
             "once polling stops the pad is gone: the paddle must read as unplugged, not stay deflected or centered");
     }
@@ -156,7 +158,7 @@ class PadPollerTest {
         poller.stop(2000);
 
         assertTrue(log.toString().contains("device vanished"), log.toString());
-        assertEquals("B0=false", lastEventFor(sink, "B0"), "a held button must be released, not stuck");
+        assertEquals("B0=open", lastEventFor(sink, "B0"), "a held button must be unplugged, not stuck held");
     }
 
     @Test

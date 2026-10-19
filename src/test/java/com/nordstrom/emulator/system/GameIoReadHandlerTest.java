@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GameIoReadHandlerTest {
 
     private static GameIoReadHandler handler(PaddleTimers paddles, GameButtons buttons) {
-        return new GameIoReadHandler(paddles, buttons);
+        return new GameIoReadHandler(paddles, buttons, new ShiftKeyMod());
     }
 
     @Test
@@ -36,10 +36,13 @@ class GameIoReadHandlerTest {
     }
 
     @Test
-    void pushbuttonsReadClearUntilPressed() {
-        GameIoReadHandler handler = handler(new PaddleTimers(), new GameButtons());
+    void pushbuttonsReadSetUntilSomethingIsPluggedIn() {
+        GameButtons buttons = new GameButtons();
+        GameIoReadHandler handler = handler(new PaddleTimers(), buttons);
         for (int offset = 1; offset <= 3; offset++) {
-            assertEquals(0x00, handler.read(offset), "button at offset " + offset + " starts released");
+            assertEquals(0x80, handler.read(offset), "button at offset " + offset + " floats high, unplugged");
+            buttons.setPressed(offset - 1, false);
+            assertEquals(0x00, handler.read(offset), "button at offset " + offset + " plugged in, released");
         }
     }
 
@@ -47,6 +50,9 @@ class GameIoReadHandlerTest {
     void eachPushbuttonMapsToItsOwnOffset() {
         GameButtons buttons = new GameButtons();
         GameIoReadHandler handler = handler(new PaddleTimers(), buttons);
+        for (int button = 0; button < 3; button++) {
+            buttons.setPressed(button, false); // plug all three in
+        }
 
         for (int button = 0; button < 3; button++) {
             buttons.setPressed(button, true);

@@ -4,7 +4,8 @@ package com.nordstrom.emulator.system;
  * Dispatches $C060-$C06F -- the real Apple II+ "game I/O" switch block:
  * $C060 (cassette input), $C061-$C063 (joystick/paddle pushbuttons, to
  * {@link GameButtons}), and $C064-$C067 (paddle analog reads, to
- * {@link PaddleTimers#read}).
+ * {@link PaddleTimers#read}). An input the {@link ShiftKeyMod} is wired to
+ * reads that key instead, whichever input it is.
  * <p>
  * A {@code switch}, not a range check: this reads directly as "offset 0
  * does X, offsets 1-3 do Y, offsets 4-7 do Z" -- matching how this
@@ -34,18 +35,24 @@ final class GameIoReadHandler implements AddressRangeHandler {
 
     private final PaddleTimers paddles;
     private final GameButtons buttons;
+    private final ShiftKeyMod shiftKeyMod;
 
-    GameIoReadHandler(PaddleTimers paddles, GameButtons buttons) {
+    GameIoReadHandler(PaddleTimers paddles, GameButtons buttons, ShiftKeyMod shiftKeyMod) {
         this.paddles = paddles;
         this.buttons = buttons;
+        this.shiftKeyMod = shiftKeyMod;
     }
 
     @Override
     public int read(int offset) {
-        return switch (offset & 7) { // $C068-$C06F mirror $C060-$C067 -- see class Javadoc
+        int input = offset & 7; // $C068-$C06F mirror $C060-$C067 -- see class Javadoc
+        if (shiftKeyMod.drives(input)) {
+            return shiftKeyMod.read(input);
+        }
+        return switch (input) {
             case 0 -> 0x00; // cassette input: no cassette modeled, always "no signal"
-            case 1, 2, 3 -> buttons.read((offset & 7) - 1);
-            default -> paddles.read((offset & 7) - 4); // 4-7
+            case 1, 2, 3 -> buttons.read(input - 1);
+            default -> paddles.read(input - 4); // 4-7
         };
     }
 

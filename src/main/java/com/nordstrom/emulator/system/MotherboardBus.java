@@ -45,7 +45,7 @@ import com.nordstrom.emulator.MemoryBus;
  *   <li>$C040-$C04F: utility strobe ({@link InertSwitchHandler} -- nothing on the pin)</li>
  *   <li>$0000-$BFFF: main RAM ({@link RamHandler})</li>
  *   <li>$C050-$C05F: video mode switches ({@link VideoSoftSwitches})</li>
- *   <li>$C060-$C06F: game I/O -- cassette input, pushbuttons ({@link GameButtons}), paddle reads ({@link GameIoReadHandler})</li>
+ *   <li>$C060-$C06F: game I/O -- cassette input, pushbuttons ({@link GameButtons}), paddle reads ({@link GameIoReadHandler}), and the {@link ShiftKeyMod} wired to any of them</li>
  *   <li>$C070-$C07F: paddle trigger strobe ({@link PaddleStrobeHandler})</li>
  *   <li>$C080-$C08F: slot 0's I/O switches ({@link SlotZeroIoHandler})</li>
  *   <li>$C090-$C0FF: slots 1-7's I/O switches ({@link SlotIoHandler})</li>
@@ -67,6 +67,7 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
     private final KeyboardRegister keyboardRegister = new KeyboardRegister();
     private final PaddleTimers paddleTimers = new PaddleTimers();
     private final GameButtons gameButtons = new GameButtons();
+    private final ShiftKeyMod shiftKeyMod = new ShiftKeyMod();
     private final SpeakerToggle speakerToggle = new SpeakerToggle();
     private final SpeakerOutput speakerOutput;
     private final VideoSoftSwitches videoSoftSwitches = new VideoSoftSwitches();
@@ -126,7 +127,7 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
         addressSpace.register(0xC030, 0xC03F, speakerToggle);
         addressSpace.register(0xC040, 0xC04F, new InertSwitchHandler());
         addressSpace.register(0xC050, 0xC05F, videoSoftSwitches);
-        addressSpace.register(0xC060, 0xC06F, new GameIoReadHandler(paddleTimers, gameButtons));
+        addressSpace.register(0xC060, 0xC06F, new GameIoReadHandler(paddleTimers, gameButtons, shiftKeyMod));
         addressSpace.register(0xC070, 0xC07F, new PaddleStrobeHandler(paddleTimers));
 
         FloatingBus floatingBus = new FloatingBus(videoScanner, addressSpace);
@@ -201,6 +202,18 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
      */
     public GameButtons gameButtons() {
         return gameButtons;
+    }
+
+    /**
+     * The shift-key modification wired into $C060-$C067 -- how the host's
+     * Shift and Control keys reach software that polls for them, and how
+     * the wiring is chosen. Starts {@link ShiftKeyMod.Wiring#NOT_CONNECTED}.
+     * Emulator state: call it from the emulation thread only.
+     *
+     * @return this machine's shift-key modification
+     */
+    public ShiftKeyMod shiftKeyMod() {
+        return shiftKeyMod;
     }
 
     /**

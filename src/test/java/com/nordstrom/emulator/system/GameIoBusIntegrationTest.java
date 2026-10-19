@@ -36,6 +36,9 @@ class GameIoBusIntegrationTest {
     @Test
     void aPushbuttonPressReachesTheCpuAtItsAbsoluteAddress() {
         try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
+            for (int button = 0; button < 3; button++) {
+                bus.gameButtons().setPressed(button, false); // plug all three in
+            }
             assertEquals(0x00, bus.read(0xC061));
             bus.gameButtons().setPressed(0, true);
             assertEquals(0x80, bus.read(0xC061), "button 0 -> $C061");

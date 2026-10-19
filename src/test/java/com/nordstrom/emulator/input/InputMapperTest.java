@@ -22,6 +22,7 @@ class InputMapperTest {
         @Override public void setPaddle(int channel, int position) { events.add("P" + channel + "=" + position); }
         @Override public void disconnectPaddle(int channel) { events.add("P" + channel + "=open"); }
         @Override public void setButton(int button, boolean pressed) { events.add("B" + button + "=" + pressed); }
+        @Override public void disconnectButton(int button) { events.add("B" + button + "=open"); }
     }
 
     private static final float DEAD = 0.15f;
@@ -223,10 +224,10 @@ class InputMapperTest {
     // connected is told there always is one.
 
     @Test
-    void noPadConnectedLeavesEveryPaddleUnpluggedAndEveryButtonReleased() {
+    void noPadConnectedLeavesEveryPaddleAndEveryButtonUnplugged() {
         RecordingSink sink = new RecordingSink();
         mapperWithDefaults(sink).apply(PadSnapshot.ABSENT);
-        assertEquals(List.of("P0=open", "P1=open", "P2=open", "P3=open", "B0=false", "B1=false", "B2=false"), sink.events);
+        assertEquals(List.of("P0=open", "P1=open", "P2=open", "P3=open", "B0=open", "B1=open", "B2=open"), sink.events);
     }
 
     @Test
@@ -236,18 +237,33 @@ class InputMapperTest {
         mapper.apply(PadSnapshot.ABSENT);
         sink.events.clear();
         mapper.apply(PadSnapshot.NEUTRAL);
-        assertEquals(List.of("P0=128", "P1=128", "P2=128", "P3=128"), sink.events,
-            "plugging a pad in centers each bound paddle; the buttons were released and stay so");
+        assertEquals(List.of("P0=128", "P1=128", "P2=128", "P3=128", "B0=false", "B1=false", "B2=false"), sink.events,
+            "plugging a pad in centers each bound paddle and plugs in each bound button, released");
     }
 
     @Test
-    void aPadThatDisappearsUnplugsThePaddlesAndReleasesTheButtons() {
+    void aPadThatDisappearsUnplugsThePaddlesAndTheButtons() {
         RecordingSink sink = new RecordingSink();
         InputMapper mapper = mapperWithDefaults(sink);
         mapper.apply(PadSnapshot.builder().axis(PadAxis.LEFT_X, 1f).press(PadButton.A).build());
         sink.events.clear();
         mapper.apply(PadSnapshot.ABSENT);
-        assertEquals(List.of("P0=open", "P1=open", "P2=open", "P3=open", "B0=false"), sink.events);
+        assertEquals(List.of("P0=open", "P1=open", "P2=open", "P3=open", "B0=open", "B1=open", "B2=open"), sink.events);
+    }
+
+    @Test
+    void aButtonWithNothingBoundToItStaysUnpluggedEvenWhileAPadIsConnected() {
+        InputMapping twoButtons = InputMapping.fromSections(IniFile.parse(List.of("[button2]", "pad =")));
+        RecordingSink sink = new RecordingSink();
+        InputMapper mapper = new InputMapper(twoButtons, sink);
+
+        mapper.apply(PadSnapshot.NEUTRAL);
+        assertEquals(List.of("P0=128", "P1=128", "P2=128", "P3=128", "B0=false", "B1=false", "B2=open"), sink.events,
+            "like a real two-button Apple joystick, which leaves PB2 unwired");
+
+        sink.events.clear();
+        mapper.apply(PadSnapshot.builder().press(PadButton.X).build());
+        assertEquals(List.of(), sink.events, "there is nothing attached for X to press");
     }
 
     @Test

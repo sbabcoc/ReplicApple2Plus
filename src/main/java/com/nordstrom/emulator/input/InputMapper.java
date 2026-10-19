@@ -15,6 +15,11 @@ package com.nordstrom.emulator.input;
  * held at center. A pad at rest is a joystick plugged in and centered,
  * a different thing that the Apple II can tell apart.
  * <p>
+ * Pushbuttons follow the same rule: unplugged with no pad connected, and
+ * unplugged when the mapping binds no pad button to them. An unplugged
+ * pushbutton reads as pressed, because the II+ has no pull-down on those
+ * inputs -- a real controller supplies its own (see {@code GameButtons}).
+ * <p>
  * Only changes are reported, except for the very first snapshot, which
  * reports everything: the machine's own idea of where the paddles sit
  * before any input arrives is not something to rely on, so the first
@@ -32,7 +37,9 @@ public final class InputMapper {
     /** Stands for "unplugged" in {@link #lastPaddle}; no real position is negative. */
     private static final int UNPLUGGED = -1;
 
-    private final int[] lastPaddle = new int[InputMapping.PADDLES];    private final boolean[] lastButton = new boolean[InputMapping.BUTTONS];
+    private final int[] lastPaddle = new int[InputMapping.PADDLES];
+    /** Per button: {@link #UNPLUGGED}, or 1 held, 0 released. */
+    private final int[] lastButton = new int[InputMapping.BUTTONS];
     private boolean primed;
 
     /**
@@ -45,6 +52,7 @@ public final class InputMapper {
         this.mapping = mapping;
         this.sink = sink;
         java.util.Arrays.fill(lastPaddle, UNPLUGGED); // so an un-sent slot never reads as "sent at 0"
+        java.util.Arrays.fill(lastButton, UNPLUGGED);
     }
 
     /**
@@ -68,13 +76,22 @@ public final class InputMapper {
             }
         }
         for (int button = 0; button < InputMapping.BUTTONS; button++) {
-            boolean down = false;
-            for (PadButton source : mapping.button(button)) {
-                down |= snapshot.pressed(source);
+            int state = UNPLUGGED;
+            if (snapshot.isPresent() && !mapping.button(button).isEmpty()) {
+                state = 0;
+                for (PadButton source : mapping.button(button)) {
+                    if (snapshot.pressed(source)) {
+                        state = 1;
+                    }
+                }
             }
-            if (!primed || down != lastButton[button]) {
-                lastButton[button] = down;
-                sink.setButton(button, down);
+            if (!primed || state != lastButton[button]) {
+                lastButton[button] = state;
+                if (state == UNPLUGGED) {
+                    sink.disconnectButton(button);
+                } else {
+                    sink.setButton(button, state == 1);
+                }
             }
         }
         primed = true;

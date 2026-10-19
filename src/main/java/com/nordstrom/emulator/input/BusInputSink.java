@@ -44,4 +44,9 @@ public final class BusInputSink implements InputSink {
     public void setButton(int button, boolean pressed) {
         emulationThread.execute(() -> bus.gameButtons().setPressed(button, pressed));
     }
+
+    @Override
+    public void disconnectButton(int button) {
+        emulationThread.execute(() -> bus.gameButtons().disconnect(button));
+    }
 }

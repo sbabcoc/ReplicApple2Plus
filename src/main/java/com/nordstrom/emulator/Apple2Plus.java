@@ -101,8 +101,9 @@ import java.util.function.Supplier;
  * dependency: it needs the Jamepad jar in the {@code --plugins}
  * directory or on the class path, and without it everything else works
  * exactly as before. With no pad connected the paddles read as
- * unplugged (255), exactly as real hardware does with nothing in the
- * game port; a connected pad at rest reads centered (128).
+ * unplugged (255) and the pushbuttons as pressed (their inputs float
+ * high), exactly as real hardware does with nothing in the game port; a
+ * connected pad at rest reads centered (128), its buttons released.
  * <p>
  * {@code --network-input PORT} selects {@link NetworkPadProvider} instead
  * of Jamepad -- the route for Android/Termux/PRoot, where an
@@ -606,6 +607,7 @@ public final class Apple2Plus {
         }
 
         MotherboardBus bus = new MotherboardBus(slots);
+        bus.shiftKeyMod().setWiring(MachineMenu.rememberedWiring());
         Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
@@ -851,12 +853,15 @@ public final class Apple2Plus {
         menuBar.add(FileMenu.build(next.typing(), frame, next.loop(), next.transferCard(), next.videoTerm(),
             startupFiles));
         menuBar.add(EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()));
+        // next's loop isn't running yet, so reading its wiring here is safe
+        menuBar.add(MachineMenu.build(next.bus().shiftKeyMod(), next.bus().shiftKeyMod().wiring(), next.loop()));
         if (next.disk() != null) {
             menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));
         }
         frame.setJMenuBar(menuBar);
 
-        KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(), next.loop());
+        KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(),
+            next.bus().shiftKeyMod(), next.loop());
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 

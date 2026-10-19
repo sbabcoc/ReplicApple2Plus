@@ -77,7 +77,17 @@ Companion documents:
   SDL binding)
   or, on Android, by the companion PadBridge app over UDP -- see
   [android-bridge/README.md](android-bridge/README.md). Controller
-  mapping is configurable.
+  mapping is configurable. With nothing connected, paddles read 255 and
+  pushbuttons read pressed: the II+ has no pull-down on its button inputs,
+  so an unwired one floats high, as on real hardware.
+- The shift-key mod: the host's Shift key (and, in two wirings, Control)
+  wired to a game I/O input, so lowercase-aware software can tell when
+  Shift is held -- the II+ keyboard itself sends uppercase only. Chosen
+  from **Machine ▸ Shift Key Mod**, with MAME's wirings: SW2 = Shift
+  (`$C063`, the default), PADDL2 = Shift with PADDL3 = Ctrl
+  (`$C066`/`$C067`), SW0 = Shift with SW1 = Ctrl (`$C061`/`$C062`), or Not
+  connected. A wired input reads the key, active low, and no longer reads
+  the gamepad.
 
 **Disks** (Disk II controller, two drives)
 - WOZ 2 images (5.25"), DOS-order DSK images (`.dsk`/`.do`) and
@@ -135,7 +145,8 @@ Companion documents:
   [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., Slot
   Configuration..., Emulator Folder..., and Open Emulator Folder (see
   [The emulator folder](#the-emulator-folder)); **Edit** menu: Copy Screen
-  Text, Copy Screen Image, and Paste. Typed or pasted text is fed to the
+  Text, Copy Screen Image, and Paste; **Machine** menu: Shift Key Mod,
+  applied at once and remembered across Reboot and launches. Typed or pasted text is fed to the
   keyboard at exactly the pace the running software reads it, and a line
   at a time -- after each Return, the next line waits for the screen to
   settle -- so software that buffers keys, like CP/M, isn't overrun.
@@ -203,7 +214,8 @@ catalog — regenerate it, don't trust it to stay current).
   substitution is actually requested.
 - **Lowercase on the 40-column screen.** The stock character ROM has no
   lowercase glyphs, and the II+ keyboard folds typing to uppercase. The
-  VideoTerm displays lowercase on its 80-column screen.
+  VideoTerm displays lowercase on its 80-column screen, and software that
+  supports the shift-key mod types it.
 - **The genuinely chip-unstable illegal opcodes** (`ANE`/`XAA`, `LXA`,
   `SHA`, `SHX`, `SHY`, `TAS`) throw `UnsupportedOperationException` rather
   than encode a guess -- real NMOS chips disagree with each other on
