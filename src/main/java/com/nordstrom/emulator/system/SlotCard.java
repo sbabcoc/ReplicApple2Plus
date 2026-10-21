@@ -33,40 +33,44 @@ import java.util.Set;
  * special syntax -- rather than one that merely resembles the convention.
  * {@link java.util.ServiceLoader} requires exactly this shape.
  * <p>
- * A card's short config-file name ({@link #getShortName}) and recognized
- * parameters ({@link #getSupportedParameters}) are declared as real code
- * on the card itself, not as hand-typed comments in a separate file.
- * That's deliberate: a comment living apart from the class it describes
- * is a second source of truth that can silently drift from the first.
- * Because construction is genuinely no-arg, discovering this metadata is
- * safe and cheap: construct a throwaway instance, ask it two questions,
- * discard it.
+ * A card's identity and settings -- its short config-file name
+ * ({@link #getShortName}), the name a host UI shows ({@link #getDisplayName})
+ * and the settings it accepts ({@link #getParameters}) -- are declared as
+ * real code on the card itself, not as hand-typed comments in a separate
+ * file. That's deliberate: a comment living apart from the class it
+ * describes is a second source of truth that can silently drift from the
+ * first. Discovering them means constructing a throwaway instance of every
+ * provider and asking, so a card's constructor must stay cheap: anything
+ * expensive, like loading a ROM image, belongs in {@link #configure}.
  */
 public interface SlotCard {
 
     /**
-     * A short config-file alias for this card type, or null (the
-     * default) for none -- a card with no short name is still loadable,
-     * just by its fully-qualified class name only.
+     * The name a slot configuration's {@code type} key uses for this card
+     * -- the only way a configuration names a card. Unique among all the
+     * cards a class loader can see.
      *
-     * @return the short name, or null for none
+     * @return the short name, such as {@code disk2}
      */
-    default String getShortName() {
-        return null;
-    }
+    String getShortName();
 
     /**
-     * The configuration keys this card recognizes, or null (the default)
-     * to accept anything with no validation. When non-null, both a
-     * config file supplying an unrecognized key and this card's own
-     * {@link #configure} querying an undeclared one fail loudly rather
-     * than silently.
+     * The card's name as a host UI shows it.
      *
-     * @return the recognized parameter names, or null for no validation
+     * @return the display name, such as {@code Disk II}
      */
-    default Set<String> getSupportedParameters() {
-        return null;
-    }
+    String getDisplayName();
+
+    /**
+     * The settings this card accepts, in the order a host UI should show
+     * them; empty for a card with none. A configuration supplying any other
+     * key, or a value a setting's {@link CardParameter#problem} rejects,
+     * fails to load -- and so does this card's own {@link #configure}
+     * reading a key not listed here.
+     *
+     * @return the card's settings
+     */
+    List<CardParameter> getParameters();
 
     /**
      * Called exactly once, immediately after construction and before any

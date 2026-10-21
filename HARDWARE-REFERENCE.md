@@ -551,7 +551,7 @@ character is output", under the standard convention -- and `$C058`
 only for that one command.
 
 **Emulator display modes** (chosen with the toolbar's display-mode
-drop-down; `display=` in `slots.ini` sets the initial mode). Besides the
+drop-down, and remembered across Reboot and launches). Besides the
 two below, **Apple Video** and **Slot 3 Video** hold a single window on
 one source, like a manual monitor switch -- for software that leaves
 80-column mode without clearing AN0. Merlin (1983) is one: its `VID 0`

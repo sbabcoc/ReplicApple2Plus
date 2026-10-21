@@ -14,17 +14,17 @@ import java.util.List;
  * This is deliberately NOT a persisted or auto-synced catalog -- writing
  * one into {@code slots.ini} as comments would relocate, rather than
  * remove, exactly the drift problem this project already eliminated once
- * by moving short names and parameters off of hand-maintained comments
+ * by moving short names and settings off of hand-maintained comments
  * and onto real code (see {@link SlotCard}'s Javadoc). This class is a
  * snapshot, timestamped and labeled as such, valid at the moment it's
  * generated and with no promise of staying accurate afterward: install a
- * plugin, remove one, or change a card's declared parameters, and this
+ * plugin, remove one, or change a card's declared settings, and this
  * has to be run again to reflect that -- it will not update itself.
  * <p>
  * Every field it writes is commented out, since it names no slot number
  * -- the user still chooses one, uncomments, and fills in real values.
  * A file built entirely from this output, pasted in unedited, is
- * harmless: {@link IniFile} ignores comment lines entirely, so nothing
+ * harmless: {@link IniDocument} ignores comment lines entirely, so nothing
  * here can accidentally configure a slot on its own.
  * <p>
  * Usage:
@@ -53,7 +53,7 @@ public final class SlotConfigTemplate {
             classLoader = PluginLoader.load(pluginsPath, classLoader);
         }
 
-        String text = render(CardCatalog.list(classLoader));
+        String text = render(CardCatalog.of(classLoader).cards());
 
         String outputFile = cli.get("output");
         if (outputFile != null) {
@@ -69,9 +69,9 @@ public final class SlotConfigTemplate {
         StringBuilder sb = new StringBuilder();
         sb.append("# Starter slot configuration -- SNAPSHOT generated ").append(Instant.now()).append('\n');
         sb.append("# This is a ONE-TIME SNAPSHOT, not a live or auto-synced catalog. If a\n");
-        sb.append("# plugin is added, removed, or changes its declared parameters, re-run\n");
+        sb.append("# plugin is added, removed, or changes its declared settings, re-run\n");
         sb.append("# this tool to regenerate it -- nothing here updates itself.\n");
-        sb.append("# Every entry below is commented out: pick a real slot number (1-7),\n");
+        sb.append("# Every entry below is commented out: pick a slot number the card allows,\n");
         sb.append("# uncomment its lines, and fill in real values before use.\n\n");
 
         if (cards.isEmpty()) {
@@ -80,14 +80,17 @@ public final class SlotConfigTemplate {
         }
 
         for (CardCatalog.CardDescription card : cards) {
-            sb.append("# --- ").append(card.className()).append(" ---\n");
-            sb.append("# [N]                 <- replace N with a slot number, 1-7\n");
-            sb.append("# type=").append(card.typeValue()).append('\n');
-            if (card.supportedParameters() != null) {
-                card.supportedParameters().stream().sorted()
-                    .forEach(param -> sb.append("# ").append(param).append("=\n"));
-            } else {
-                sb.append("# (no parameters declared -- any key is accepted, unvalidated)\n");
+            sb.append("# --- ").append(card.displayName()).append(" ---\n");
+            sb.append("# [N]                 <- replace N with a slot number: ")
+                .append(new java.util.TreeSet<>(card.supportedSlots()).toString().replaceAll("[\\[\\]]", ""))
+                .append('\n');
+            sb.append("# type=").append(card.shortName()).append('\n');
+            for (CardParameter parameter : card.parameters()) {
+                // The description on a line of its own: on the setting's line it would become part of the value.
+                sb.append("#   ").append(parameter.label()).append(" (").append(CardCatalog.describe(parameter))
+                    .append(")\n");
+                sb.append("# ").append(parameter.name()).append("=")
+                    .append(parameter.defaultValue() != null ? parameter.defaultValue() : "").append('\n');
             }
             sb.append('\n');
         }

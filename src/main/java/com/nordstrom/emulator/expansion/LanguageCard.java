@@ -1,11 +1,12 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.CardParameter;
 import com.nordstrom.emulator.system.PowerOnRam;
 import com.nordstrom.emulator.system.SlotCard;
 
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.Properties;
-import java.util.Set;
 
 /**
  * The Apple II+'s Language Card: 16KB of pure RAM, occupying slot 0,
@@ -70,8 +71,13 @@ public final class LanguageCard implements SlotCard {
     }
 
     @Override
-    public Set<String> getSupportedParameters() {
-        return Set.of(); // a real Language Card has no settings at all
+    public String getDisplayName() {
+        return "Language Card";
+    }
+
+    @Override
+    public List<CardParameter> getParameters() {
+        return List.of(); // a real Language Card has no settings at all
     }
 
     @Override

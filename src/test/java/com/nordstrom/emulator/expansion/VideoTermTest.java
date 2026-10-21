@@ -7,25 +7,20 @@ import org.junit.jupiter.api.Test;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @RequiresRoms({Rom.VIDEOTERM})
 class VideoTermTest {
 
-    private static VideoTerm configured(String display) {
+    private static VideoTerm configured() {
         VideoTerm card = new VideoTerm();
-        Properties props = new Properties();
-        if (display != null) {
-            props.setProperty("display", display);
-        }
-        card.configure(props);
+        card.configure(new Properties());
         return card;
     }
 
     @Test
     void theSlotPageIsTheFirmwaresLastPage() {
-        VideoTerm card = configured(null);
+        VideoTerm card = configured();
         // $C300: BIT $FFCB, the standard slot-ROM entry; $C305/$C307/$C30B/$C30C: the Pascal 1.1 protocol IDs.
         assertEquals(0x2C, card.readRom(0x00));
         assertEquals(0xCB, card.readRom(0x01));
@@ -41,7 +36,7 @@ class VideoTermTest {
 
     @Test
     void theExpansionSpaceStartsWithTheFirmware() {
-        VideoTerm card = configured(null);
+        VideoTerm card = configured();
         // $C800: LDA $077B -- the start of SETUP.
         assertEquals(0xAD, card.readExpansionRom(0x000));
         assertEquals(0x7B, card.readExpansionRom(0x001));
@@ -51,7 +46,7 @@ class VideoTermTest {
 
     @Test
     void crtcRegistersAreLoadedThroughIndexThenData() {
-        VideoTerm card = configured(null);
+        VideoTerm card = configured();
         card.writeIoSwitch(0x0, 1);   // $C0B0: select R1
         card.writeIoSwitch(0x1, 80);  // $C0B1: R1 = 80
         card.writeIoSwitch(0x0, 14);
@@ -69,7 +64,7 @@ class VideoTermTest {
 
     @Test
     void anyDeviceSelectAccessPicksTheVramPageItAddresses() {
-        VideoTerm card = configured(null);
+        VideoTerm card = configured();
         for (int page = 0; page < 4; page++) {
             card.readIoSwitch(page * 4);                 // a read, as the firmware's LDA $C0B0,X does
             card.writeExpansionRom(0x400, 0x10 + page);  // $CC00
@@ -86,7 +81,7 @@ class VideoTermTest {
 
     @Test
     void theUnusedTopOfTheExpansionSpaceReadsZeroAndIgnoresWrites() {
-        VideoTerm card = configured(null);
+        VideoTerm card = configured();
         card.writeExpansionRom(0x600, 0x55); // $CE00
         assertEquals(0, card.readExpansionRom(0x600));
         card.writeExpansionRom(0x000, 0x55); // the firmware is ROM
@@ -94,12 +89,11 @@ class VideoTermTest {
     }
 
     @Test
-    void displayModeComesFromConfiguration() {
-        assertEquals(VideoTerm.Display.SWITCHED, configured(null).display());
-        assertEquals(VideoTerm.Display.SWITCHED, configured("switched").display());
-        assertEquals(VideoTerm.Display.APPLE, configured("apple").display());
-        assertEquals(VideoTerm.Display.SLOT3, configured("slot3").display());
-        assertEquals(VideoTerm.Display.SEPARATE, configured("Separate").display());
-        assertThrows(IllegalArgumentException.class, () -> configured("both"));
+    void theDisplayModeStartsAsTheSoftSwitchAndIsSetByTheApplication() {
+        VideoTerm card = configured();
+        assertTrue(card.getParameters().isEmpty(), "the display mode is not a card setting");
+        assertEquals(VideoTerm.Display.SWITCHED, card.display());
+        card.setDisplay(VideoTerm.Display.SEPARATE);
+        assertEquals(VideoTerm.Display.SEPARATE, card.display());
     }
 }

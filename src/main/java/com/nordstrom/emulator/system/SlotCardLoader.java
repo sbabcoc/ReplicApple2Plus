@@ -9,10 +9,8 @@ import java.util.Properties;
  * Loads slot configuration from an INI file. Section names are bare slot
  * numbers ({@code [6]}, not {@code [slot.6]} -- the number itself is
  * already the identifier, no prefix needed). Each section's required
- * {@code type} key names either a card's own declared short name (see
- * {@link SlotCard#getShortName}) or a fully-qualified class name -- see
- * {@link CardTypes} for exactly how that resolves, and why it stays open
- * rather than a closed set.
+ * {@code type} key names a card by its own declared short name (see
+ * {@link SlotCard#getShortName}), resolved by {@link CardTypes}.
  * <p>
  * Example:
  * <pre>
@@ -83,7 +81,7 @@ public final class SlotCardLoader {
      * @throws IOException if {@code configFile} can't be read
      */
     public static SlotCard[] load(Path configFile, ClassLoader classLoader) throws IOException {
-        Map<String, Properties> sections = IniFile.parse(configFile);
+        Map<String, Properties> sections = IniDocument.read(configFile).sections();
         SlotCard[] slots = new SlotCard[8]; // slots 0-7, slot 0 real but electrically special -- see SlotCard's Javadoc
 
         for (Map.Entry<String, Properties> entry : sections.entrySet()) {

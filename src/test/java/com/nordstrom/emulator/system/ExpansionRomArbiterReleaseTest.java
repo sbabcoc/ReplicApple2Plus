@@ -2,6 +2,7 @@ package com.nordstrom.emulator.system;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -22,6 +23,21 @@ class ExpansionRomArbiterReleaseTest {
 
         RomCard(int fill) {
             this.fill = fill;
+        }
+
+        @Override
+        public String getShortName() {
+            return "romCard";
+        }
+
+        @Override
+        public String getDisplayName() {
+            return "ROM Card";
+        }
+
+        @Override
+        public List<CardParameter> getParameters() {
+            return List.of();
         }
 
         @Override

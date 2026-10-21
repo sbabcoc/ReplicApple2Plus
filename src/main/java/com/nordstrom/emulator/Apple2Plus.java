@@ -24,6 +24,7 @@ import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
 
 import javax.swing.JFrame;
+import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JOptionPane;
 import javax.swing.JToolBar;
@@ -155,6 +156,11 @@ public final class Apple2Plus {
      *             which aren't distributed with the emulator ({@link RomFiles})
      */
     public static void main(String[] args) {
+        // Before anything touches AWT, which reads these once. On macOS they put
+        // the menus in the screen menu bar, under an application menu named
+        // for the app rather than for its main class; elsewhere they're unused.
+        System.setProperty("apple.laf.useScreenMenuBar", "true");
+        System.setProperty("apple.awt.application.name", "ReplicApple2Plus");
         CliArgs cli;
         try {
             cli = CliArgs.parse(args);
@@ -368,33 +374,48 @@ public final class Apple2Plus {
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
                             EightyColumnView eightyColumns, DisplayModeSelector displayModes,
-                            HostTransferCard transferCard, VideoTerm videoTerm, Path config) {}
+                            HostTransferCard transferCard, VideoTerm videoTerm, SlotCard[] slots,
+                            Path config, ConfigurationWindow.Source configSource) {}
 
     /**
-     * What the File menu needs to know about how the emulator was started:
-     * the class loader cards are made with, and whether the command line
-     * named a slot configuration, which outranks the one chosen in the menu.
+     * How the emulator was started, for the menus and dialogs that need it:
+     * the class loader cards are made with, the command line, and the
+     * plug-ins path in use (the command line's, or the emulator folder's).
+     *
+     * @param classLoader the class loader cards are made with
+     * @param cli         the parsed command line
+     * @param pluginsPath the plug-ins path loaded, or null if none
      */
-    record StartupFiles(ClassLoader classLoader, boolean configGiven) {}
+    record StartupFiles(ClassLoader classLoader, CliArgs cli, String pluginsPath) {
+
+        /** @return true if the command line named a slot configuration, which outranks the one chosen in Settings */
+        boolean configGiven() {
+            return cli.get("config") != null;
+        }
+    }
 
     private static StartupFiles startupFiles;
 
+    /** The slot configuration in force, and where it came from. */
+    private record SlotConfiguration(Path path, ConfigurationWindow.Source source) {}
+
     /**
      * The slot configuration in force: {@code --config}, else the one chosen
-     * with File &gt; Slot Configuration..., else the emulator folder's
-     * {@code slots.ini}, else none.
+     * in Settings, else the emulator folder's {@code slots.ini}, else none.
      */
-    private static Path slotConfiguration(CliArgs cli) {
+    private static SlotConfiguration slotConfiguration(CliArgs cli) {
         String configFile = cli.get("config");
         if (configFile != null) {
-            return Path.of(configFile);
+            return new SlotConfiguration(Path.of(configFile), ConfigurationWindow.Source.COMMAND_LINE);
         }
         Path chosen = RememberedFiles.slotConfiguration();
         if (chosen != null) {
-            return chosen;
+            return new SlotConfiguration(chosen, ConfigurationWindow.Source.SETTINGS);
         }
         Path folderConfiguration = EmulatorFolder.slotConfiguration();
-        return folderConfiguration != null && Files.isRegularFile(folderConfiguration) ? folderConfiguration : null;
+        return folderConfiguration != null && Files.isRegularFile(folderConfiguration)
+            ? new SlotConfiguration(folderConfiguration, ConfigurationWindow.Source.EMULATOR_FOLDER)
+            : new SlotConfiguration(null, ConfigurationWindow.Source.NONE);
     }
 
     private static void createAndRun(CliArgs cli) {
@@ -446,7 +467,8 @@ public final class Apple2Plus {
 
         final ClassLoader finalClassLoader = classLoader;
         final InputMapping finalInputMapping = inputMapping;
-        startupFiles = new StartupFiles(classLoader, cli.get("config") != null);
+        startupFiles = new StartupFiles(classLoader, cli, pluginsPath);
+        AppMenu.install(frame, startupFiles);
 
         // Mutable only across a reboot -- read by the shutdown hook from a
         // different thread, hence AtomicReference rather than a plain field.
@@ -471,11 +493,11 @@ public final class Apple2Plus {
             // persisting at all is to avoid.
             persistDiskQuietly(old.disk());
             // A power cycle keeps the disks in the drives -- unless the slot
-            // configuration has changed (File > Slot Configuration...), whose
-            // own drives then apply.
-            Disk2Controller keepMedia = Objects.equals(old.config(), slotConfiguration(cli)) ? old.disk() : null;
+            // configuration has changed (chosen in Settings), whose own drives
+            // then apply.
+            Disk2Controller keepMedia = Objects.equals(old.config(), slotConfiguration(cli).path()) ? old.disk() : null;
             Machine fresh = buildMachine(cli, finalClassLoader, finalInputMapping, keepMedia, frame, onRebootHolder[0]);
-            rewireFrame(frame, old, fresh);
+            rewireFrame(frame, old, fresh, onRebootHolder[0]);
             current.set(fresh);
             fresh.loop().start();
         };
@@ -483,7 +505,7 @@ public final class Apple2Plus {
 
         Machine initial = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onReboot);
         current.set(initial);
-        rewireFrame(frame, null, initial);
+        rewireFrame(frame, null, initial, onReboot);
 
         // Runs on both a normal EXIT_ON_CLOSE-triggered exit and a
         // SIGINT/SIGTERM (e.g. Ctrl+C from a terminal) -- shutdown hooks
@@ -555,7 +577,8 @@ public final class Apple2Plus {
     private static Machine buildMachine(CliArgs cli, ClassLoader classLoader, InputMapping inputMapping,
                                          Disk2Controller mediaSource, JFrame frame, Runnable onReboot) {
         SlotCard[] slots;
-        Path config = slotConfiguration(cli);
+        SlotConfiguration slotConfiguration = slotConfiguration(cli);
+        Path config = slotConfiguration.path();
         if (config != null) {
             try {
                 slots = SlotCardLoader.load(config, classLoader);
@@ -622,8 +645,8 @@ public final class Apple2Plus {
         TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
         typing.setScreenSignature(screenSignature(bus, videoTerm));
         clock.addCycleListener(typing::tick);
-        if (videoTerm != null && displayChosenAtRuntime != null) {
-            videoTerm.setDisplay(displayChosenAtRuntime); // a reboot keeps the mode chosen from the toolbar
+        if (videoTerm != null) {
+            videoTerm.setDisplay(DisplayModeSelector.rememberedDisplay()); // the mode last chosen from the toolbar
         }
         ScreenPanel screen = new ScreenPanel(bus, bus.scanlineModes(), videoTerm);
         EightyColumnView eightyColumns = videoTerm != null ? new EightyColumnView(videoTerm, screen.getPreferredSize()) : null;
@@ -662,7 +685,6 @@ public final class Apple2Plus {
         if (toolbar != null && videoTerm != null) {
             VideoTerm card = videoTerm;
             displayModes = new DisplayModeSelector(card, () -> {
-                displayChosenAtRuntime = card.display();
                 updateEightyColumnWindow(frame, card);
                 screen.repaint();
             });
@@ -670,7 +692,7 @@ public final class Apple2Plus {
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
-            transferCard, videoTerm, config);
+            transferCard, videoTerm, slots, config, slotConfiguration.source());
     }
 
     /**
@@ -716,9 +738,6 @@ public final class Apple2Plus {
     /** The current machine's display-mode selector, for the 80-column window's close handler; null if none. */
     private static DisplayModeSelector currentDisplayModes;
 
-    /** The display mode last chosen from the toolbar, carried across reboots; null until one is chosen. */
-    private static volatile VideoTerm.Display displayChosenAtRuntime;
-
     /**
      * Puts the machine's 80-column view into the separate 80-column window
      * (creating the window the first time), then shows or hides that window
@@ -726,7 +745,7 @@ public final class Apple2Plus {
      * keyboard, since both feed the one Apple II keyboard.
      */
     private static void rewireEightyColumnWindow(JFrame main, Machine previous, Machine next,
-                                                 KeyboardInputListener keyboardInput) {
+                                                 KeyboardInputListener keyboardInput, Runnable onReboot) {
         if (eightyColumnFrame != null && previous != null && previous.eightyColumns() != null) {
             eightyColumnFrame.getContentPane().remove(previous.eightyColumns());
             for (var listener : eightyColumnFrame.getKeyListeners()) {
@@ -756,9 +775,8 @@ public final class Apple2Plus {
             });
         }
         eightyColumnFrame.getContentPane().add(next.eightyColumns());
-        JMenuBar menuBar = new JMenuBar();
-        menuBar.add(EditMenu.buildForEightyColumnWindow(next.eightyColumns(), eightyColumnFrame, next.loop()));
-        eightyColumnFrame.setJMenuBar(menuBar);
+        eightyColumnFrame.setJMenuBar(menuBar(eightyColumnFrame, next,
+            EditMenu.buildForEightyColumnWindow(next.eightyColumns(), eightyColumnFrame, next.loop()), onReboot));
         eightyColumnFrame.addKeyListener(keyboardInput);
         eightyColumnFrame.setFocusTraversalKeysEnabled(false);
         eightyColumnFrame.getContentPane().revalidate();
@@ -837,7 +855,7 @@ public final class Apple2Plus {
         }
     }
 
-    private static void rewireFrame(JFrame frame, Machine previous, Machine next) {
+    private static void rewireFrame(JFrame frame, Machine previous, Machine next, Runnable onReboot) {
         if (previous != null) {
             frame.getContentPane().remove(previous.screen());
             frame.getContentPane().remove(previous.toolbar());
@@ -849,23 +867,15 @@ public final class Apple2Plus {
         frame.getContentPane().add(next.screen());
         frame.getContentPane().add(next.toolbar(), BorderLayout.NORTH);
 
-        JMenuBar menuBar = new JMenuBar();
-        menuBar.add(FileMenu.build(next.typing(), frame, next.loop(), next.transferCard(), next.videoTerm(),
-            startupFiles));
-        menuBar.add(EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()));
-        // next's loop isn't running yet, so reading its wiring here is safe
-        menuBar.add(MachineMenu.build(next.bus().shiftKeyMod(), next.bus().shiftKeyMod().wiring(), next.loop()));
-        if (next.disk() != null) {
-            menuBar.add(DiskMenu.build(next.disk(), frame, next.loop()));
-        }
-        frame.setJMenuBar(menuBar);
+        frame.setJMenuBar(menuBar(frame, next,
+            EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()), onReboot));
 
         KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(),
             next.bus().shiftKeyMod(), next.loop());
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 
-        rewireEightyColumnWindow(frame, previous, next, keyboardInput);
+        rewireEightyColumnWindow(frame, previous, next, keyboardInput, onReboot);
         rewireTransferWindow(frame, next);
         rewireTypingProgress(frame, next);
 
@@ -875,6 +885,37 @@ public final class Apple2Plus {
         }
         frame.getContentPane().repaint();
         frame.requestFocusInWindow();
+    }
+
+    /**
+     * A window's menu bar: the same menus for every window, so each command
+     * is reachable from whichever window has focus -- on macOS, the screen
+     * menu bar shows only the focused window's. Only Edit differs, since it
+     * copies that window's own screen. Built fresh per window, since a menu
+     * can be in only one menu bar.
+     *
+     * @param anchor   the window the menus' dialogs are anchored to
+     * @param machine  the machine the menus operate on
+     * @param editMenu that window's Edit menu
+     * @param onReboot runs a Reboot, for drive 1's Insert and Reboot
+     */
+    private static JMenuBar menuBar(JFrame anchor, Machine machine, JMenu editMenu, Runnable onReboot) {
+        JMenuBar menuBar = new JMenuBar();
+        menuBar.add(FileMenu.build(machine.typing(), anchor, machine.loop(), machine.transferCard(),
+            machine.videoTerm(), startupFiles));
+        menuBar.add(editMenu);
+        // machine's loop isn't running yet, so reading its wiring here is safe
+        menuBar.add(MachineMenu.build(machine.bus().shiftKeyMod(), machine.bus().shiftKeyMod().wiring(),
+            machine.loop(), anchor, () -> ConfigurationWindow.describe(machine.slots(), machine.config(),
+                machine.configSource(), slotConfiguration(startupFiles.cli()).path(), startupFiles)));
+        if (machine.disk() != null) {
+            menuBar.add(DiskMenu.build(machine.disk(), anchor, machine.loop(), onReboot));
+        }
+        JMenu help = AppMenu.buildHelpMenu(anchor);
+        if (help != null) {
+            menuBar.add(help);
+        }
+        return menuBar;
     }
 
     private Apple2Plus() {}
@@ -900,6 +941,8 @@ public final class Apple2Plus {
             + "or Cancel to start with no disk -- real boot code will keep\n"
             + "waiting for one, but you can insert one later from the Disk menu.",
             "No Disk Loaded", JOptionPane.INFORMATION_MESSAGE);
-        DiskMenu.promptAndInsert(disk.removableDrives().get(0), parent, Runnable::run); // emulation hasn't started yet
+        // Emulation hasn't started yet, so the insert runs here, and inserting
+        // is already how this machine boots: Insert alone, no Reboot.
+        DiskMenu.promptAndInsert(disk.removableDrives().get(0), "Drive 1", parent, Runnable::run, null);
     }
 }

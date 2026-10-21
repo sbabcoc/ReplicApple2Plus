@@ -8,6 +8,8 @@ import javax.swing.JList;
 import javax.swing.JToolBar;
 import java.awt.Component;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.prefs.Preferences;
 
 /**
  * Toolbar drop-down choosing how a VideoTerm's 80-column output is shown:
@@ -22,6 +24,11 @@ import java.util.Map;
  * </ul>
  * Not focusable, so choosing a mode leaves keyboard focus -- and with it the
  * Apple's keyboard -- where it was.
+ * <p>
+ * The mode chosen is remembered with the JDK's user preferences, so a
+ * machine built later -- after a Reboot, or in the next launch -- starts in
+ * it ({@link #rememberedDisplay}). It's the only place the mode is set:
+ * it's a choice about the emulator's windows, not a card setting.
  */
 final class DisplayModeSelector {
 
@@ -31,8 +38,12 @@ final class DisplayModeSelector {
         VideoTerm.Display.SLOT3, "Slot 3 Video",
         VideoTerm.Display.SEPARATE, "Dual Monitor");
 
+    private static final Preferences PREFS = Preferences.userNodeForPackage(DisplayModeSelector.class);
+    private static final String DISPLAY_KEY = "videoTermDisplay";
+
     private final VideoTerm card;
     private final Runnable onChange;
+    private final Consumer<VideoTerm.Display> remember;
     private final JComboBox<VideoTerm.Display> comboBox = new JComboBox<>(new VideoTerm.Display[] {
         VideoTerm.Display.SWITCHED, VideoTerm.Display.APPLE, VideoTerm.Display.SLOT3, VideoTerm.Display.SEPARATE});
 
@@ -42,8 +53,20 @@ final class DisplayModeSelector {
      *                 repaint and show or hide the 80-column window
      */
     DisplayModeSelector(VideoTerm card, Runnable onChange) {
+        this(card, onChange, display -> PREFS.put(DISPLAY_KEY, display.name()));
+    }
+
+    /**
+     * Package-visible for tests, which mustn't change the user's remembered mode.
+     *
+     * @param card     the card whose display mode this controls
+     * @param onChange runs after the mode changes
+     * @param remember records the mode chosen
+     */
+    DisplayModeSelector(VideoTerm card, Runnable onChange, Consumer<VideoTerm.Display> remember) {
         this.card = card;
         this.onChange = onChange;
+        this.remember = remember;
         comboBox.setFocusable(false);
         comboBox.setToolTipText("How the VideoTerm's 80-column output is displayed");
         comboBox.setRenderer(new DefaultListCellRenderer() {
@@ -73,7 +96,22 @@ final class DisplayModeSelector {
     private void apply(VideoTerm.Display display) {
         if (display != null && card.display() != display) {
             card.setDisplay(display);
+            remember.accept(display);
             onChange.run();
+        }
+    }
+
+    /**
+     * The mode last chosen, for a newly built machine's VideoTerm.
+     *
+     * @return the mode last chosen, or {@link VideoTerm.Display#SWITCHED} if none was
+     *         (or what was remembered is no longer a mode this build knows)
+     */
+    static VideoTerm.Display rememberedDisplay() {
+        try {
+            return VideoTerm.Display.valueOf(PREFS.get(DISPLAY_KEY, VideoTerm.Display.SWITCHED.name()));
+        } catch (IllegalArgumentException e) {
+            return VideoTerm.Display.SWITCHED;
         }
     }
 

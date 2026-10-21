@@ -1,6 +1,6 @@
 package com.nordstrom.emulator.input;
 
-import com.nordstrom.emulator.system.IniFile;
+import com.nordstrom.emulator.system.IniDocument;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -253,7 +253,7 @@ class InputMapperTest {
 
     @Test
     void aButtonWithNothingBoundToItStaysUnpluggedEvenWhileAPadIsConnected() {
-        InputMapping twoButtons = InputMapping.fromSections(IniFile.parse(List.of("[button2]", "pad =")));
+        InputMapping twoButtons = InputMapping.fromSections(IniDocument.parse(List.of("[button2]", "pad =")).sections());
         RecordingSink sink = new RecordingSink();
         InputMapper mapper = new InputMapper(twoButtons, sink);
 
@@ -279,8 +279,8 @@ class InputMapperTest {
 
     @Test
     void aPaddleWithNothingBoundToItStaysUnpluggedEvenWhileAPadIsConnected() {
-        InputMapping oneJoystick = InputMapping.fromSections(IniFile.parse(List.of(
-            "[paddle2]", "axis =", "[paddle3]", "axis =")));
+        InputMapping oneJoystick = InputMapping.fromSections(IniDocument.parse(List.of(
+            "[paddle2]", "axis =", "[paddle3]", "axis =")).sections());
         RecordingSink sink = new RecordingSink();
         InputMapper mapper = new InputMapper(oneJoystick, sink);
 
@@ -295,8 +295,8 @@ class InputMapperTest {
 
     @Test
     void aPaddleDrivenOnlyByDpadButtonsIsPluggedInAndCenteredAtRest() {
-        InputMapping dpadOnly = InputMapping.fromSections(IniFile.parse(List.of(
-            "[paddle0]", "axis =", "dpad = DPAD_LEFT, DPAD_RIGHT")));
+        InputMapping dpadOnly = InputMapping.fromSections(IniDocument.parse(List.of(
+            "[paddle0]", "axis =", "dpad = DPAD_LEFT, DPAD_RIGHT")).sections());
         RecordingSink sink = new RecordingSink();
         InputMapper mapper = new InputMapper(dpadOnly, sink);
         mapper.apply(PadSnapshot.NEUTRAL);

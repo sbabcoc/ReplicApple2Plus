@@ -7,7 +7,7 @@ import java.util.Set;
 /**
  * Wraps a {@link Properties} instance and records every key actually
  * queried through it via {@link #getProperty}. Used by {@link CardTypes}
- * to catch a card's {@link SlotCard#getSupportedParameters()} disagreeing
+ * to catch a card's {@link SlotCard#getParameters()} disagreeing
  * with what its own {@link SlotCard#configure} actually reads -- both
  * live on the same class, but nothing stops them drifting apart from
  * each other as the code changes, so this observes the real behavior

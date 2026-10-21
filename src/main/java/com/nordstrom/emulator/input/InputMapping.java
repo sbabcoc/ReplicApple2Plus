@@ -1,6 +1,6 @@
 package com.nordstrom.emulator.input;
 
-import com.nordstrom.emulator.system.IniFile;
+import com.nordstrom.emulator.system.IniDocument;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -122,7 +122,7 @@ public final class InputMapping {
      * @throws IllegalArgumentException if the file is malformed or names something unknown
      */
     public static InputMapping load(Path file) throws IOException {
-        return fromSections(IniFile.parse(file));
+        return fromSections(IniDocument.read(file).sections());
     }
 
     /**
@@ -149,7 +149,7 @@ public final class InputMapping {
                 throw new IllegalStateException(DEFAULTS_RESOURCE + " is missing from the classpath -- this is a packaging bug");
             }
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                return IniFile.parse(reader.lines().collect(Collectors.toList()));
+                return IniDocument.parse(reader.lines().collect(Collectors.toList())).sections();
             }
         } catch (IOException e) {
             throw new IllegalStateException("Could not read " + DEFAULTS_RESOURCE, e);

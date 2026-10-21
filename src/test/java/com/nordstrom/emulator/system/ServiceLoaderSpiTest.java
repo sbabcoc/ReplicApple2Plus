@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ServiceLoader;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Confirms, empirically and with NO involvement from {@link CardTypes}'
@@ -17,14 +18,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
  * {@link SlotCard}'s Javadoc -- not merely an assertion that the
  * no-arg-constructor-plus-{@code configure()} contract "should" work
  * with {@code ServiceLoader}, but a test that it demonstrably does.
- * <p>
- * NOTE: written and believed correct against the JUnit 5 Jupiter API,
- * consistent with this project's other tests, but this specific test
- * also depends on there being at least one real, compiled {@code
- * SlotCard} provider registered by the time it runs -- currently there
- * are none (see the service file's own placeholder example), so this
- * test will need a genuine provider added before it can meaningfully
- * pass rather than trivially enumerate zero providers.
  */
 class ServiceLoaderSpiTest {
 
@@ -38,5 +31,12 @@ class ServiceLoaderSpiTest {
                 // genuine no-arg constructor.
             }
         });
+    }
+
+    @Test
+    void everyRegisteredCardDeclaresItsNamesAndSettings() {
+        CardCatalog.Catalog catalog = CardCatalog.read(ServiceLoaderSpiTest.class.getClassLoader());
+        assertTrue(catalog.problems().isEmpty(), "every registered card describes itself: " + catalog.problems());
+        assertTrue(catalog.cards().size() >= 5, "the project's own five cards at least: " + catalog.cards());
     }
 }

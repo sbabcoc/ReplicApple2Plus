@@ -1,8 +1,10 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.CardParameter;
 import com.nordstrom.emulator.system.PowerOnRam;
 import com.nordstrom.emulator.system.SlotCard;
 
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
@@ -32,33 +34,22 @@ import java.util.Set;
  * by the firmware's setup, R14-R17 readable (R16/R17 being the light pen,
  * which isn't modeled and reads 0).
  * <p>
- * Configuration: {@code display} sets the initial display mode -- see
- * {@link Display} for the four choices and their configuration values; the
- * application can change it while running.
+ * The card has no settings. How its output reaches the screen
+ * ({@link Display}) is a choice about the emulator's windows, not the card,
+ * so the application sets it -- {@link Display#SWITCHED} until it does.
  */
 public final class VideoTerm implements SlotCard {
 
     /** How the 80-column output reaches the screen. */
     public enum Display {
-        /** One window; the Soft Video Switch picks 80 columns when AN0 is on and graphics is off. Config value {@code switched}. */
-        SWITCHED("switched"),
-        /** One window, always the Apple's own video -- a monitor switch set to the Apple. Config value {@code apple}. */
-        APPLE("apple"),
-        /** One window, always the card's 80 columns -- a monitor switch set to slot 3. Config value {@code slot3}. */
-        SLOT3("slot3"),
-        /** Two windows: the main one always the Apple's video, a second always the 80 columns. Config value {@code separate}. */
-        SEPARATE("separate");
-
-        private final String configValue;
-
-        Display(String configValue) {
-            this.configValue = configValue;
-        }
-
-        /** @return this mode's value for {@code display=} in the slot configuration */
-        public String configValue() {
-            return configValue;
-        }
+        /** One window; the Soft Video Switch picks 80 columns when AN0 is on and graphics is off. */
+        SWITCHED,
+        /** One window, always the Apple's own video -- a monitor switch set to the Apple. */
+        APPLE,
+        /** One window, always the card's 80 columns -- a monitor switch set to slot 3. */
+        SLOT3,
+        /** Two windows: the main one always the Apple's video, a second always the 80 columns. */
+        SEPARATE
     }
 
     static final int VRAM_SIZE = 2048;
@@ -86,23 +77,17 @@ public final class VideoTerm implements SlotCard {
     }
 
     @Override
-    public Set<String> getSupportedParameters() {
-        return Set.of("display");
+    public String getDisplayName() {
+        return "Videx VideoTerm";
+    }
+
+    @Override
+    public List<CardParameter> getParameters() {
+        return List.of();
     }
 
     @Override
     public void configure(Properties props) {
-        String mode = props.getProperty("display", Display.SWITCHED.configValue()).trim();
-        display = null;
-        for (Display candidate : Display.values()) {
-            if (candidate.configValue().equalsIgnoreCase(mode)) {
-                display = candidate;
-            }
-        }
-        if (display == null) {
-            throw new IllegalArgumentException("videoterm: display must be switched, apple, slot3 or separate, not '"
-                + mode + "'");
-        }
         firmware = VideoTermRoms.firmware();
         VideoTermRoms.charset(); // fail at startup, not first paint, if the character ROM is missing or wrong
         vram = PowerOnRam.allocate(VRAM_SIZE); // static RAM, also indeterminate at power-on

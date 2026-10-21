@@ -114,8 +114,8 @@ class BusInputIntegrationTest {
     @Test
     void aParticularPaddleLeftUnboundStaysUnpluggedWhileTheOthersWork() {
         try (MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8])) {
-            InputMapping oneJoystick = InputMapping.fromSections(com.nordstrom.emulator.system.IniFile.parse(java.util.List.of(
-                "[paddle2]", "axis =", "[paddle3]", "axis =")));
+            InputMapping oneJoystick = InputMapping.fromSections(com.nordstrom.emulator.system.IniDocument.parse(java.util.List.of(
+                "[paddle2]", "axis =", "[paddle3]", "axis =")).sections());
             new InputMapper(oneJoystick, new BusInputSink(bus, Runnable::run)).apply(PadSnapshot.NEUTRAL);
 
             assertTrue(tripsWithin(bus, 0, 20_000), "paddle 0 is the joystick's X");

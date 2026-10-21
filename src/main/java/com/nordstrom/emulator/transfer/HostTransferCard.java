@@ -1,11 +1,13 @@
 package com.nordstrom.emulator.transfer;
 
+import com.nordstrom.emulator.system.CardParameter;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
@@ -75,8 +77,13 @@ public final class HostTransferCard implements SlotCard {
     }
 
     @Override
-    public Set<String> getSupportedParameters() {
-        return Set.of("dir");
+    public String getDisplayName() {
+        return "Host File Transfer Card";
+    }
+
+    @Override
+    public List<CardParameter> getParameters() {
+        return List.of(CardParameter.folder("dir", "Start folder"));
     }
 
     /** {@code dir} (optional): the folder the host dialogs open in first; must exist. */

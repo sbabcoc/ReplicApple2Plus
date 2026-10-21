@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.util.prefs.Preferences;
 
 /**
- * The slot configuration chosen with File &gt; Slot Configuration...,
+ * The slot configuration chosen in Settings ({@link SettingsDialog}),
  * remembered between runs. It takes the place of the emulator folder's own
  * slots.ini (EmulatorFolder); {@code --config}, when given, takes
  * precedence over both.

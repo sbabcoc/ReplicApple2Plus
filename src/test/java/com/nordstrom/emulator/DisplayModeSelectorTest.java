@@ -6,6 +6,8 @@ import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.SlotCard;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,17 +17,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @RequiresRoms({Rom.SYSTEM, Rom.VIDEOTERM})
 class DisplayModeSelectorTest {
 
-    private static VideoTerm card(String display) {
+    private static VideoTerm card(VideoTerm.Display display) {
         VideoTerm card = new VideoTerm();
-        Properties props = new Properties();
-        props.setProperty("display", display);
-        card.configure(props);
+        card.configure(new Properties());
+        card.setDisplay(display);
         return card;
     }
 
+    /** A selector that records the modes it would remember, rather than changing the user's preferences. */
+    private static DisplayModeSelector selector(VideoTerm card, Runnable onChange, List<VideoTerm.Display> remembered) {
+        return new DisplayModeSelector(card, onChange, remembered::add);
+    }
+
     @Test
-    void offersTheFourModesInOrderAndStartsOnTheConfiguredOne() {
-        DisplayModeSelector selector = new DisplayModeSelector(card("slot3"), () -> {});
+    void offersTheFourModesInOrderAndStartsOnTheCardsMode() {
+        DisplayModeSelector selector = selector(card(VideoTerm.Display.SLOT3), () -> {}, new ArrayList<>());
         assertEquals(4, selector.comboBox().getItemCount());
         String[] labels = {"Soft Switch", "Apple Video", "Slot 3 Video", "Dual Monitor"};
         for (int i = 0; i < 4; i++) {
@@ -35,10 +41,11 @@ class DisplayModeSelectorTest {
     }
 
     @Test
-    void choosingAModeChangesTheCardOnceAndRunsTheCallback() {
-        VideoTerm card = card("switched");
+    void choosingAModeChangesTheCardOnceRemembersItAndRunsTheCallback() {
+        VideoTerm card = card(VideoTerm.Display.SWITCHED);
         int[] changes = {0};
-        DisplayModeSelector selector = new DisplayModeSelector(card, () -> changes[0]++);
+        List<VideoTerm.Display> remembered = new ArrayList<>();
+        DisplayModeSelector selector = selector(card, () -> changes[0]++, remembered);
         selector.comboBox().setSelectedItem(VideoTerm.Display.APPLE);
         assertEquals(VideoTerm.Display.APPLE, card.display());
         selector.comboBox().setSelectedItem(VideoTerm.Display.APPLE); // unchanged: no callback
@@ -47,16 +54,17 @@ class DisplayModeSelectorTest {
         assertEquals(VideoTerm.Display.SWITCHED, card.display());
         assertEquals(VideoTerm.Display.SWITCHED, selector.comboBox().getSelectedItem());
         assertEquals(2, changes[0]);
+        assertEquals(List.of(VideoTerm.Display.APPLE, VideoTerm.Display.SWITCHED), remembered);
     }
 
     @Test
     void theDropDownNeverTakesKeyboardFocus() {
-        assertFalse(new DisplayModeSelector(card("switched"), () -> {}).comboBox().isFocusable());
+        assertFalse(selector(card(VideoTerm.Display.SWITCHED), () -> {}, new ArrayList<>()).comboBox().isFocusable());
     }
 
     @Test
     void eachModeDecidesWhatTheMainWindowShows() {
-        VideoTerm card = card("switched");
+        VideoTerm card = card(VideoTerm.Display.SWITCHED);
         SlotCard[] slots = new SlotCard[8];
         slots[3] = card;
         try (MotherboardBus bus = MotherboardBus.withoutAudio(slots)) {

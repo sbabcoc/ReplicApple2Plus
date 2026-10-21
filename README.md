@@ -135,25 +135,35 @@ Companion documents:
     an always-Apple main window. Closing that window returns to Soft
     Switch.
 
-  The chosen mode carries across Reboot.
+  The chosen mode is remembered across Reboot and launches.
 - Peripherals are plug-ins: cards are discovered through Java's standard
   `ServiceLoader`, and new ones can be added from external jars without
   rebuilding the emulator.
 
 **Application**
 - **File** menu: Start CP/M Transfer (see
-  [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., Slot
-  Configuration..., Emulator Folder..., and Open Emulator Folder (see
-  [The emulator folder](#the-emulator-folder)); **Edit** menu: Copy Screen
-  Text, Copy Screen Image, and Paste; **Machine** menu: Shift Key Mod,
-  applied at once and remembered across Reboot and launches. Typed or pasted text is fed to the
+  [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., and Open
+  Emulator Folder (see [The emulator folder](#the-emulator-folder));
+  **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste;
+  **Machine** menu: Shift Key Mod, applied at once and remembered across
+  Reboot and launches, and Show Configuration. Typed or pasted text is fed to the
   keyboard at exactly the pace the running software reads it, and a line
   at a time -- after each Return, the next line waits for the screen to
   settle -- so software that buffers keys, like CP/M, isn't overrun.
-- **Slot Configuration...** chooses a slot configuration other than the
-  emulator folder's own `slots.ini` -- one for CP/M, say -- remembered,
-  and applied at the next Reboot, with its own disks. `--config`, when
-  given, takes precedence.
+- **About ReplicApple2Plus**, **Settings...** and **Quit** are in the
+  application menu on macOS; on Windows and Linux, Settings... and Quit
+  end the File menu, and About is in the Help menu. The 80-column window
+  has the same menus as the main window.
+- **Settings...** shows, and changes, the choices that apply later: the
+  **Slot Configuration** -- one other than the emulator folder's own
+  `slots.ini`, for CP/M, say -- applied at the next Reboot, with its own
+  disks (`--config`, when given, takes precedence); and the **Emulator
+  Folder**, used from the next start.
+- **Show Configuration** describes what the running machine was built
+  from -- its slot configuration and where it came from, the card in each
+  slot and the disk in each drive, the emulator, ROM and plug-in folders,
+  game input, and the Shift Key Mod -- and, under Pending, any choice made
+  in Settings that hasn't taken effect yet.
 - Typing that runs longer than a moment shows a progress window, with a
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
@@ -190,11 +200,16 @@ implements: a public no-arg constructor plus a `configure(Properties)`
 lifecycle method (deliberately not a constructor argument, so
 `META-INF/services/...SlotCard` is a genuine, ordinary Java SPI file that
 real `ServiceLoader` can use directly — proven by `ServiceLoaderSpiTest`,
-not just claimed). A card declares its own short config-file name and
-recognized parameters as real methods on the class itself, not as
-comments in a separate file that could drift out of sync with the code —
-and if a card's own declared parameters and what it actually reads ever
-disagree, that's caught automatically rather than silently tolerated.
+not just claimed). A card declares its own short config-file name, its
+display name, and its settings -- each with a kind (file, folder or
+whole number), a label, and any default and range -- as real methods on
+the class itself, not as comments in a separate file that could drift
+out of sync with the code. A configuration naming a setting the card
+doesn't declare, or a value outside its range, fails to load; and if a
+card's own declarations and what it actually reads ever disagree, that's
+caught automatically rather than silently tolerated. A plugin jar that
+can't be loaded -- one built against an older `SlotCard`, say -- is
+reported and left out, without taking the other cards with it.
 Around this: `PluginLoader` builds a classloader from one or more directories
 of external `.jar` files (the actual mechanism that lets a new peripheral be
 added without recompiling this project), `Install` is a minimal
@@ -322,13 +337,12 @@ one, which the dialog can create -- and remembers it.
 
 Relative paths in `slots.ini` are relative to this folder, so a disk in
 `disks/` is just `drive1=disks/name.dsk`. **File > Open Emulator Folder**
-opens the folder; **File > Emulator Folder...** switches to another one
-from the next start.
+opens the folder; **Settings...** switches to another one from the next
+start.
 
 Each command-line option takes the place of its part of the folder:
 `--roms` of `roms/`, `--plugins` of `plugins/`, and `--config` of
-`slots.ini` (as does a configuration chosen with **File > Slot
-Configuration...**).
+`slots.ini` (as does a slot configuration chosen in **Settings...**).
 
 ## Required ROM files
 
@@ -421,7 +435,7 @@ Or, the same on every platform, through Gradle:
 | Option | Meaning |
 |---|---|
 | `--roms DIR` | Directory holding the ROM images (see [Required ROM files](#required-rom-files)), in place of the emulator folder's `roms/`. Searched before the classpath. |
-| `--config FILE` | Slot configuration (INI). Without it, the one chosen with File > Slot Configuration..., else the emulator folder's `slots.ini` (see [The emulator folder](#the-emulator-folder)). |
+| `--config FILE` | Slot configuration (INI). Without it, the one chosen in Settings..., else the emulator folder's `slots.ini` (see [The emulator folder](#the-emulator-folder)). |
 | `--plugins DIR[:DIR...]` | Directories of external peripheral jars to load, separated by `:` (`;` on Windows), like a class path. Earlier directories win if two supply the same class. Without it, the emulator folder's `plugins/`. |
 | `--input FILE` | Game controller mapping; defaults apply without it. |
 | `--network-input PORT` | Take controller input from PadBridge over UDP on this port, instead of a local gamepad. |
@@ -435,7 +449,6 @@ type=languageCard
 
 [3]
 type=videoterm
-display=switched
 
 [6]
 type=disk2
@@ -451,9 +464,8 @@ and its disks can be kept and moved together.
 `[3]` is optional: it adds the VideoTerm (`PR#3` activates it). It must
 be slot 3 -- the card's firmware is written for it, and any other slot is
 refused at startup.
-`display` sets the mode it starts in -- `switched` (Soft Switch, the
-default), `apple` (Apple Video), `slot3` (Slot 3 Video) or `separate`
-(Dual Monitor); the toolbar changes it while running.
+Its display mode is chosen from the toolbar, not in the configuration,
+and remembered across Reboot and launches.
 
 To move files with the host file transfer card, add it in any free slot
 1-7 (`dir=` optionally names the folder its file dialogs open first):
@@ -499,6 +511,8 @@ Card or Saturn card) or under DOS 3.3:
 the emulator offers to insert a boot disk first -- otherwise the
 Autostart ROM would wait forever for one. Disks can be inserted,
 created, ejected and write-protected at any time from the Disk menu.
+Inserting into drive 1 also offers **Insert and Reboot**, to boot the new
+disk in one step.
 
 ### Running CP/M on the SoftCard II
 
@@ -518,7 +532,6 @@ type=languageCard
 
 [3]
 type=videoterm
-display=separate
 
 [4]
 type=softcard2
@@ -678,7 +691,7 @@ knowing before reading the source:
   throws rather than guesses — the genuinely unstable illegal opcodes and
   the multi-latch expansion-ROM conflict are the current examples.
 - **A second source of truth is a bug waiting to happen, so it gets
-  removed, not monitored.** A card's short name and parameters live as
+  removed, not monitored.** A card's names and settings live as
   real methods on the card itself, not as comments in a separate file;
   `AddressSpace` pairs a handler with its range in one shared record, not
   two arrays that have to be kept in sync by hand.

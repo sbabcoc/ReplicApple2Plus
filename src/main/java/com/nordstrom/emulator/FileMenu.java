@@ -2,7 +2,6 @@ package com.nordstrom.emulator;
 
 import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.expansion.VideoTermRenderer;
-import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.transfer.CpmTransferStarter;
 import com.nordstrom.emulator.transfer.HostTransferCard;
 
@@ -18,7 +17,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,12 +36,12 @@ import java.util.prefs.Preferences;
  * what it prints on the VideoTerm (TRANSFER-CARD.md 8.5). It's enabled
  * once CP/M has initialized the transfer card since the last RESET.
  * <p>
- * Slot Configuration... chooses a slot configuration other than the
- * emulator folder's own slots.ini (EmulatorFolder), remembered, and
- * applied at the next Reboot; {@code --config}, when given, takes
- * precedence. Emulator Folder... chooses another emulator folder, for the
- * next start; Open Emulator Folder shows the current one, where the ROM
- * images, plug-ins and disks go.
+ * Open Emulator Folder shows the emulator folder in use, where the ROM
+ * images, plug-ins and disks go; choosing a different one, or a different
+ * slot configuration, is in Settings ({@link SettingsDialog}).
+ * <p>
+ * Settings... and Quit end the menu where the platform has no application
+ * menu of its own to hold them ({@link AppMenu}).
  * <p>
  * Deliberately no keyboard shortcuts: these are menu actions only.
  */
@@ -54,6 +52,12 @@ final class FileMenu {
     private static final String LAST_DIRECTORY_KEY = "lastTypeFileDirectory";
 
     private FileMenu() {}
+
+    /**
+     * Whether a CP/M transfer is being started. Shared by every window's
+     * copy of this menu, so a second start can't begin from the other one.
+     */
+    private static final AtomicBoolean STARTING = new AtomicBoolean();
 
     /** How long one CP/M command may run while starting a transfer: PIP copying XFER is the longest. */
     private static final long COMMAND_TIMEOUT_MILLIS = 120_000;
@@ -68,8 +72,7 @@ final class FileMenu {
      * @param emulationThread runs everything that touches machine state -- queueing typing
      * @param transferCard    the machine's host file transfer card, or null if it has none
      * @param videoTerm       the machine's VideoTerm, CP/M's console on a II+, or null if it has none
-     * @param startup         how the emulator was started: for checking a slot configuration, and
-     *                        whether the command line overrides what's chosen here
+     * @param startup         how the emulator was started, for the Settings dialog
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
     static JMenu build(TypingFeeder feeder, Component parent, Executor emulationThread,
@@ -77,9 +80,8 @@ final class FileMenu {
         JMenu menu = new JMenu("File");
 
         JMenuItem startCpmTransfer = new JMenuItem("Start CP/M Transfer");
-        AtomicBoolean starting = new AtomicBoolean();
         startCpmTransfer.addActionListener(event ->
-            startCpmTransfer(feeder, parent, emulationThread, videoTerm, starting));
+            startCpmTransfer(feeder, parent, emulationThread, videoTerm, STARTING));
         menu.add(startCpmTransfer);
 
         JMenuItem typeFile = new JMenuItem("Type File...");
@@ -88,23 +90,28 @@ final class FileMenu {
 
         menu.addSeparator();
 
-        JMenuItem slotConfiguration = new JMenuItem("Slot Configuration...");
-        slotConfiguration.addActionListener(event -> chooseSlotConfiguration(parent, startup));
-        menu.add(slotConfiguration);
-
-        JMenuItem emulatorFolder = new JMenuItem("Emulator Folder...");
-        emulatorFolder.addActionListener(event -> chooseEmulatorFolder(parent));
-        menu.add(emulatorFolder);
-
         JMenuItem openEmulatorFolder = new JMenuItem("Open Emulator Folder");
         openEmulatorFolder.addActionListener(event -> EmulatorFolder.open(parent, EmulatorFolder.path()));
         menu.add(openEmulatorFolder);
+
+        if (!AppMenu.systemHasSettings()) {
+            menu.addSeparator();
+            JMenuItem settings = new JMenuItem("Settings...");
+            settings.addActionListener(event -> SettingsDialog.show(parent, startup));
+            menu.add(settings);
+        }
+        if (!AppMenu.systemHasQuit()) {
+            menu.addSeparator();
+            JMenuItem quit = new JMenuItem("Quit");
+            quit.addActionListener(event -> AppMenu.quit());
+            menu.add(quit);
+        }
 
         menu.addMenuListener(new MenuListener() {
             @Override
             public void menuSelected(MenuEvent e) {
                 startCpmTransfer.setEnabled(transferCard != null && videoTerm != null
-                    && transferCard.servedByCpm() && !starting.get());
+                    && transferCard.servedByCpm() && !STARTING.get());
                 openEmulatorFolder.setEnabled(EmulatorFolder.path() != null);
             }
 
@@ -171,50 +178,6 @@ final class FileMenu {
         }, "Start CP/M Transfer");
         worker.setDaemon(true);
         worker.start();
-    }
-
-    /**
-     * Chooses another emulator folder -- an existing one, or a new one,
-     * which is set up -- and remembers it for the next start, when its ROM
-     * images and plug-ins are loaded.
-     */
-    private static void chooseEmulatorFolder(Component parent) {
-        Path folder = EmulatorFolder.choose(parent);
-        if (folder == null) {
-            return;
-        }
-        EmulatorFolder.remember(folder);
-        JOptionPane.showMessageDialog(parent,
-            "ReplicApple2Plus will use " + folder + " the next time it starts.",
-            "Emulator Folder", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    /**
-     * Chooses the slot configuration file, and remembers it once it loads
-     * cleanly. It takes effect at the next Reboot, which rebuilds the
-     * machine from it -- with the new configuration's own disks.
-     */
-    private static void chooseSlotConfiguration(Component parent, Apple2Plus.StartupFiles startup) {
-        JFileChooser chooser = new JFileChooser(RememberedFiles.slotConfiguration() != null
-            ? RememberedFiles.slotConfiguration().toFile() : null);
-        chooser.setDialogTitle("Slot Configuration");
-        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
-            return;
-        }
-        Path file = chooser.getSelectedFile().toPath();
-        try {
-            SlotCardLoader.load(file, startup.classLoader()); // the cards made only to check it are discarded
-        } catch (IOException | RuntimeException | LinkageError e) {
-            JOptionPane.showMessageDialog(parent, "That slot configuration can't be used:\n" + e.getMessage(),
-                "Slot Configuration", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        RememberedFiles.rememberSlotConfiguration(file);
-        JOptionPane.showMessageDialog(parent, startup.configGiven()
-                ? "Remembered " + file + " for when ReplicApple2Plus starts without --config.\n"
-                    + "This run was started with --config, which Reboot keeps using."
-                : "The machine will use " + file + " when you press Reboot.",
-            "Slot Configuration", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private static void promptAndTypeFile(TypingFeeder feeder, Component parent, Executor emulationThread) {

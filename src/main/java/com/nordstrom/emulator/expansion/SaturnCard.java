@@ -1,11 +1,12 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.CardParameter;
 import com.nordstrom.emulator.system.PowerOnRam;
 import com.nordstrom.emulator.system.SlotCard;
 
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.Properties;
-import java.util.Set;
 
 /**
  * The Saturn Systems 128K RAM card: eight 16K banks, each laid out like a
@@ -67,8 +68,13 @@ public final class SaturnCard implements SlotCard {
     }
 
     @Override
-    public Set<String> getSupportedParameters() {
-        return Set.of();
+    public String getDisplayName() {
+        return "Saturn 128K RAM Card";
+    }
+
+    @Override
+    public List<CardParameter> getParameters() {
+        return List.of();
     }
 
     @Override

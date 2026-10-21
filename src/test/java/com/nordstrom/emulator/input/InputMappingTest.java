@@ -1,6 +1,6 @@
 package com.nordstrom.emulator.input;
 
-import com.nordstrom.emulator.system.IniFile;
+import com.nordstrom.emulator.system.IniDocument;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InputMappingTest {
 
     private static InputMapping custom(String... lines) {
-        return InputMapping.fromSections(IniFile.parse(List.of(lines)));
+        return InputMapping.fromSections(IniDocument.parse(List.of(lines)).sections());
     }
 
     private static String errorFor(String... lines) {

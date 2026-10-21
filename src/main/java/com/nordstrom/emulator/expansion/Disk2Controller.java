@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.expansion;
 
+import com.nordstrom.emulator.system.CardParameter;
 import com.nordstrom.emulator.system.RemovableMediaDrive;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
@@ -10,7 +11,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
 
 /**
  * A Disk II floppy disk controller card. Named {@code Disk2Controller},
@@ -124,14 +124,25 @@ public final class Disk2Controller implements SlotCard {
         drives[1].sibling = drives[0];
     }
 
+    /** The disk image files a drive accepts. */
+    private static final String[] DISK_EXTENSIONS = {"woz", "dsk", "do", "po"};
+
     @Override
     public String getShortName() {
         return "disk2";
     }
 
     @Override
-    public Set<String> getSupportedParameters() {
-        return Set.of("drive1", "drive2");
+    public String getDisplayName() {
+        return "Disk II";
+    }
+
+    /** The disks in the drives when the machine starts -- the Disk menu changes them while it runs. */
+    @Override
+    public List<CardParameter> getParameters() {
+        return List.of(
+            CardParameter.file("drive1", "Drive 1 at startup", DISK_EXTENSIONS),
+            CardParameter.file("drive2", "Drive 2 at startup", DISK_EXTENSIONS));
     }
 
     @Override
