@@ -154,11 +154,22 @@ Companion documents:
   application menu on macOS; on Windows and Linux, Settings... and Quit
   end the File menu, and About is in the Help menu. The 80-column window
   has the same menus as the main window.
-- **Settings...** shows, and changes, the choices that apply later: the
-  **Slot Configuration** -- one other than the emulator folder's own
-  `slots.ini`, for CP/M, say -- applied at the next Reboot, with its own
-  disks (`--config`, when given, takes precedence); and the **Emulator
-  Folder**, used from the next start.
+- **Settings...** has two tabs. **Machine** edits the slot configuration
+  the next Reboot uses: choose a slot to pick its card -- only cards that
+  can go in that slot are offered -- and fill in the card's settings,
+  with Browse... for files and folders. Anything that would stop the
+  configuration loading -- a card that isn't available, a card in a slot
+  it can't use, a setting the card doesn't have, a disk image that isn't
+  there -- is shown on its slot, and Save stays disabled until it's
+  fixed; lines that aren't valid INI at all are listed above the slots,
+  with **Edit as Text...** to open the file in your text editor and
+  **Reload** to read it back. Comments and layout in the file are kept.
+  **Open...** uses another configuration -- one for CP/M, say -- and
+  **Save As...** saves a variant; either is remembered for the emulator
+  folder in use, and **Use Emulator Folder's slots.ini** goes back to the
+  default. A banner says when a Reboot is needed to use what's saved.
+  (`--config`, when given, fixes the configuration for that run.)
+  **Emulator** chooses the emulator folder, used from the next start.
 - **Show Configuration** describes what the running machine was built
   from -- its slot configuration and where it came from, the card in each
   slot and the disk in each drive, the emulator, ROM and plug-in folders,
@@ -342,7 +353,8 @@ start.
 
 Each command-line option takes the place of its part of the folder:
 `--roms` of `roms/`, `--plugins` of `plugins/`, and `--config` of
-`slots.ini` (as does a slot configuration chosen in **Settings...**).
+`slots.ini` (as does a slot configuration chosen in **Settings...**,
+which is remembered for that emulator folder alone).
 
 ## Required ROM files
 
@@ -512,7 +524,9 @@ the emulator offers to insert a boot disk first -- otherwise the
 Autostart ROM would wait forever for one. Disks can be inserted,
 created, ejected and write-protected at any time from the Disk menu.
 Inserting into drive 1 also offers **Insert and Reboot**, to boot the new
-disk in one step.
+disk in one step. If a different slot configuration has been chosen
+since the last Reboot, it asks first: that configuration starts with its
+own disks, so the one inserted wouldn't stay.
 
 ### Running CP/M on the SoftCard II
 

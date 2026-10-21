@@ -30,6 +30,7 @@ import java.awt.event.ActionEvent;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.function.BooleanSupplier;
 import java.util.prefs.Preferences;
 
 /**
@@ -147,15 +148,19 @@ final class DiskMenu {
      *                        thread, and these change several fields the running machine
      *                        reads, so they must not happen concurrently with a tick
      * @param onReboot runs a Reboot, for drive 1's Insert and Reboot; called on the event thread
+     * @param rebootChangesConfiguration whether a Reboot now would switch to a different slot
+     *                                   configuration, which brings its own disks
      * @return the built menu, ready to add to a {@code JMenuBar}
      */
-    static JMenu build(Disk2Controller disk, Component parent, Executor emulationThread, Runnable onReboot) {
+    static JMenu build(Disk2Controller disk, Component parent, Executor emulationThread, Runnable onReboot,
+                       BooleanSupplier rebootChangesConfiguration) {
         captureConfiguredImageDirectory(disk.removableDrives());
         JMenu menu = new JMenu("Disk");
         RemovableMediaDrive drive1 = disk.removableDrives().get(0);
         RemovableMediaDrive drive2 = disk.removableDrives().get(1);
-        DriveMenu driveMenu1 = driveMenuItems(drive1, "Drive 1", parent, emulationThread, onReboot);
-        DriveMenu driveMenu2 = driveMenuItems(drive2, "Drive 2", parent, emulationThread, null);
+        DriveMenu driveMenu1 = driveMenuItems(drive1, "Drive 1", parent, emulationThread, onReboot,
+            rebootChangesConfiguration);
+        DriveMenu driveMenu2 = driveMenuItems(drive2, "Drive 2", parent, emulationThread, null, null);
         menu.add(driveMenu1.menu());
         menu.addSeparator();
         menu.add(driveMenu2.menu());
@@ -213,9 +218,11 @@ final class DiskMenu {
      * drives' items into one menu with ambiguous labels.
      *
      * @param onReboot runs a Reboot, offered with Insert; null for a drive that isn't booted from
+     * @param rebootChangesConfiguration as for {@link #build}; null with {@code onReboot}
      */
     private static DriveMenu driveMenuItems(RemovableMediaDrive drive, String label, Component parent,
-                                             Executor emulationThread, Runnable onReboot) {
+                                             Executor emulationThread, Runnable onReboot,
+                                             BooleanSupplier rebootChangesConfiguration) {
         JMenu driveMenu = new JMenu(label);
 
         // A radio pair rather than one checkbox, so both states are always
@@ -234,7 +241,8 @@ final class DiskMenu {
         driveMenu.add(newBlank);
 
         JMenuItem insert = new JMenuItem("Insert...");
-        insert.addActionListener(event -> promptAndInsert(drive, label, parent, emulationThread, onReboot));
+        insert.addActionListener(event -> promptAndInsert(drive, label, parent, emulationThread, onReboot,
+            rebootChangesConfiguration));
         driveMenu.add(insert);
 
         JMenuItem eject = new JMenuItem("Eject");
@@ -297,7 +305,9 @@ final class DiskMenu {
      * it has succeeded is the Reboot posted to the event thread -- so the
      * new disk is in the drive whose media the Reboot carries forward, and a
      * disk that fails to load is reported instead of rebooting into the
-     * old one.
+     * old one. If that Reboot would switch to a different slot configuration
+     * -- which starts with its own disks, so the one inserted wouldn't stay
+     * -- it asks first.
      *
      * @param drive the drive to insert into
      * @param label the drive's name, for the dialog's title
@@ -305,15 +315,26 @@ final class DiskMenu {
      * @param emulationThread runs the insert itself; pass {@code Runnable::run} when
      *                        emulation is not running yet (the startup prompt)
      * @param onReboot runs a Reboot, for Insert and Reboot; null to offer only Insert
+     * @param rebootChangesConfiguration whether a Reboot now would switch slot configurations;
+     *                                   null with {@code onReboot}
      */
     static void promptAndInsert(RemovableMediaDrive drive, String label, Component parent,
-                                Executor emulationThread, Runnable onReboot) {
+                                Executor emulationThread, Runnable onReboot,
+                                BooleanSupplier rebootChangesConfiguration) {
         JFileChooser chooser = chooserAtLastDirectory();
         chooser.setFileFilter(new FileNameExtensionFilter(
             "Disk images (*.woz, *.dsk, *.do, *.po)", "woz", "dsk", "do", "po"));
         InsertChoice choice = showInsertDialog(chooser, "Insert Disk in " + label, parent, onReboot != null);
         rememberDirectory(chooser);
         if (choice == InsertChoice.CANCEL) {
+            return;
+        }
+        if (choice == InsertChoice.INSERT_AND_REBOOT && rebootChangesConfiguration.getAsBoolean()
+                && JOptionPane.showConfirmDialog(parent,
+                    "Reboot will switch to the new slot configuration, which starts with its own disks,\n"
+                        + "so this disk won't stay in " + label.toLowerCase() + ". Insert and Reboot anyway?",
+                    "Insert and Reboot", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE)
+                != JOptionPane.OK_OPTION) {
             return;
         }
         java.nio.file.Path image = chooser.getSelectedFile().toPath();

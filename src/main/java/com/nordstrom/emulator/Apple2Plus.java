@@ -375,7 +375,35 @@ public final class Apple2Plus {
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
                             EightyColumnView eightyColumns, DisplayModeSelector displayModes,
                             HostTransferCard transferCard, VideoTerm videoTerm, SlotCard[] slots,
-                            Path config, ConfigurationWindow.Source configSource) {}
+                            Path config, List<String> configLines, ConfigurationWindow.Source configSource) {}
+
+    /**
+     * The slot configuration the running machine was built from.
+     *
+     * @param path  the file, absolute, or null if it was built with none
+     * @param lines the file's lines when it was read
+     */
+    record RunningConfiguration(Path path, List<String> lines) {}
+
+    /** The machine running now, replaced on Reboot; read by the shutdown hook and the Settings dialog. */
+    private static final AtomicReference<Machine> CURRENT = new AtomicReference<>();
+
+    /**
+     * @return the slot configuration the running machine was built from
+     */
+    static RunningConfiguration runningConfiguration() {
+        Machine machine = CURRENT.get();
+        return machine == null || machine.config() == null ? new RunningConfiguration(null, List.of())
+            : new RunningConfiguration(machine.config().toAbsolutePath().normalize(), machine.configLines());
+    }
+
+    /**
+     * @return the slot configuration a Reboot would use now, absolute, or null if none
+     */
+    static Path rebootConfiguration() {
+        Path path = slotConfiguration(startupFiles.cli()).path();
+        return path != null ? path.toAbsolutePath().normalize() : null;
+    }
 
     /**
      * How the emulator was started, for the menus and dialogs that need it:
@@ -470,9 +498,7 @@ public final class Apple2Plus {
         startupFiles = new StartupFiles(classLoader, cli, pluginsPath);
         AppMenu.install(frame, startupFiles);
 
-        // Mutable only across a reboot -- read by the shutdown hook from a
-        // different thread, hence AtomicReference rather than a plain field.
-        AtomicReference<Machine> current = new AtomicReference<>();
+        AtomicReference<Machine> current = CURRENT;
 
         // A one-element holder, not a plain Runnable field, specifically so
         // the lambda below can pass itself to buildMachine when rebuilding
@@ -579,8 +605,10 @@ public final class Apple2Plus {
         SlotCard[] slots;
         SlotConfiguration slotConfiguration = slotConfiguration(cli);
         Path config = slotConfiguration.path();
+        List<String> configLines = List.of(); // what it said when read, for telling later whether it's changed
         if (config != null) {
             try {
+                configLines = Files.readAllLines(config);
                 slots = SlotCardLoader.load(config, classLoader);
             } catch (IOException | IllegalArgumentException | IllegalStateException e) {
                 // The same configuration already loaded successfully once
@@ -692,7 +720,7 @@ public final class Apple2Plus {
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
-            transferCard, videoTerm, slots, config, slotConfiguration.source());
+            transferCard, videoTerm, slots, config, configLines, slotConfiguration.source());
     }
 
     /**
@@ -909,7 +937,9 @@ public final class Apple2Plus {
             machine.loop(), anchor, () -> ConfigurationWindow.describe(machine.slots(), machine.config(),
                 machine.configSource(), slotConfiguration(startupFiles.cli()).path(), startupFiles)));
         if (machine.disk() != null) {
-            menuBar.add(DiskMenu.build(machine.disk(), anchor, machine.loop(), onReboot));
+            // Reboot keeps the disks in the drives only if the slot configuration is the same one.
+            menuBar.add(DiskMenu.build(machine.disk(), anchor, machine.loop(), onReboot,
+                () -> !Objects.equals(machine.config(), slotConfiguration(startupFiles.cli()).path())));
         }
         JMenu help = AppMenu.buildHelpMenu(anchor);
         if (help != null) {
@@ -943,6 +973,6 @@ public final class Apple2Plus {
             "No Disk Loaded", JOptionPane.INFORMATION_MESSAGE);
         // Emulation hasn't started yet, so the insert runs here, and inserting
         // is already how this machine boots: Insert alone, no Reboot.
-        DiskMenu.promptAndInsert(disk.removableDrives().get(0), "Drive 1", parent, Runnable::run, null);
+        DiskMenu.promptAndInsert(disk.removableDrives().get(0), "Drive 1", parent, Runnable::run, null, null);
     }
 }
