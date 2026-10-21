@@ -19,6 +19,7 @@ import com.nordstrom.emulator.system.PluginLoader;
 import com.nordstrom.emulator.system.RemovableMediaDrive;
 import com.nordstrom.emulator.system.RomFiles;
 import com.nordstrom.emulator.system.RomImageException;
+import com.nordstrom.emulator.system.ShiftKeyMod;
 import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.system.SlotCardLoader;
 import com.nordstrom.emulator.system.SystemClock;
@@ -375,8 +376,8 @@ public final class Apple2Plus {
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
                             EightyColumnView eightyColumns, DisplayModeSelector displayModes,
-                            HostTransferCard transferCard, VideoTerm videoTerm, SlotCard[] slots,
-                            Path config, List<String> configLines, ConfigurationWindow.Source configSource) {}
+                            HostTransferCard transferCard, VideoTerm videoTerm, Path config,
+                            List<String> configLines) {}
 
     /**
      * The slot configuration the running machine was built from.
@@ -399,10 +400,24 @@ public final class Apple2Plus {
     }
 
     /**
+     * Rewires the running machine's Shift Key Mod, on its emulation thread,
+     * and remembers the wiring for every machine built after it.
+     *
+     * @param wiring the new wiring
+     */
+    static void setShiftKeyMod(ShiftKeyMod.Wiring wiring) {
+        ShiftKeyModSetting.remember(wiring);
+        Machine machine = CURRENT.get();
+        if (machine != null) {
+            machine.loop().execute(() -> machine.bus().shiftKeyMod().setWiring(wiring));
+        }
+    }
+
+    /**
      * @return the slot configuration a Reboot would use now, absolute, or null if none
      */
     static Path rebootConfiguration() {
-        Path path = slotConfiguration(startupFiles.cli()).path();
+        Path path = slotConfiguration(startupFiles.cli());
         return path != null ? path.toAbsolutePath().normalize() : null;
     }
 
@@ -425,26 +440,23 @@ public final class Apple2Plus {
 
     private static StartupFiles startupFiles;
 
-    /** The slot configuration in force, and where it came from. */
-    private record SlotConfiguration(Path path, ConfigurationWindow.Source source) {}
-
     /**
      * The slot configuration in force: {@code --config}, else the one chosen
      * in Settings, else the emulator folder's {@code slots.ini}, else none.
+     *
+     * @return the configuration file, or null if there's none
      */
-    private static SlotConfiguration slotConfiguration(CliArgs cli) {
+    private static Path slotConfiguration(CliArgs cli) {
         String configFile = cli.get("config");
         if (configFile != null) {
-            return new SlotConfiguration(Path.of(configFile), ConfigurationWindow.Source.COMMAND_LINE);
+            return Path.of(configFile);
         }
         Path chosen = RememberedFiles.slotConfiguration();
         if (chosen != null) {
-            return new SlotConfiguration(chosen, ConfigurationWindow.Source.SETTINGS);
+            return chosen;
         }
         Path folderConfiguration = EmulatorFolder.slotConfiguration();
-        return folderConfiguration != null && Files.isRegularFile(folderConfiguration)
-            ? new SlotConfiguration(folderConfiguration, ConfigurationWindow.Source.EMULATOR_FOLDER)
-            : new SlotConfiguration(null, ConfigurationWindow.Source.NONE);
+        return folderConfiguration != null && Files.isRegularFile(folderConfiguration) ? folderConfiguration : null;
     }
 
     private static void createAndRun(CliArgs cli) {
@@ -533,7 +545,7 @@ public final class Apple2Plus {
             // A power cycle keeps the disks in the drives -- unless the slot
             // configuration has changed (chosen in Settings), whose own drives
             // then apply.
-            Disk2Controller keepMedia = Objects.equals(old.config(), slotConfiguration(cli).path()) ? old.disk() : null;
+            Disk2Controller keepMedia = Objects.equals(old.config(), slotConfiguration(cli)) ? old.disk() : null;
             Machine fresh;
             SlotConfigurationException failure = null;
             try {
@@ -654,7 +666,7 @@ public final class Apple2Plus {
      * @return why it won't load, or null if it loads
      */
     private static SlotConfigurationException configurationProblem(CliArgs cli, ClassLoader classLoader) {
-        Path config = slotConfiguration(cli).path();
+        Path config = slotConfiguration(cli);
         if (config == null) {
             return null;
         }
@@ -733,9 +745,7 @@ public final class Apple2Plus {
                                          Disk2Controller mediaSource, JFrame frame, Runnable onReboot,
                                          boolean withoutCards) {
         SlotCard[] slots = new SlotCard[8]; // no configuration -- no cards at all
-        SlotConfiguration slotConfiguration = withoutCards
-            ? new SlotConfiguration(null, ConfigurationWindow.Source.NONE) : slotConfiguration(cli);
-        Path config = slotConfiguration.path();
+        Path config = withoutCards ? null : slotConfiguration(cli);
         List<String> configLines = List.of(); // what it said when read, for telling later whether it's changed
         if (config != null) {
             configLines = readConfiguration(config);
@@ -777,7 +787,7 @@ public final class Apple2Plus {
         }
 
         MotherboardBus bus = new MotherboardBus(slots);
-        bus.shiftKeyMod().setWiring(MachineMenu.rememberedWiring());
+        bus.shiftKeyMod().setWiring(ShiftKeyModSetting.remembered());
         Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
@@ -839,7 +849,7 @@ public final class Apple2Plus {
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
-            transferCard, videoTerm, slots, config, configLines, slotConfiguration.source());
+            transferCard, videoTerm, config, configLines);
     }
 
     /**
@@ -1051,14 +1061,10 @@ public final class Apple2Plus {
         menuBar.add(FileMenu.build(machine.typing(), anchor, machine.loop(), machine.transferCard(),
             machine.videoTerm(), startupFiles));
         menuBar.add(editMenu);
-        // machine's loop isn't running yet, so reading its wiring here is safe
-        menuBar.add(MachineMenu.build(machine.bus().shiftKeyMod(), machine.bus().shiftKeyMod().wiring(),
-            machine.loop(), anchor, () -> ConfigurationWindow.describe(machine.slots(), machine.config(),
-                machine.configSource(), slotConfiguration(startupFiles.cli()).path(), startupFiles)));
         if (machine.disk() != null) {
             // Reboot keeps the disks in the drives only if the slot configuration is the same one.
             menuBar.add(DiskMenu.build(machine.disk(), anchor, machine.loop(), onReboot,
-                () -> !Objects.equals(machine.config(), slotConfiguration(startupFiles.cli()).path())));
+                () -> !Objects.equals(machine.config(), slotConfiguration(startupFiles.cli()))));
         }
         JMenu help = AppMenu.buildHelpMenu(anchor);
         if (help != null) {

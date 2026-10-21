@@ -83,7 +83,7 @@ Companion documents:
 - The shift-key mod: the host's Shift key (and, in two wirings, Control)
   wired to a game I/O input, so lowercase-aware software can tell when
   Shift is held -- the II+ keyboard itself sends uppercase only. Chosen
-  from **Machine ▸ Shift Key Mod**, with MAME's wirings: SW2 = Shift
+  in **Settings... ▸ Machine**, with MAME's wirings: SW2 = Shift
   (`$C063`, the default), PADDL2 = Shift with PADDL3 = Ctrl
   (`$C066`/`$C067`), SW0 = Shift with SW1 = Ctrl (`$C061`/`$C062`), or Not
   connected. A wired input reads the key, active low, and no longer reads
@@ -144,9 +144,8 @@ Companion documents:
 - **File** menu: Start CP/M Transfer (see
   [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., and Open
   Emulator Folder (see [The emulator folder](#the-emulator-folder));
-  **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste;
-  **Machine** menu: Shift Key Mod, applied at once and remembered across
-  Reboot and launches, and Show Configuration. Typed or pasted text is fed to the
+  **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste. Typed or
+  pasted text is fed to the
   keyboard at exactly the pace the running software reads it, and a line
   at a time -- after each Return, the next line waits for the screen to
   settle -- so software that buffers keys, like CP/M, isn't overrun.
@@ -168,19 +167,18 @@ Companion documents:
   **Save As...** saves a variant; either is remembered for the emulator
   folder in use, and **Use Emulator Folder's slots.ini** goes back to the
   default. A banner says when a Reboot is needed to use what's saved.
-  (`--config`, when given, fixes the configuration for that run.)
-  **Emulator** chooses the emulator folder, used from the next start.
+  (`--config`, when given, fixes the configuration for that run.) The
+  Machine tab also holds the **Shift Key Mod**, applied at once and
+  remembered across Reboot and launches. **Emulator** chooses the emulator
+  folder, used from the next start, and shows what this run is using --
+  its emulator, ROM and plug-in folders, game input and input mapping,
+  each noting the command-line option that set it, if one did.
 - **A slot configuration that won't load** doesn't stop the emulator. At
   startup it says why, and **Edit Configuration...** starts the machine
   with every slot empty and opens the configuration in Settings, with its
   problems marked, to fix and then Reboot. A Reboot checks the
   configuration first, and doesn't happen if it won't load -- the running
   machine carries on -- offering the same way to fix it.
-- **Show Configuration** describes what the running machine was built
-  from -- its slot configuration and where it came from, the card in each
-  slot and the disk in each drive, the emulator, ROM and plug-in folders,
-  game input, and the Shift Key Mod -- and, under Pending, any choice made
-  in Settings that hasn't taken effect yet.
 - Typing that runs longer than a moment shows a progress window, with a
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
