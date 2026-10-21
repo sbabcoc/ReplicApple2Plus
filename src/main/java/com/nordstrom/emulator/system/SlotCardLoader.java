@@ -102,6 +102,7 @@ public final class SlotCardLoader {
             }
             slots[slotNum] = card;
         }
+        MotherboardBus.upperMemoryCard(slots); // the one rule across slots: only one card takes over $D000-$FFFF
         return slots;
     }
 

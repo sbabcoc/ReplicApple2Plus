@@ -31,6 +31,7 @@ import javax.swing.JToolBar;
 import javax.swing.SwingUtilities;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -508,6 +509,17 @@ public final class Apple2Plus {
         // already-initialized holder that happens to contain it.
         Runnable[] onRebootHolder = new Runnable[1];
         onRebootHolder[0] = () -> {
+            // Checked before the running machine is stopped: if the
+            // configuration won't load, the Reboot doesn't happen, and
+            // nothing is lost.
+            SlotConfigurationException problem = configurationProblem(cli, finalClassLoader);
+            if (problem != null) {
+                if (offerToEditConfiguration(frame, problem,
+                        "Reboot didn't happen: the machine is still running as it was.", "Cancel")) {
+                    SettingsDialog.show(frame, startupFiles);
+                }
+                return;
+            }
             Machine old = current.get();
             old.padPoller().stop(SHUTDOWN_JOIN_MS);
             old.loop().stop(SHUTDOWN_JOIN_MS);
@@ -522,14 +534,42 @@ public final class Apple2Plus {
             // configuration has changed (chosen in Settings), whose own drives
             // then apply.
             Disk2Controller keepMedia = Objects.equals(old.config(), slotConfiguration(cli).path()) ? old.disk() : null;
-            Machine fresh = buildMachine(cli, finalClassLoader, finalInputMapping, keepMedia, frame, onRebootHolder[0]);
+            Machine fresh;
+            SlotConfigurationException failure = null;
+            try {
+                fresh = buildMachine(cli, finalClassLoader, finalInputMapping, keepMedia, frame, onRebootHolder[0],
+                    false);
+            } catch (SlotConfigurationException e) {
+                // It loaded a moment ago, so it changed in between; the old
+                // machine is already stopped, so this one runs with no cards.
+                failure = e;
+                fresh = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onRebootHolder[0], true);
+            }
             rewireFrame(frame, old, fresh, onRebootHolder[0]);
             current.set(fresh);
             fresh.loop().start();
+            if (failure != null && offerToEditConfiguration(frame, failure,
+                    "The machine is running with every slot empty.", "OK")) {
+                SettingsDialog.show(frame, startupFiles);
+            }
         };
         Runnable onReboot = onRebootHolder[0];
 
-        Machine initial = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onReboot);
+        Machine initial;
+        boolean editConfiguration = false;
+        try {
+            initial = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onReboot, false);
+        } catch (SlotConfigurationException e) {
+            System.err.println("ReplicApple2Plus couldn't load its slot configuration " + e.path() + ": "
+                + e.getMessage());
+            if (!offerToEditConfiguration(null, e, "Edit Configuration... starts ReplicApple2Plus with every slot "
+                    + "empty and opens the configuration in Settings, to fix and then Reboot.", "Quit")) {
+                System.exit(1);
+                return;
+            }
+            initial = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onReboot, true);
+            editConfiguration = true;
+        }
         current.set(initial);
         rewireFrame(frame, null, initial, onReboot);
 
@@ -557,6 +597,92 @@ public final class Apple2Plus {
         }
 
         initial.loop().start();
+
+        if (editConfiguration) {
+            // Once the main window is up, so the dialog has it to sit over.
+            SwingUtilities.invokeLater(() -> SettingsDialog.show(frame, startupFiles));
+        }
+    }
+
+    /**
+     * The slot configuration couldn't be read, or wouldn't load: a card it
+     * names isn't available, a setting is wrong, a disk it names won't load.
+     * A missing or bad ROM image isn't this -- that has its own recovery,
+     * {@link #recoverFromRomFailure}, since its fix is in the ROM folder.
+     */
+    private static final class SlotConfigurationException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private final transient Path path;
+
+        SlotConfigurationException(Path path, Throwable cause) {
+            super(rootMessage(cause), cause);
+            this.path = path;
+        }
+
+        /** @return the configuration file */
+        Path path() {
+            return path;
+        }
+    }
+
+    /** @return the configuration's lines */
+    private static List<String> readConfiguration(Path config) {
+        try {
+            return Files.readAllLines(config);
+        } catch (IOException e) {
+            throw new SlotConfigurationException(config, e);
+        }
+    }
+
+    /** @return the cards the configuration puts in each slot */
+    private static SlotCard[] loadSlots(Path config, ClassLoader classLoader) {
+        try {
+            return SlotCardLoader.load(config, classLoader);
+        } catch (IOException e) {
+            throw new SlotConfigurationException(config, e);
+        } catch (RuntimeException | LinkageError e) {
+            if (romImageFailure(e)) {
+                throw e;
+            }
+            throw new SlotConfigurationException(config, e);
+        }
+    }
+
+    /**
+     * Loads the configuration a Reboot would use, and discards the cards.
+     *
+     * @return why it won't load, or null if it loads
+     */
+    private static SlotConfigurationException configurationProblem(CliArgs cli, ClassLoader classLoader) {
+        Path config = slotConfiguration(cli).path();
+        if (config == null) {
+            return null;
+        }
+        try {
+            readConfiguration(config);
+            loadSlots(config, classLoader);
+            return null;
+        } catch (SlotConfigurationException e) {
+            return e;
+        }
+    }
+
+    /**
+     * Reports a slot configuration that won't load, and offers to fix it in Settings.
+     *
+     * @param parent      anchors the dialog, or null before the main window shows
+     * @param failure     why it won't load
+     * @param outcome     what happens next, or has happened
+     * @param otherChoice the label of the choice that doesn't edit it
+     * @return true if Edit Configuration... was chosen
+     */
+    private static boolean offerToEditConfiguration(Component parent, SlotConfigurationException failure,
+                                                    String outcome, String otherChoice) {
+        Object[] choices = {"Edit Configuration...", otherChoice};
+        return JOptionPane.showOptionDialog(parent,
+            wrap("The slot configuration won't load:\n" + failure.path() + "\n\n" + failure.getMessage()
+                + "\n\n" + outcome),
+            "ReplicApple2Plus", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, choices, choices[0]) == 0;
     }
 
     /**
@@ -598,29 +724,22 @@ public final class Apple2Plus {
      * @param mediaSource the previous machine's disk controller, to carry its loaded media forward, or null on initial startup
      * @param frame the single, reused application window, needed only to wire this machine's toolbar's REBOOT button
      * @param onReboot runs when this machine's REBOOT button is clicked, or null if this machine will never have a toolbar
+     * @param withoutCards true to build it with every slot empty, ignoring the slot configuration --
+     *                     what runs while a configuration that won't load is being fixed
      * @return the fully built, not-yet-started machine
+     * @throws SlotConfigurationException if the slot configuration won't load
      */
     private static Machine buildMachine(CliArgs cli, ClassLoader classLoader, InputMapping inputMapping,
-                                         Disk2Controller mediaSource, JFrame frame, Runnable onReboot) {
-        SlotCard[] slots;
-        SlotConfiguration slotConfiguration = slotConfiguration(cli);
+                                         Disk2Controller mediaSource, JFrame frame, Runnable onReboot,
+                                         boolean withoutCards) {
+        SlotCard[] slots = new SlotCard[8]; // no configuration -- no cards at all
+        SlotConfiguration slotConfiguration = withoutCards
+            ? new SlotConfiguration(null, ConfigurationWindow.Source.NONE) : slotConfiguration(cli);
         Path config = slotConfiguration.path();
         List<String> configLines = List.of(); // what it said when read, for telling later whether it's changed
         if (config != null) {
-            try {
-                configLines = Files.readAllLines(config);
-                slots = SlotCardLoader.load(config, classLoader);
-            } catch (IOException | IllegalArgumentException | IllegalStateException e) {
-                // The same configuration already loaded successfully once
-                // (at initial startup) if mediaSource != null -- a failure
-                // here on reboot would mean the config file changed or
-                // vanished out from under a running process, which is
-                // exceptional enough to surface loudly rather than attempt
-                // any fallback.
-                throw new IllegalStateException("Could not reload slot configuration on reboot: " + e.getMessage(), e);
-            }
-        } else {
-            slots = new SlotCard[8]; // no config given -- no cards at all
+            configLines = readConfiguration(config);
+            slots = loadSlots(config, classLoader);
         }
 
         Disk2Controller disk = null;

@@ -170,6 +170,12 @@ Companion documents:
   default. A banner says when a Reboot is needed to use what's saved.
   (`--config`, when given, fixes the configuration for that run.)
   **Emulator** chooses the emulator folder, used from the next start.
+- **A slot configuration that won't load** doesn't stop the emulator. At
+  startup it says why, and **Edit Configuration...** starts the machine
+  with every slot empty and opens the configuration in Settings, with its
+  problems marked, to fix and then Reboot. A Reboot checks the
+  configuration first, and doesn't happen if it won't load -- the running
+  machine carries on -- offering the same way to fix it.
 - **Show Configuration** describes what the running machine was built
   from -- its slot configuration and where it came from, the card in each
   slot and the disk in each drive, the emulator, ROM and plug-in folders,

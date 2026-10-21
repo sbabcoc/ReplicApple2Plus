@@ -51,9 +51,11 @@ public final class CardCatalog {
      * @param displayName    its name in a host UI
      * @param parameters     the settings it accepts, in display order
      * @param supportedSlots the slots it can occupy
+     * @param upperMemory    whether it takes over $D000-$FFFF, which only one card in a machine can
      */
     public record CardDescription(Class<? extends SlotCard> cardClass, String shortName, String displayName,
-                                  List<CardParameter> parameters, Set<Integer> supportedSlots) {
+                                  List<CardParameter> parameters, Set<Integer> supportedSlots,
+                                  boolean upperMemory) {
 
         /**
          * Takes unmodifiable copies of the settings and slots, so a description can't change after it's made.
@@ -63,6 +65,7 @@ public final class CardCatalog {
          * @param displayName    its name in a host UI
          * @param parameters     the settings it accepts, in display order
          * @param supportedSlots the slots it can occupy
+         * @param upperMemory    whether it takes over $D000-$FFFF, which only one card in a machine can
          */
         public CardDescription {
             parameters = List.copyOf(parameters);
@@ -210,7 +213,8 @@ public final class CardCatalog {
         }
         @SuppressWarnings("unchecked")
         Class<? extends SlotCard> cardClass = (Class<? extends SlotCard>) card.getClass();
-        return new CardDescription(cardClass, shortName, displayName, parameters, card.supportedSlots());
+        return new CardDescription(cardClass, shortName, displayName, parameters, card.supportedSlots(),
+            card.wantsUpperMemory());
     }
 
     /** A problem's message: an AbstractMethodError names only the missing method, so it gets an explanation. */

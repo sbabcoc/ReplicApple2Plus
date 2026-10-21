@@ -150,6 +150,23 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
         addressSpace.register(0xC100, 0xC7FF, new SlotRomHandler(slots, arbiter, floatingBus));
         addressSpace.register(0xC800, 0xCFFF, new ExpansionRomHandler(arbiter));
 
+        SlotCard upperMemoryCard = upperMemoryCard(slots);
+        AddressRangeHandler upperMemory = (upperMemoryCard != null)
+            ? new UpperMemoryHandler(upperMemoryCard)
+            : new SystemRomHandler();
+        addressSpace.register(0xD000, 0xFFFF, upperMemory);
+    }
+
+    /**
+     * The card that takes over $D000-$FFFF. Checked here and by
+     * {@link SlotCardLoader}, so a configuration breaking the rule fails as
+     * it loads, before anything is built from it.
+     *
+     * @param slots the cards, by slot
+     * @return the one card whose {@link SlotCard#wantsUpperMemory} is true, or null if none's is
+     * @throws IllegalStateException if more than one card's is
+     */
+    static SlotCard upperMemoryCard(SlotCard[] slots) {
         SlotCard upperMemoryCard = null;
         for (int slot = 0; slot < slots.length; slot++) {
             if (slots[slot] != null && slots[slot].wantsUpperMemory()) {
@@ -160,10 +177,7 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
                 upperMemoryCard = slots[slot];
             }
         }
-        AddressRangeHandler upperMemory = (upperMemoryCard != null)
-            ? new UpperMemoryHandler(upperMemoryCard)
-            : new SystemRomHandler();
-        addressSpace.register(0xD000, 0xFFFF, upperMemory);
+        return upperMemoryCard;
     }
 
     /**

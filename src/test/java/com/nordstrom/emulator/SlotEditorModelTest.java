@@ -55,6 +55,15 @@ class SlotEditorModelTest {
     }
 
     @Test
+    void onlyOneCardMayTakeOverUpperMemory(@TempDir Path dir) throws IOException {
+        SlotEditorModel model = model(dir, "[0]", "type=languageCard", "[5]", "type=saturn128");
+        assertTrue(model.slot(0).problems().isEmpty());
+        assertEquals(List.of("Only one card can take over $D000-$FFFF, and the Language Card in slot 0 already does."),
+            model.slot(5).problems());
+        assertThrows(IllegalStateException.class, () -> model.save(LOADER));
+    }
+
+    @Test
     void linesNoSlotCanShowAreFileProblems(@TempDir Path dir) throws IOException {
         SlotEditorModel model = model(dir, "[0]", "type=languageCard", "junk", "[slot9]", "[06]");
         assertEquals(List.of("Line 3: Malformed line (missing '='): \"junk\"",

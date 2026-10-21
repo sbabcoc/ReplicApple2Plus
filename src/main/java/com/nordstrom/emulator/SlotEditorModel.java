@@ -177,6 +177,16 @@ final class SlotEditorModel {
             }
         }
         if (card != null) {
+            if (card.upperMemory()) {
+                for (int other = 0; other < slot; other++) {
+                    SlotState earlier = slot(other);
+                    if (earlier.card() != null && earlier.card().upperMemory()) {
+                        problems.add("Only one card can take over $D000-$FFFF, and the " + earlier.card().displayName()
+                            + " in slot " + other + " already does.");
+                        break;
+                    }
+                }
+            }
             if (!card.supportedSlots().contains(slot)) {
                 problems.add(card.displayName() + " can't go in slot " + slot + ": only slot"
                     + (card.supportedSlots().size() == 1 ? " " : "s ")

@@ -527,8 +527,8 @@ final class SlotEditorPanel extends JPanel {
             c.gridy++;
             c.gridx = 1;
             c.gridwidth = 2;
-            JLabel note = new JLabel("<html>Its settings can't be shown until the card is found. Choose another "
-                + "card, or Empty, to replace it.</html>");
+            JLabel note = new JLabel("<html><div style='width:300px'>Its settings can't be shown until the card "
+                + "is found. Choose another card, or Empty, to replace it.</div></html>");
             small(note);
             detail.add(note, c);
             c.gridwidth = 1;

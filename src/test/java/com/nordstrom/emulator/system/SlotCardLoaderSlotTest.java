@@ -8,10 +8,12 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** A card declaring {@link SlotCard#supportedSlots()} is refused anywhere else, at startup. */
 class SlotCardLoaderSlotTest {
@@ -41,5 +43,15 @@ class SlotCardLoaderSlotTest {
         for (int slot = 1; slot <= 7; slot++) {
             assertNotNull(load(dir, "[" + slot + "]\ntype=disk2\n")[slot], "slot " + slot);
         }
+    }
+
+    @Test
+    void aConfigurationGivingUpperMemoryToTwoCardsFailsAsItLoads(@TempDir Path dir)
+            throws IOException {
+        Path config = dir.resolve("slots.ini");
+        Files.write(config, List.of("[0]", "type=languageCard", "[5]", "type=saturn128"));
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+            () -> SlotCardLoader.load(config, SlotCardLoaderSlotTest.class.getClassLoader()));
+        assertTrue(e.getMessage().contains("Only one card can take over $D000-$FFFF"), e.getMessage());
     }
 }
