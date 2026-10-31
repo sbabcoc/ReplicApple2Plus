@@ -30,8 +30,11 @@ HARDWARE-REFERENCE.md records real cards.
 type=hostfiles
 ```
 
-Any slot 1-7, one card per machine. An optional `dir=` sets the folder
-the host dialogs open in when none has been used yet.
+Any slot 1-7. A second card is accepted but never connected to the
+host: only the card in the lowest-numbered slot gets the transfer window
+and the CP/M menu item; any other reports no host (5.3) and its firmware
+refuses to start. An optional `dir=` sets the folder the host dialogs
+open in when none has been used yet.
 
 ## 3. User flow
 
@@ -230,7 +233,7 @@ SoftCard II's Z80, through CP/M's 6502 server (8.1).
 | `$0` | request register: next request opcode, or `0` = none yet | -- |
 | `$1` | -- | result register: completes the current request |
 | `$2` | data port: next byte from the emulator | data port: next byte to the emulator |
-| `$3` | card signature / protocol version | ROM bank select (`$C800`-`$CFFF`) |
+| `$3` | protocol version, and whether a host is available | ROM bank select (`$C800`-`$CFFF`) |
 | `$E` | 6850 status: CP/M's reader (8.2) | 6850 control |
 | `$F` | 6850 data: the next reader byte | 6850 data: discarded |
 
@@ -243,9 +246,11 @@ SoftCard II's Z80, through CP/M's 6502 server (8.1).
 - **No DMA.** The emulator never touches guest RAM. Everything,
   including file data, crosses the data port. A tight 6502 copy loop
   moves a 64K file in about a second of emulated time.
-- **Protocol version.** Register `$3` reads back the card's signature
-  and protocol version, and the adapter states the version it speaks in
-  its `DESCRIBE` reply; each side uses only what both support.
+- **Protocol version.** Register `$3` reads back the card's protocol
+  version, and the adapter states the version it speaks in its BEGIN
+  message (5.2); each side uses only what both support. The card has no
+  separate signature byte: the slot page's Communications Card bytes
+  (8.2) are the only identification it carries.
 
 ### 5.1 When the adapter goes away
 
@@ -353,6 +358,119 @@ legal in host file names on every platform (`/ \ : * ? " < > |`,
 control characters), the convention's own `#` and `%`, and a trailing
 space or period are written as `%` and two hex digits, and decoded on
 import.
+
+### 5.3 Card behavior in detail
+
+Everything an implementation must match for the committed firmware and
+XFER to run unchanged. "Power-on" and "RESET" mean the slot's RESET
+line; Reboot builds a new card, so it is power-on.
+
+**ROM.**
+
+- The firmware image is 8,448 bytes: the 256-byte `$Cn00` page, then
+  four 2K expansion banks. The `$Cn00` page reads the image's first 256
+  bytes at every slot.
+- Any access to the `$Cn00` page latches the card's expansion ROM, as
+  on real cards; any access to `$CFFF` releases it. A *read* of `$CFFF`
+  while the card is the only one latched returns that bank's last byte
+  before releasing -- the agent copy reads it as image data.
+- Register `$3`'s write selects the bank from the whole byte: bank `n`
+  is image bytes `$100 + n * $800` on. A bank past the image reads
+  `$FF`. The selection survives a `$CFFF` release; power-on and RESET
+  select bank 0.
+- The expansion ROM ignores writes.
+
+**Registers.** Offsets not listed read 0 and ignore writes; reading a
+write-only register reads 0.
+
+- **`$0`, the request register.** With no session open, it reads `END`
+  (`$07`). With a request handed out and not yet completed, it reads
+  `0`, however often it's read: the card hands out one request at a
+  time, in the order the host made them. Otherwise it hands out the next
+  waiting request -- its opcode, with its arguments now readable on `$2`
+  -- or reads `0` if none is waiting.
+- **`$2` read.** The next of the readable bytes: a request's arguments,
+  or the stash after RECALL, whichever was made readable last; `0` once
+  they are exhausted, and before any have been.
+- **`$2` write.** Appends to the adapter's message, held until the next
+  write to `$1`.
+- **`$1` write.** Ends the message, whatever the code, and the card
+  clears it:
+  - `$00`-`$7F` complete the outstanding request. With none outstanding,
+    or no session open, the message is discarded and nothing happens.
+    `$00` is OK; `$01`-`$07` are as listed in 5.2; any other code is
+    read as OTHER. Only OTHER's payload is read (an empty one carries no
+    OS code); the others' payloads are ignored. END ends the session
+    only when completed with `$00`.
+  - `$80` BEGIN first ends any open session (its outstanding and waiting
+    requests fail as abandoned). It then opens a new one -- unless no
+    host is connected, the message is empty, or the capability record is
+    malformed; in those cases no session is open and `$0` reads `END`.
+  - `$81` STASH replaces the stash with the message; `$82` RECALL makes
+    the stash readable on `$2` from its first byte, and may be repeated.
+    The card holds one stash, of any length, empty at power-on; it is
+    opaque to the card, and neither RESET nor the end of a session
+    clears it. (The firmware stashes zero page `$06`-`$09`, then
+    `$0800`-`$1BFF`, and reads them back in that order.)
+  - `$83`-`$FF`: the message is discarded and nothing happens.
+- **`$3` read.** Bits 0-6: the protocol version, 1. Bit 7: a host is
+  connected.
+- **`$4` write.** Appends the byte, as written, to the print spool.
+- **`$5`, `$6`.** Plain 8-bit storage: each reads back what was last
+  written to it. The card gives them no meaning of its own (the
+  firmware's use is in section 7). Power-on and RESET clear them.
+- **`$7` write.** Any value trims the spool (below).
+- **`$E` read** is always `$03`: a byte to receive, room to transmit; no
+  other status bit is ever set. **`$E` write:** a value whose low two
+  bits are both set is a master reset, which restarts the reader stream
+  and marks the card as served by CP/M (8.5); every other control value
+  is ignored.
+- **`$F` read** returns the reader stream's next byte: `xfer.hex`
+  exactly as committed, then `$1A` (`^Z`), then from the start again.
+  **`$F` write** is discarded.
+
+**RESET** ends any open session (outstanding and waiting requests fail
+as abandoned), discards the message being written and any readable
+bytes, selects bank 0, clears `$5` and `$6`, and clears the served-by-
+CP/M mark. It doesn't rewind the reader stream, clear the stash, or
+empty the print spool.
+
+**Liveness.** Any access to registers `$0`-`$D` while a session is open
+-- a data byte included -- counts as the adapter being alive; `$E` and
+`$F` don't. The host's 10-second silence (5.1) is measured in host time,
+not emulated cycles, and offered only while the host is waiting on the
+adapter.
+
+**The print spool** collects `$4`'s bytes. A trim (`$7`) cuts, from the
+end, any bytes after the last carriage return, then repeated carriage
+returns down to one; then, from the start, every leading carriage
+return. Bit 7 is ignored in recognizing a carriage return (`$0D` or
+`$8D`); nothing else is altered. Once no byte has arrived for 1.5
+seconds of host time, the host takes the whole spool as one job and
+empties it; it converts it as section 7 says.
+
+**Decoding replies.** The host reads a reply with the encodings of 5.2.
+A string holds at most 255 bytes and a path at most 255 components;
+both are bytes, one per character, with no character set applied. A
+reply that ends inside a value fails its request as IO_ERROR. VOLUMES
+and LIST stop at their empty string, ignoring anything after it; READ's
+data is every byte after its type.
+
+**Capability fields** are read only by the host:
+
+- *Strings* in a field (`$09`, `$11`) are a sequence of length-prefixed
+  strings filling the field's value. `$01`, `$02`, `$06`, `$09` and
+  `$11` are 7-bit ASCII.
+- A field shorter than its value is ignored: an empty `$04`, `$05`,
+  `$0C` or `$0E`, a `$0F` under 3 bytes, a `$10` under 2. A `$0A` or
+  `$0B` must hold its whole tag string and both aux bytes.
+- An absent field means: no OS name or version; flat; names of up to 15
+  characters, with no rules and no extra characters; CR line endings,
+  high bit clear; no text tags; text `TXT` and other files `BIN`, aux
+  `$0000`; attributes 0; random-access text not recognized; no end
+  marker; files of any length; one-part names; typed files.
+- A record that runs past the end of BEGIN's message is malformed. An
+  end tag is optional when the record fills the message.
 
 ## 6. Firmware (the ProDOS and DOS 3.3 adapters)
 
