@@ -39,6 +39,29 @@ class PrintSpoolTest {
     }
 
     @Test
+    void resetDuringACaptureAbandonsIt() {
+        HostTransferCard card = new HostTransferCard();
+        card.writeIoSwitch(Protocol.REG_PHASE, 2); // capturing
+        card.writeIoSwitch(Protocol.REG_PRINT, 0xB1);
+        card.writeIoSwitch(Protocol.REG_PRINT, 0xB0);
+        card.onReset();
+        assertFalse(card.printSpool().hasJob(), "a partial listing isn't offered for saving");
+    }
+
+    @Test
+    void resetAfterACaptureKeepsTheListing() {
+        HostTransferCard card = new HostTransferCard();
+        card.writeIoSwitch(Protocol.REG_PHASE, 2);
+        card.writeIoSwitch(Protocol.REG_PRINT, 0xB1);
+        card.writeIoSwitch(Protocol.REG_PRINT, 0x8D);
+        card.writeIoSwitch(Protocol.REG_PHASE, 0); // the capture is over, as the firmware ends it
+        card.writeIoSwitch(Protocol.REG_TRIM, 0);
+        card.onReset(); // within the idle wait, before the job is taken
+        assertArrayEquals(new byte[] {(byte) 0xB1, (byte) 0x8D}, card.printSpool().takeIfIdle(0),
+            "a finished listing is still saved");
+    }
+
+    @Test
     void aListingIsTrimmedToItsNonBlankLines() {
         PrintSpool spool = new PrintSpool();
         // Applesoft's leading Return, an Integer-style line, BASIC's fresh line and prompt

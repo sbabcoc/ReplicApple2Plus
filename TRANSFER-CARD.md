@@ -432,8 +432,10 @@ write-only register reads 0.
 **RESET** ends any open session (outstanding and waiting requests fail
 as abandoned), discards the message being written and any readable
 bytes, selects bank 0, clears `$5` and `$6`, and clears the served-by-
-CP/M mark. It doesn't rewind the reader stream, clear the stash, or
-empty the print spool.
+CP/M mark. If a capture was under way (`$6` not 0), it empties the
+print spool: the partial listing is abandoned. A finished listing still
+waiting out its idle time is kept and saved. RESET doesn't rewind the
+reader stream or clear the stash.
 
 **Liveness.** Any access to registers `$0`-`$D` while a session is open
 -- a data byte included -- counts as the adapter being alive; `$E` and

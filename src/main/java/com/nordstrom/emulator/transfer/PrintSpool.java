@@ -55,6 +55,14 @@ public final class PrintSpool {
     }
 
     /**
+     * Discards the job: a listing whose capture never finished. Emulation
+     * thread.
+     */
+    public synchronized void discard() {
+        job.reset();
+    }
+
+    /**
      * Takes the job if one is waiting and nothing has been printed for at
      * least {@code idleNanos}; otherwise leaves it.
      *

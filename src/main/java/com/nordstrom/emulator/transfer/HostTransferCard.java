@@ -229,7 +229,10 @@ public final class HostTransferCard implements SlotCard {
         toAdapter = new byte[0];
         toAdapterPos = 0;
         romBank = 0;
-        typing = 0; // a capture interrupted by RESET is abandoned
+        if (phase != 0) {
+            printSpool.discard(); // a capture interrupted by RESET is abandoned
+        } // phase 0: any job is a finished listing, still to be saved
+        typing = 0;
         phase = 0;
         servedByCpm = false;
     }
