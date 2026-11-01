@@ -116,7 +116,16 @@ public final class Capabilities {
         return Collections.unmodifiableList(out);
     }
 
+    /**
+     * Reads a type field ($0A, $0B): tag (string), then aux (2 bytes).
+     * Shorter than that is malformed, refusing the session like a field
+     * that runs past the end -- not an exception for the emulation thread.
+     */
     private static FileType fileType(byte[] value) {
+        if (value.length < 1 || value.length < 1 + (value[0] & 0xFF) + 2) {
+            throw new IllegalArgumentException("type field holds " + value.length
+                + " bytes, too few for its tag and aux value");
+        }
         int length = value[0] & 0xFF;
         String tag = new String(value, 1, length, StandardCharsets.US_ASCII);
         int aux = (value[1 + length] & 0xFF) | (value[2 + length] & 0xFF) << 8;

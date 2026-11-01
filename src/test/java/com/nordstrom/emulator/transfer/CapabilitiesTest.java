@@ -47,6 +47,16 @@ class CapabilitiesTest {
     }
 
     @Test
+    void aTypeFieldTooShortForItsTagAndAuxIsRejected() {
+        assertThrows(IllegalArgumentException.class, // tag length 3, but only 1 tag byte
+            () -> Capabilities.parse(new byte[] {Protocol.CAP_DEFAULT_TEXT_TYPE, 2, 3, 'T'}));
+        assertThrows(IllegalArgumentException.class, // whole tag, but only 1 aux byte
+            () -> Capabilities.parse(new byte[] {Protocol.CAP_DEFAULT_BINARY_TYPE, 5, 3, 'B', 'I', 'N', 0}));
+        assertThrows(IllegalArgumentException.class, // empty
+            () -> Capabilities.parse(new byte[] {Protocol.CAP_DEFAULT_TEXT_TYPE, 0}));
+    }
+
+    @Test
     void randomAccessTextIsNotConvertible() {
         Capabilities caps = Capabilities.parse(FakeAdapter.proDosLike());
         assertTrue(caps.isConvertibleText(new FileType("TXT", 0)));

@@ -105,6 +105,13 @@ class HostTransferCardTest {
     }
 
     @Test
+    void aShortTypeFieldIsRefusedNotThrown() {
+        adapter.begin(new byte[] {Protocol.CAP_DEFAULT_TEXT_TYPE, 2, 3, 'T'}); // tag length 3, 1 byte
+        assertTrue(host.started.isEmpty());
+        assertEquals(Protocol.REQ_END, card.readIoSwitch(Protocol.REG_REQUEST));
+    }
+
+    @Test
     void volumesAndListing() throws Exception {
         TransferSession session = begin();
         adapter.directories.add(List.of("VOL", "SUB"));

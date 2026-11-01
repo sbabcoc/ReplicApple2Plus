@@ -463,7 +463,8 @@ data is every byte after its type.
   `$11` are 7-bit ASCII.
 - A field shorter than its value is ignored: an empty `$04`, `$05`,
   `$0C` or `$0E`, a `$0F` under 3 bytes, a `$10` under 2. A `$0A` or
-  `$0B` must hold its whole tag string and both aux bytes.
+  `$0B` that doesn't hold its whole tag string and both aux bytes makes
+  the record malformed.
 - An absent field means: no OS name or version; flat; names of up to 15
   characters, with no rules and no extra characters; CR line endings,
   high bit clear; no text tags; text `TXT` and other files `BIN`, aux
