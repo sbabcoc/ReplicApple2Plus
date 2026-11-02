@@ -200,7 +200,9 @@ public final class TransferSession {
     }
 
     /**
-     * Completes the current request.
+     * Completes the current request. END can't fail -- the adapter answers
+     * it before it leaves, with nothing yet attempted -- so any code
+     * completes END as OK (TRANSFER-CARD.md 5.2).
      *
      * @param code    the completion code, $00-$7F
      * @param payload the adapter's reply
@@ -212,7 +214,7 @@ public final class TransferSession {
             return false; // a completion with nothing outstanding: ignored
         }
         current = null;
-        ResultCode result = ResultCode.of(code);
+        ResultCode result = request.opcode == Protocol.REQ_END ? ResultCode.OK : ResultCode.of(code);
         if (result == ResultCode.OK) {
             request.succeed(payload);
         } else {
@@ -227,7 +229,7 @@ public final class TransferSession {
             }
             request.future.completeExceptionally(new TransferException(result, nativeCode, message));
         }
-        return request.opcode == Protocol.REQ_END && result == ResultCode.OK;
+        return request.opcode == Protocol.REQ_END;
     }
 
     /** Ends the session, failing everything outstanding. */

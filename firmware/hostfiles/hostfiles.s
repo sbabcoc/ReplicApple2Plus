@@ -7,21 +7,26 @@
 ; The emulator never touches the guest's disks or memory.
 ;
 ; Layout (see hostfiles.cfg):
-;   $Cn00 page  -- entry and finish; position-independent (any slot)
-;   $C800       -- detection, borrowing RAM, starting the agent
+;   $Cn00 page  -- entries, finish and RESET; position-independent (any
+;                  slot)
+;   $C800       -- detection, borrowing RAM, starting the agent, and
+;                  restoring RAM
 ;   AGENT       -- request loop and every MLI call, copied to and run
 ;                  from RAM at $0800: MLI calls can't be made from ROM
 ;                  space safely, and other cards may take $C800 away
 ;                  while ProDOS works.
 ;
 ; Rules kept throughout:
-;   - Code running at $C800 never calls out except to COUT1 ($FDF0),
-;     which touches no card. All MLI calls happen from RAM.
+;   - Code running at $C800 never calls out except to COUT1 ($FDF0) and
+;     DOS 3.3's DOSHOOK ($3EA), which touch no card. All MLI calls happen
+;     from RAM.
 ;   - $CFFF is touched before running at $C800, so no other card's
 ;     expansion ROM is selected alongside ours.
 ;   - RAM $0800-$1BFF and zero page $06-$09 are borrowed: saved to the
 ;     card first, restored at the end. Memory is left as it was. Agent
 ;     code runs at $0800-$15FF; its buffers sit above that.
+;   - While RAM is borrowed, the soft-reset vector ($3F2-$3F4) points at
+;     the card: RESET restores RAM, then goes where the OS's vector went.
 ; =====================================================================
 
         .setcpu "6502"
@@ -47,6 +52,8 @@ DOSHOOK  = $03EA        ; DOS 3.3: reconnect DOS to the I/O hooks
 COUT1    = $FDF0        ; Monitor screen output: no card involved
 KEYIN    = $FD1B        ; Monitor keyboard input
 IORTS    = $FF58        ; a known RTS in the Monitor ROM
+SOFTEV   = $03F2        ; soft-reset vector: the Autostart ROM's RESET
+PWREDUP  = $03F4        ;   jumps through it when PWREDUP = SOFTEV+1 EOR $A5
 
 ; ---- card registers, at $C080 + slot*16 (index with X = slot*16) ----
 CARD_REQ  = $C080       ; read: next request, 0 = none
@@ -184,53 +191,23 @@ print:  asl     a               ; $Cn -> Y = slot*16
         pla
         rts
 
-; Finish: entered from the agent with X = slot*16. Gets the borrowed RAM
-; back from the card and restores it -- overwriting the agent, which is
-; why this runs from ROM -- then returns output to the screen and prints
-; the character we were called with.
-finish: lda     #MSG_RECALL
-        sta     CARD_DONE,x
-        ldy     #4              ; zero page $06-$09 first: onto the stack,
-@zp:    lda     CARD_DATA,x     ; since PTR is needed for the region
-        pha
-        dey
-        bne     @zp
-        lda     #<(REGION_FIRST*256)
-        sta     PTR
-        lda     #REGION_FIRST
-        sta     PTR+1
-        ldy     #0
-@copy:  lda     CARD_DATA,x
-        sta     (PTR),y
-        iny
-        bne     @copy
-        inc     PTR+1
-        lda     PTR+1
-        cmp     #REGION_END
-        bne     @copy
-        pla
-        sta     ZP+3
-        pla
-        sta     ZP+2
-        pla
-        sta     ZP+1
-        pla
-        sta     ZP
-        lda     #<KEYIN         ; input back to the keyboard -- IN#0 -- the way
-        sta     KSW             ; the running OS needs. KSW in both cases:
-        lda     #>KEYIN         ; BASIC.SYSTEM keeps the device there too,
-        sta     KSW+1           ; and would call us again otherwise
-        lda     MLI
-        cmp     #$4C
-        bne     @dos
-        lda     #<KEYIN         ; ProDOS: BASIC.SYSTEM's own vector as well
-        sta     VECTIN
-        lda     #>KEYIN
-        sta     VECTIN+1
-        bne     @out            ; (always: >KEYIN isn't 0)
-@dos:   jsr     DOSHOOK         ; DOS 3.3: let DOS reconnect its hooks
-@out:   bit     $CFFF
-        jmp     resume_prompted
+; Finish: entered from the agent with X = slot*16. Restoring RAM
+; overwrites the agent, so it runs from ROM -- in bank 0, reached as at
+; $Cn00. Then input goes back to the keyboard, and BASIC's prompt again.
+finish: bit     $CFFF
+        jmp     finish_main
+
+; RESET while RAM is borrowed: the Autostart ROM jumps here through the
+; soft-reset vector, after resetting the screen and I/O. The card has
+; ended the session and selected bank 0; the stash survives RESET. Bank 0
+; restores RAM and the OS's own vector, then takes that vector.
+reset_entry:
+        jsr     IORTS           ; find our slot, as at $Cn00
+        tsx
+        lda     $0100,x
+        sta     MSLOT
+        bit     $CFFF
+        jmp     reset_main
 
 ; Copies COPYCNT bytes of the agent image from (PTR), starting in bank
 ; COPYBANK, to (PTR2); then selects bank 0 again and returns to
@@ -324,34 +301,45 @@ main:   tsx                     ; called as the input device: RDKEY flashed the
         pha
         ; fall through
 
-; Lend the card zero page $06-$09 and $0800-$15FF exactly as they are,
-; then copy the chosen agent into RAM -- from the $Cn page, since its image
-; is in another bank and code can't switch away the bank it's running
-; from. On the stack: bank, image address (lo, hi), size (lo, hi).
-borrow: lda     ZP
-        sta     CARD_DATA,x
-        lda     ZP+1
-        sta     CARD_DATA,x
-        lda     ZP+2
-        sta     CARD_DATA,x
-        lda     ZP+3
-        sta     CARD_DATA,x
-        lda     #0
-        sta     PTR
-        lda     #REGION_FIRST
-        sta     PTR+1
-        ldy     #0
-@stash: lda     (PTR),y
+; Lend the card zero page $06-$09, $0800-$1BFF and the soft-reset vector
+; exactly as they are, point the vector at the card, then copy the chosen
+; agent into RAM: from the $Cn page, since its image is in another bank
+; and code can't switch away the bank it's running from. Nothing is
+; changed until the card holds it all: the region is read by absolute
+; address, not through PTR, so a RESET while stashing finds memory as it
+; was. The stream, which restore reads back in order: zero page; the
+; region, a column at a time -- byte Y of every page, for each Y; then the
+; vector as restore writes it (high byte, low byte, PWREDUP). On the
+; stack: bank, image address (lo, hi), size (lo, hi).
+borrow: ldy     #0
+@zp:    lda     ZP,y
         sta     CARD_DATA,x
         iny
+        cpy     #4
+        bne     @zp
+        ldy     #0
+@stash: .repeat REGION_END - REGION_FIRST, I
+        lda     REGION_FIRST * 256 + I * 256,y
+        sta     CARD_DATA,x
+        .endrepeat
+        iny
         bne     @stash
-        inc     PTR+1
-        lda     PTR+1
-        cmp     #REGION_END
-        bne     @stash
+        lda     SOFTEV+1
+        sta     CARD_DATA,x
+        lda     SOFTEV
+        sta     CARD_DATA,x
+        lda     PWREDUP
+        sta     CARD_DATA,x
         lda     #MSG_STASH
         sta     CARD_DONE,x
-        pla                     ; now the region is safe to use
+        lda     MSLOT           ; now RESET can restore it all: hook the
+        sta     SOFTEV+1        ; soft-reset vector. High byte, low byte,
+        lda     #<reset_entry   ; then PWREDUP: until the last write the
+        sta     SOFTEV          ; vector is invalid -- a RESET then is a
+        lda     MSLOT           ; cold start -- never valid but half-written
+        eor     #$A5
+        sta     PWREDUP
+        pla                     ; and the region is safe to use
         sta     COPYCNT+1
         pla
         sta     COPYCNT
@@ -377,6 +365,49 @@ main_continue:
         lda     #<finish
         sta     AGENT_FINPTR
         jmp     AGENT_ENTRY
+
+; Finish, from the $Cn page with X = slot*16.
+finish_main:
+        jsr     restore
+        jsr     undo_in
+        jmp     resume_prompted
+
+; RESET while RAM was borrowed, from the $Cn page.
+reset_main:
+        jsr     slot_x
+        jsr     restore
+        jsr     undo_in         ; the session that IN#n started is over
+        jmp     (SOFTEV)        ; the OS's own RESET handling, as if we'd
+                                ; never been there
+
+; Gets the borrowed RAM back from the card, X = slot*16, writing it in
+; the order borrow streamed it: zero page, the region a column at a time,
+; then the soft-reset vector -- last, so a RESET at any point before
+; restores it all again; and high byte, low byte, then PWREDUP, so it is
+; never valid but half-written. Calls nothing, and uses no zero page.
+restore:
+        lda     #MSG_RECALL
+        sta     CARD_DONE,x
+        ldy     #0
+@zp:    lda     CARD_DATA,x
+        sta     ZP,y
+        iny
+        cpy     #4
+        bne     @zp
+        ldy     #0
+@copy:  .repeat REGION_END - REGION_FIRST, I
+        lda     CARD_DATA,x
+        sta     REGION_FIRST * 256 + I * 256,y
+        .endrepeat
+        iny
+        bne     @copy
+        lda     CARD_DATA,x
+        sta     SOFTEV+1
+        lda     CARD_DATA,x
+        sta     SOFTEV
+        lda     CARD_DATA,x
+        sta     PWREDUP
+        rts
 
 ; X = slot * 16, from MSLOT ($Cn)
 slot_x: lda     MSLOT

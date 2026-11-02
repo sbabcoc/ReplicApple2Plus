@@ -262,7 +262,9 @@ returning an error code. The card must never wait forever:
 - **RESET:** the card abandons the transfer session at once. This needs
   a small addition to the card interface -- `SlotCard.onReset()`, a
   default no-op, called when the RESET line is asserted (on real
-  hardware, the slot connector carries RESET to every card).
+  hardware, the slot connector carries RESET to every card). The
+  firmware then restores the borrowed memory before the OS's own RESET
+  handling runs (6.4).
 - **Reboot:** builds a new machine with a new card, so the session
   ends with the old card.
 - **Silence:** if the adapter neither completes the request nor polls
@@ -315,6 +317,12 @@ happens to it.
 NOT_FOUND, `$02` EXISTS, `$03` DISK_FULL, `$04` WRITE_PROTECTED, `$05`
 BAD_NAME, `$06` IO_ERROR, `$07` OTHER (payload: the OS's own code, 1
 byte, then a message string).
+
+**END cannot fail.** Its only completion is `$00`, written before the
+adapter leaves -- before it restores anything, so nothing has yet been
+attempted that could fail -- and what follows (RECALL, restoring memory,
+returning to the OS) is the adapter's alone. The card reads any code
+completing END as `$00`, ending the session.
 
 **Encodings:** a *string* is a length byte and that many bytes; a
 *path* is a count byte and that many strings; *tag* is a string; *aux*
@@ -400,8 +408,8 @@ write-only register reads 0.
     or no session open, the message is discarded and nothing happens.
     `$00` is OK; `$01`-`$07` are as listed in 5.2; any other code is
     read as OTHER. Only OTHER's payload is read (an empty one carries no
-    OS code); the others' payloads are ignored. END ends the session
-    only when completed with `$00`.
+    OS code); the others' payloads are ignored. Any code completing END
+    is read as `$00` and ends the session.
   - `$80` BEGIN first ends any open session (its outstanding and waiting
     requests fail as abandoned). It then opens a new one -- unless no
     host is connected, the message is empty, or the capability record is
@@ -410,8 +418,7 @@ write-only register reads 0.
     the stash readable on `$2` from its first byte, and may be repeated.
     The card holds one stash, of any length, empty at power-on; it is
     opaque to the card, and neither RESET nor the end of a session
-    clears it. (The firmware stashes zero page `$06`-`$09`, then
-    `$0800`-`$1BFF`, and reads them back in that order.)
+    clears it: the firmware recalls it after RESET (6.4).
   - `$83`-`$FF`: the message is discarded and nothing happens.
 - **`$3` read.** Bits 0-6: the protocol version, 1. Bit 7: a host is
   connected.
@@ -486,12 +493,13 @@ emulator needs no 6502 toolchain; `./gradlew assembleHostFilesFirmware`
 rebuilds it.
 
 - **The `$Cn00` page:** entry, the listing path, the input entry used
-  while typing `LIST`, the copy routine and finish. Position-independent: it runs at `$C100`-`$C700` depending on
+  while typing `LIST`, the copy routine, and the entries for finish and
+  RESET, which go on into bank 0. Position-independent: it runs at `$C100`-`$C700` depending on
   the slot. Its first bytes match neither the Autostart ROM's disk-boot
   signature nor Pascal 1.1's; bytes 5 and 7 (`$18`/`$38`) identify it as
   an Apple Communications Card, for CP/M (8.2).
-- **Bank 0** (`$C800`): detection, borrowing memory, messages, and
-  capturing a listing (section 7).
+- **Bank 0** (`$C800`): detection, borrowing and restoring memory,
+  messages, and capturing a listing (section 7).
 - **Bank 1:** the ProDOS agent image. **Banks 2-3:** the DOS 3.3 agent
   image, larger than one bank -- the copy routine follows an image from
   `$CFFF` on to `$C800` of the next bank (reading `$CFFF` releases the ROM,
@@ -532,7 +540,8 @@ ProDOS first, then DOS 3.3:
 
 - **Borrowed, then restored:** `$0800`-`$1BFF` and zero page `$06`-`$09`
   are streamed out to the card before use and back at the end, so memory
-  -- a BASIC program included -- is left exactly as it was. Agent code
+  -- a BASIC program included -- is left exactly as it was, whether the
+  session ends or RESET ends it (below). Agent code
   runs from `$0800` (up to `$15FF`); the ProDOS agent's I/O buffer is at
   `$1000` and its data buffer at `$1400`; the DOS agent's buffers are at
   `$1600`-`$1BFF`; while an agent is copied, the copy's own variables sit
@@ -544,9 +553,28 @@ ProDOS first, then DOS 3.3:
 - **OS calls run from RAM.** The ProDOS manual states that MLI calls
   can't be executed from the Language Card area, and while the OS works,
   other cards' firmware can take over the shared `$C800` space. So code
-  running at `$C800` calls nothing but COUT1 (`$FDF0`), which touches no
-  card, and touches `$CFFF` before running there; all OS calls and all
+  running at `$C800` calls nothing but COUT1 (`$FDF0`) and DOS 3.3's
+  `$3EA`, which touch no card, and touches `$CFFF` before running there; all OS calls and all
   printing during a session come from the agent in RAM.
+- **RESET-safe.** The stash is zero page, then the region a column at a
+  time (byte *n* of every page, for each *n*), then the soft-reset vector
+  (`$3F2`-`$3F4`). Stashing reads memory by absolute address and changes
+  nothing, so RESET while stashing finds memory as it was. Once the card
+  holds it all, the firmware points the vector at the card's `$Cn00`
+  page; from then until the session's memory is back, RESET -- which the
+  Autostart ROM sends through that vector after resetting the screen and
+  I/O -- reaches the card's firmware. It recalls the stash and writes it
+  back in order, with no zero page used, input back on the keyboard as
+  at the end of a session (6.7), and jumps through the OS's vector, now
+  restored: DOS 3.3 or BASIC.SYSTEM warm-starts as if the card had never
+  been there. A normal finish restores memory the same way, so the
+  vector is never left pointing at the card. The vector goes back last,
+  so RESET part-way through a restore restores it all again.
+- **The vector's two edges.** The firmware writes the vector high byte,
+  low byte, then `$3F4`, so it is never valid but half-written: a few
+  microseconds as the vector changes, at the start of a session and at
+  its end, it is invalid, and RESET then is the Autostart ROM's cold
+  start -- the same exposure the OSes accept whenever they set it.
 
 ### 6.5 The ProDOS adapter
 
@@ -607,6 +635,9 @@ ProDOS first, then DOS 3.3:
   continues into KEYIN -- as if the card had never been asked.
 - **Early exits** print one line and end the same way: no host window,
   memory in use, or neither ProDOS nor DOS 3.3.
+- **RESET** ends a session too: memory comes back (6.4), input goes back
+  to the keyboard as above, and then the OS's own RESET handling runs in
+  place of the fresh prompt.
 
 ## 7. Capturing the program listing: `PR#n`
 

@@ -28,7 +28,9 @@ final class MachineHarness implements AutoCloseable {
     final HostTransferCard card = new HostTransferCard();
     final BlockingQueue<TransferSession> sessions = new LinkedBlockingQueue<>();
     final MotherboardBus bus;
+    private final Cpu6502 cpu;
     private final SystemClock clock;
+    private volatile TransferHost.EndReason ended;
     private final Deque<Integer> keys = new ConcurrentLinkedDeque<>();
     private double seconds;
 
@@ -55,6 +57,7 @@ final class MachineHarness implements AutoCloseable {
 
             @Override
             public void sessionEnded(TransferSession session, EndReason reason) {
+                ended = reason;
             }
         });
         SlotCard[] slots = new SlotCard[8];
@@ -64,7 +67,8 @@ final class MachineHarness implements AutoCloseable {
         slots[6] = disk2;
         disk2.removableDrives().get(0).insert(disk);
         bus = MotherboardBus.withoutAudio(slots);
-        clock = new SystemClock(new Cpu6502(bus, 0xFFFC));
+        cpu = new Cpu6502(bus, 0xFFFC);
+        clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
         clock.addCycleListener(bus.scanlineModes()::tick);
         clock.addCycleListener(disk2::tick);
@@ -159,6 +163,23 @@ final class MachineHarness implements AutoCloseable {
         }
         run(2);
         t.join(1000);
+    }
+
+    /** Presses and releases RESET, as the toolbar's Reset button does. */
+    void pressReset() {
+        cpu.raiseReset();
+        bus.resetCards(); // the slot connector carries RESET to every card
+        cpu.lowerReset();
+    }
+
+    /** @return why the last session ended, or null if none has */
+    TransferHost.EndReason ended() {
+        return ended;
+    }
+
+    /** @return the 16-bit word at the given address */
+    int word(int address) {
+        return bus.read(address) | bus.read(address + 1) << 8;
     }
 
     /** Types IN#2 and waits for the session it starts; null if none does. */

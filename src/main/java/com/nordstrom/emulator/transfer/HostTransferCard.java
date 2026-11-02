@@ -66,7 +66,7 @@ public final class HostTransferCard implements SlotCard {
     private final ByteArrayOutputStream fromAdapter = new ByteArrayOutputStream();
     private byte[] toAdapter = new byte[0];
     private int toAdapterPos;
-    private byte[] stash = new byte[0];
+    private byte[] stash = new byte[0]; // survives RESET: the firmware's RESET hook recalls it
     private int romBank;
     private int typing; // the firmware's place in a recipe; 0 = not typing
     private int phase;  // the listing capture: 0 idle, 1 typing the command, 2 capturing
@@ -228,7 +228,7 @@ public final class HostTransferCard implements SlotCard {
         fromAdapter.reset();
         toAdapter = new byte[0];
         toAdapterPos = 0;
-        romBank = 0;
+        romBank = 0; // the firmware's RESET hook runs from bank 0
         if (phase != 0) {
             printSpool.discard(); // a capture interrupted by RESET is abandoned
         } // phase 0: any job is a finished listing, still to be saved

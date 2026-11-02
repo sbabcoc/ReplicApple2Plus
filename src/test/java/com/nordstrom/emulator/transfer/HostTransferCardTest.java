@@ -112,6 +112,20 @@ class HostTransferCardTest {
     }
 
     @Test
+    void theStashSurvivesResetForTheFirmwareToRecall() {
+        begin();
+        for (int b : new int[] {1, 2, 3}) {
+            card.writeIoSwitch(Protocol.REG_DATA, b);
+        }
+        card.writeIoSwitch(Protocol.REG_COMPLETE, Protocol.MSG_STASH);
+        card.onReset(); // the session ends; the borrowed memory must not
+        card.writeIoSwitch(Protocol.REG_COMPLETE, Protocol.MSG_RECALL); // no session open
+        assertEquals(1, card.readIoSwitch(Protocol.REG_DATA));
+        assertEquals(2, card.readIoSwitch(Protocol.REG_DATA));
+        assertEquals(3, card.readIoSwitch(Protocol.REG_DATA));
+    }
+
+    @Test
     void volumesAndListing() throws Exception {
         TransferSession session = begin();
         adapter.directories.add(List.of("VOL", "SUB"));
@@ -208,6 +222,18 @@ class HostTransferCardTest {
         assertEquals(List.of(TransferHost.EndReason.COMPLETED), host.ended);
         assertEquals(Protocol.REQ_END, card.readIoSwitch(Protocol.REG_REQUEST), "no session: END");
         assertInstanceOf(TransferException.Abandoned.class, failure(session.volumes()));
+    }
+
+    @Test
+    void endCompletedWithAnyCodeStillEndsTheSession() throws Exception {
+        TransferSession session = begin();
+        CompletableFuture<Void> end = session.end();
+        assertEquals(Protocol.REQ_END, card.readIoSwitch(Protocol.REG_REQUEST));
+        card.writeIoSwitch(Protocol.REG_COMPLETE, ResultCode.IO_ERROR.code());
+        done(end); // END can't fail: any code completes it as OK
+        assertFalse(session.isOpen());
+        assertEquals(List.of(TransferHost.EndReason.COMPLETED), host.ended);
+        assertEquals(Protocol.REQ_END, card.readIoSwitch(Protocol.REG_REQUEST), "no session: END");
     }
 
     @Test
