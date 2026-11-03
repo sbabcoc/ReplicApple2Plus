@@ -71,6 +71,21 @@ Companion documents:
 
 **Input**
 - Keyboard, with the II+'s single-character latch and strobe.
+- Command history at the Apple's own prompts. The host's **Up** and
+  **Down** arrows -- keys the II+ keyboard doesn't have -- step through
+  lines entered before at the same prompt: Applesoft's `]`, Integer
+  BASIC's `>`, the Monitor's `*` and the mini-assembler's `!` each keep
+  their own, up to 100 lines. **Down** past the newest brings back the
+  line that was being typed. A recalled line is typed into the Monitor's
+  line-input routine (GETLN) as a person would type it, so it edits with
+  the usual arrows and ESC moves and enters with Return. DOS 3.3 and
+  ProDOS BASIC.SYSTEM commands are kept like BASIC lines. History is kept
+  across launches in the emulator folder. The arrows do nothing anywhere
+  else -- in programs with their own input routines, at `INPUT` prompts,
+  in escape mode, or while Paste or Type File... is typing (whose lines,
+  after the first, aren't kept). If the cursor was moved with ESC while
+  typing a line, a recall still enters the right line but may leave
+  characters of the old one on the screen.
 - Game controllers: four paddle timers (`$C064`-`$C067`, calibrated
   against the ROM's own `PREAD` routine) and three pushbuttons
   (`$C061`-`$C063`), fed by a locally connected gamepad (via Jamepad, an
@@ -337,6 +352,7 @@ emulator itself in one folder of your choosing:
   roms/        the ROM images (below)
   plugins/     plug-in card jars, such as SoftCard2
   disks/       disk images
+  command-history.txt   lines entered at the Apple's prompts, saved on exit
 ```
 
 On its first start it asks for that folder -- an existing one, or a new
@@ -662,7 +678,8 @@ lands in `build/jpackage` too.
 - `src/main/java/com/nordstrom/emulator/` -- the application:
   `Apple2Plus` (entry point and machine assembly), `EmulationLoop`
   (audio-paced emulation thread), `ScreenPanel`, `DiskMenu`, `EditMenu`,
-  `ToolbarControls`, keyboard input and text injection, plus the
+  `ToolbarControls`, keyboard input, text injection and command history
+  (`CommandRecall`, `CommandHistory`), plus the
   `MemoryBus` and `InterruptLines` contracts shared by `cpu` and
   `system`.
 - `.../cpu/` -- the 6502 core.

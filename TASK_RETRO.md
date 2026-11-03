@@ -15,6 +15,72 @@ current.
 
 ## Completed tasks (moved from TODO.md)
 
+### Command history at the Apple's prompts -- done
+
+The host's Up and Down arrows recall lines entered before at the same
+prompt. See `CommandRecall.java` and `CommandHistory.java`; the ROM facts
+it depends on are in HARDWARE-REFERENCE.md section 4.
+
+- **Approach:** the emulator follows the Monitor's GETLN and types
+  recalled lines as keystrokes, rather than writing the input buffer or
+  screen memory. GETLN then keeps its own buffer, cursor and echo, under
+  whatever hooks are installed, and a recalled line edits like a typed
+  one. A guest-side alternative (a resident routine on the input hook)
+  was set aside because DOS already owns that hook.
+- **Keys:** Up and Down were unmapped -- the II+ keyboard has no such
+  keys -- so they could be given to history without taking anything
+  away. Ctrl-K and Ctrl-J, which software such as Davex treats as up and
+  down, are left alone.
+- **Knowing the line's length** without guessing: GETLN holds its buffer
+  index in X when it calls `RDCHAR`, so X is read at `$FD35` when the
+  return address on the stack is GETLN's (`$FD77`). Escape mode was the
+  trap: after ESC, keys move the cursor, and `RDCHAR` is left via `$FD2F`;
+  recall is refused until execution is back at `$FD35`. Removing that
+  guard makes `nothingIsTypedInEscapeMode` fail with the recalled keys
+  read as escape commands.
+- **Replacing a longer line:** left arrows back GETLN's index up without
+  erasing the screen, so a shorter recall is followed by spaces and as
+  many left arrows -- the spaces blank the overhang, and the left arrows
+  take them back out of the line. Without that, the wrapped-row and
+  shorter-recall tests show the old characters left behind.
+- **When a line counts as entered** -- found on real use: on macOS,
+  under DOS 3.3, Up did nothing after `CATALOG`. Diagnostic logging
+  showed the Up key arriving and recall finding no entries: the line had
+  never been recorded. The first version waited for GETLN to return to
+  its caller; DOS 3.3 runs its commands when GETLN echoes the Return and
+  leaves with its own saved stack pointer, so that return never happens.
+  (The earlier DOS check used `PRINT 12`, which BASIC runs.) Recording
+  at GETLN's own Return handling (`$FD8B`) fixed DOS 3.3 but not ProDOS:
+  a trace showed BASIC.SYSTEM's input hook taking the Return, running the
+  command, and handing GETLN a left arrow at index 0, so GETLN never sees
+  a Return at all. What every case shares is the Return being taken from
+  the keyboard while GETLN waits at `RDCHAR`, and that is where a line is
+  now recorded -- `KeyboardRegister` gained `lastKey()` to tell which key
+  was taken. Two ROM-only tests reproduce each operating system's
+  behavior with a small hook in place of the disk (an output hook that
+  resets the stack and restarts BASIC; an input hook that swallows the
+  Return), and fail against the earlier versions; both commands were then
+  checked in the running application under the real DOS 3.3 and ProDOS.
+- **Recalls pressed faster than they type** build on the line the pending
+  recall will leave, so repeated Up lands where expected.
+- **History per prompt** (`]`, `>`, `*`, `!`): a line means nothing to
+  another interpreter. `INPUT` answers aren't kept -- Applesoft reads them
+  with a null prompt, Integer BASIC with `?`. Lines whose prompt appeared
+  while Paste or Type File... was typing aren't kept either, so typing a
+  program in doesn't fill the history.
+- **Persistence:** `command-history.txt` in the emulator folder, one entry
+  per line with its prompt first, written by the shutdown hook; the store
+  is shared across Reboot.
+- **CPU:** `Cpu6502` gained read-only `pc()`, `x()`, `sp()` and
+  `resetCount()` -- the last because a RESET never returns through the
+  line it interrupted.
+- **Verification:** `CommandRecallTest` runs the real ROM (Applesoft and
+  the Monitor) with the feeder and recall wired as in the application;
+  `CommandHistoryTest` covers the store and its file. The ROM bytes the
+  code checks were compared against an Autostart image matching
+  `SystemRom`'s checksums. With the VideoTerm active (`PR#3`), lines
+  were recorded and recalled as expected in real use.
+
 ### Microsoft SoftCard II (Z80, CP/M) -- done, as the SoftCard2 project
 
 Built as a separate plugin project,

@@ -372,10 +372,11 @@ public final class Apple2Plus {
      * @param loop the emulation thread currently running this machine
      * @param padPoller the thread currently polling a gamepad into this machine
      * @param toolbar the toolbar currently wired to this machine's CPU
+     * @param recall this machine's command history recall, which the keyboard listener drives
      */
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,
-                            EightyColumnView eightyColumns, DisplayModeSelector displayModes,
+                            CommandRecall recall, EightyColumnView eightyColumns, DisplayModeSelector displayModes,
                             HostTransferCard transferCard, VideoTerm videoTerm, Path config,
                             List<String> configLines) {}
 
@@ -440,6 +441,39 @@ public final class Apple2Plus {
 
     private static StartupFiles startupFiles;
 
+    /** Lines entered at the Apple's command prompts, kept across Reboot; saved on exit. */
+    private static final CommandHistory COMMAND_HISTORY = new CommandHistory();
+
+    /** @return the emulator folder's command history file, or null if there's no emulator folder */
+    private static Path commandHistoryFile() {
+        Path folder = EmulatorFolder.path();
+        return folder != null ? folder.resolve(CommandHistory.FILE_NAME) : null;
+    }
+
+    /** Reads the history saved by the last run, logging rather than failing: history is a convenience. */
+    private static void loadCommandHistoryQuietly() {
+        Path file = commandHistoryFile();
+        if (file != null) {
+            try {
+                COMMAND_HISTORY.load(file);
+            } catch (IOException e) {
+                System.err.println("Could not read command history " + file + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /** Saves the history for the next run, logging rather than failing, as the shutdown hook can only log. */
+    private static void saveCommandHistoryQuietly() {
+        Path file = commandHistoryFile();
+        if (file != null) {
+            try {
+                COMMAND_HISTORY.save(file);
+            } catch (IOException e) {
+                System.err.println("Could not save command history " + file + ": " + e.getMessage());
+            }
+        }
+    }
+
     /**
      * The slot configuration in force: {@code --config}, else the one chosen
      * in Settings, else the emulator folder's {@code slots.ini}, else none.
@@ -467,6 +501,7 @@ public final class Apple2Plus {
         if (cli.get("roms") == null && EmulatorFolder.roms() != null) {
             RomFiles.setDirectory(EmulatorFolder.roms()); // before anything loads a ROM
         }
+        loadCommandHistoryQuietly();
         try {
             if (!ensureRoms()) {
                 System.exit(1);
@@ -597,6 +632,7 @@ public final class Apple2Plus {
             m.padPoller().stop(SHUTDOWN_JOIN_MS);
             m.loop().stop(SHUTDOWN_JOIN_MS);
             persistDiskQuietly(m.disk()); // after the loop stops, same reasoning as the reboot lambda above
+            saveCommandHistoryQuietly();
         }));
 
         frame.pack();
@@ -802,6 +838,8 @@ public final class Apple2Plus {
         TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
         typing.setScreenSignature(screenSignature(bus, videoTerm));
         clock.addCycleListener(typing::tick);
+        CommandRecall recall = new CommandRecall(cpu, bus, bus.keyboardRegister(), typing, COMMAND_HISTORY);
+        clock.addCycleListener(recall::tick);
         if (videoTerm != null) {
             videoTerm.setDisplay(DisplayModeSelector.rememberedDisplay()); // the mode last chosen from the toolbar
         }
@@ -848,7 +886,7 @@ public final class Apple2Plus {
             displayModes.addTo(toolbar);
         }
 
-        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, eightyColumns, displayModes,
+        return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, recall, eightyColumns, displayModes,
             transferCard, videoTerm, config, configLines);
     }
 
@@ -1028,7 +1066,7 @@ public final class Apple2Plus {
             EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()), onReboot));
 
         KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(),
-            next.bus().shiftKeyMod(), next.loop());
+            next.bus().shiftKeyMod(), next.recall(), next.loop());
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 

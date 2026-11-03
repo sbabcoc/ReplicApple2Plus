@@ -607,3 +607,105 @@ extracted the complete document without issue. Worth remembering if
 this happens again with a similarly-restricted PDF: the fetch-by-URL
 path and the direct-file path can behave very differently on the same
 document.
+
+---
+
+## 4. Monitor Line Input, GETLN (Confirmed, Implemented — command history)
+
+`CommandRecall` follows the Monitor's line-input routine to give the
+host's Up and Down arrows a command history. It depends on the addresses
+and behavior below, and nothing else in the ROM.
+
+Sources: the annotated Monitor source in
+[cmosher01/Apple-II-Source](https://github.com/cmosher01/Apple-II-Source)
+(`src/system/monitor/common/keyin.m4`, shared by the original and
+Autostart Monitors, and `math.m4` for the Autostart escape loop), and an
+Autostart ROM image whose six CRC32s match `SystemRom`'s (341-0020,
+`079589C4`, for `$F800`-`$FFFF`). Every byte `CommandRecall` checks was
+compared against that image. The original Monitor shares `keyin.m4` and
+differs only in the 3-byte call at `$FD32` (`JSR ESC1` instead of
+`JSR $FBA5`), so its addresses are the same — from the source only; no
+original-Monitor binary was checked.
+
+### The routine
+
+| Address | Label | Code | Role |
+|---|---|---|---|
+| `$FD0C` | `RDKEY` | `LDY CH` ... `JMP (KSWL)` | Flashes the cursor, reads a key through the input hook |
+| `$FD2F` | `ESC` | `JSR RDKEY` / `JSR $FBA5` | Escape mode |
+| `$FD35` | `RDCHAR` | `JSR RDKEY` / `CMP #$9B` / `BEQ ESC` (`F0 F3`) / `RTS` | One key for GETLN; ESC diverts to escape mode |
+| `$FD3D` | `NOTCR` | | Echoes the key; handles left arrow (`$88`) and Ctrl-X (`$98`) |
+| `$FD67` | `GETLNZ` | `JSR CROUT` | New line, then GETLN |
+| `$FD6A` | `GETLN` | `LDA PROMPT` / `JSR COUT` | Prints the prompt (`$33`) |
+| `$FD6F` | | `LDX #$01` (`A2 01`) | Starts the line's index |
+| `$FD71` | `BCKSPC` | `TXA` / `BEQ GETLNZ` / `DEX` | Backs the index up; at 0 the line restarts |
+| `$FD75` | `NXTCHAR` | `JSR RDCHAR` (`20 35 FD`) | Pushes `$FD77`; returns to `$FD78` |
+| `$FD84` | `ADDINP` | `STA IN,X` / `CMP #$8D` | Stores the key at `$0200+X`; Return ends the line |
+
+Facts command history relies on:
+
+- **Every line passes `$FD6F`**, whether GETLN was entered at `$FD67`,
+  `$FD6A` or `$FD6F`, and so does a line restarted by Ctrl-X (`CANCEL`
+  falls into `GETLNZ`) or by a left arrow at index 0 (`BCKSPC` branches
+  to `GETLNZ`). The caller's return address is on top of the stack there.
+- **X is the line's length** at each `JSR RDCHAR`: GETLN keeps its buffer
+  index in X, and the characters before it are the line.
+- **A left arrow backs the index up without erasing the screen.** `NOTCR`
+  echoes `$88` through `COUT`, which only moves the cursor, back onto the
+  previous row from column 0. One left arrow too many restarts the line.
+- **Return ends the line at the index.** `ADDINP` stores `$8D` at
+  `$0200+X`, then `JSR CLREOL` clears the screen row from the cursor and
+  `CROUT` (`JMP COUT`) returns to GETLN's caller, with the line in the
+  buffer ending in `$8D`. Characters past the index never reach the line.
+- **Index `$F8` sounds the bell; past `$FF` the line is cancelled.**
+  `CPX #$F8` / `JSR BELL`, then `INX` / `BNE NXTCHAR` falls into `CANCEL`
+  when X wraps.
+- **Lowercase is folded to uppercase** at `CAPTST` (`CMP #$E0` /
+  `AND #$DF`), so the buffer never holds lowercase letters.
+- **Escape mode (Autostart).** After ESC, `$FBA5` reads the next key:
+  `I`, `J`, `K` and `M` move the cursor and read another key there,
+  staying in escape mode without passing `$FD35`; any other key is
+  handed to `ESC1` (`@`, `A`-`F` act, the rest do nothing) and consumed,
+  and execution falls into `RDCHAR` at `$FD35` with `$FD77` still on top
+  of the stack. So a key read while GETLN is at `$FD35` with `$FD77` on
+  the stack goes into the line; one read after `$FD2F` does not.
+
+### When the line ends: DOS 3.3 and BASIC.SYSTEM
+
+Plain GETLN stores the Return and returns to its caller, but the two disk
+operating systems act on their commands before that can happen. The one
+event all three share is the Return being **taken from the keyboard**
+(the strobe clears with `$0D` in the latch) while GETLN waits at
+`RDCHAR` with `$FD77` on the stack. At that moment X is the line's length
+and `$0200` holds the line, so that is where command history records it.
+
+- **DOS 3.3** acts when GETLN echoes the Return through the output hook
+  (`CSW`), runs the command, and leaves through `DOSEXIT` (`LDX STKSAVED`
+  / `TXS`), with its own saved stack pointer. GETLN does store the Return
+  first, but its caller never sees the line come back. (Source:
+  `src/dos/system/common/main.m4`.)
+- **ProDOS BASIC.SYSTEM** (PRODOS BASIC 1.7, from ProDOS 2.4.3) handles it
+  in its input hook (`KSW`): traced in this emulator, the hook takes the
+  Return, runs the command inside the hook (about 355,000 instructions
+  for `PREFIX`, disk access included), then returns `$88` with X = 0 to
+  `RDCHAR`'s caller. GETLN echoes it and `BCKSPC` restarts the line at
+  `$FD6F`. GETLN never stores the Return.
+
+### Callers' prompts
+
+`PROMPT` (`$33`) holds the prompt GETLN prints, high bit set: Applesoft
+`]` (`$DD`), Integer BASIC `>` (`$BE`), the Monitor `*` (`$AA`), the
+mini-assembler `!` (`$A1`). Applesoft's `INPUT` prints its `?` or its
+own string first and reads with a null prompt (`INLIN`: `LDX #$80` /
+`STX PROMPT` / `JSR GETLN`, while its command loop uses `INLIN2` with
+`]`); Integer BASIC's `INPUT` turns `>` into `?` (`INC PROMPT`). Lines
+read at those prompts are not kept as history. (Source:
+`src/system/applesoft/applesoft.m4` and `src/system/intbasic/intbasic.m4`
+in the same repository.)
+
+### Where it has been checked
+
+In the running application with real key events: the ROM alone, the
+DOS 3.3 System Master (680-0210-A), and ProDOS 2.4.3 with BASIC.SYSTEM --
+BASIC lines and DOS or BASIC.SYSTEM commands alike -- and with the
+VideoTerm's firmware reading the keys and echoing the line (`PR#3`).

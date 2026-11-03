@@ -58,6 +58,9 @@ public final class Cpu6502 implements InterruptLines {
      */
     private boolean irqDisabledForPolling = true; // matches the forced I=1 at power-on
 
+    /** See {@link #resetCount}. */
+    private int resetCount;
+
     /**
      * Whether a JAM/KIL opcode has permanently halted this CPU -- see {@link #jam} and {@link #reset}.
      *
@@ -65,6 +68,40 @@ public final class Cpu6502 implements InterruptLines {
      */
     public boolean isHalted() {
         return halted;
+    }
+
+    /**
+     * Read-only views of the registers, for observers outside the core
+     * that follow what running software is doing -- command history
+     * watches the Monitor's line input this way. Nothing outside this
+     * package can change a register.
+     *
+     * @return the program counter: after a {@link #step}, the address of
+     *         the next instruction to execute
+     */
+    public int pc() {
+        return pc;
+    }
+
+    /** @return the X index register */
+    public int x() {
+        return x;
+    }
+
+    /** @return the stack pointer; the top of stack is at $0100 + sp + 1 */
+    public int sp() {
+        return sp;
+    }
+
+    /**
+     * How many times {@link #reset} has run, so an observer can tell that
+     * whatever it was following was abandoned -- a RESET doesn't return
+     * through the code that was interrupted.
+     *
+     * @return the number of resets since construction
+     */
+    public int resetCount() {
+        return resetCount;
     }
 
     // ---- IRQ/NMI lines. Modeled as request counts, not booleans, because
@@ -200,6 +237,7 @@ public final class Cpu6502 implements InterruptLines {
         irqDisabledForPolling = true; // no lag here -- reset forces this the same way hardware interrupt entry does
         pc = readVector(resetVectorAddress);
         halted = false;
+        resetCount++;
     }
 
     /**
