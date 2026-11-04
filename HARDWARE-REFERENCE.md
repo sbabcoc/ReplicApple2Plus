@@ -616,7 +616,11 @@ document.
 host's Up and Down arrows a command history. It is modeled as a device
 between the 6502 and its socket: it sees only the CPU's pins -- each
 access's address, data and direction, and SYNC on opcode fetches -- and
-types through the keyboard connector. Everything it knows about GETLN
+sits on the keyboard cable, which every key passes through. A key it sends
+is waiting until the CPU touches `$C010`-`$C01F`, the latch's own rule.
+For Paste's line pacing it counts the CPU's writes to screen memory: the
+text pages (`$0400`-`$0BFF`) and the VideoTerm's display-memory window
+(`$CC00`-`$CDFF`). Everything it knows about GETLN
 comes from the accesses below, as the CPU makes them. It depends on these
 addresses and behavior, and nothing else in the ROM.
 

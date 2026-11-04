@@ -1,7 +1,5 @@
 package com.nordstrom.emulator;
 
-import com.nordstrom.emulator.system.KeyboardRegister;
-
 import java.util.ArrayDeque;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
@@ -10,11 +8,13 @@ import java.util.function.IntSupplier;
  * Types text into the machine one keystroke at a time -- the engine behind
  * the Edit menu's Paste and the File menu's Type File....
  * <p>
- * Pacing is gated on the keyboard strobe rather than a fixed delay. The
- * real II+ keyboard is a single-character latch with no buffer, and
- * {@link KeyboardRegister#keyPressed} overwrites it unconditionally, so a
- * key loaded before software has acknowledged the previous one (by
- * touching $C010) silently replaces it. Waiting for the strobe to clear
+ * Keys go in through a {@link KeyboardPort} -- the device on the keyboard
+ * cable, which also sees the CPU's pins -- and pacing is gated on the
+ * keyboard strobe rather than a fixed delay. The real II+ keyboard is a
+ * single-character latch with no buffer, so a key loaded before software
+ * has acknowledged the previous one (by touching $C010) silently replaces
+ * it; the port says whether the last key is still waiting, from the
+ * {@code $C010} accesses it sees. Waiting for the strobe to clear
  * makes injection lossless and self-paced: exactly as fast as whatever is
  * reading the keyboard, whether that's GETLN at a BASIC prompt or a
  * program's own input loop, and never faster -- including while BASIC
@@ -27,8 +27,10 @@ import java.util.function.IntSupplier;
  * takes them out, a line at a time. So the feeder also types a line at a
  * time: after each Return it waits for the screen to settle -- unchanged
  * for {@link #SETTLE_CYCLES} -- before starting the next line, which keeps
- * any such buffer to one line's worth. Most software echoes what it's
- * typed, so a quiet screen means the line has been taken; software that
+ * any such buffer to one line's worth. What counts as a change comes from
+ * {@link #setScreenSignature}: in the application, a count of the CPU's
+ * writes to screen memory, as the device sees them. Most software echoes
+ * what it's typed, so a quiet screen means the line has been taken; software that
  * doesn't echo just costs the settle time per line. A screen that never
  * settles, such as a program printing steadily, holds the next line for
  * at most {@link #MAX_LINE_WAIT_CYCLES}.
@@ -49,7 +51,7 @@ final class TypingFeeder {
     private static final int SAMPLE_CYCLES = 10_000;
     private static final int RETURN = 0x0D;
 
-    private final KeyboardRegister keyboard;
+    private final KeyboardPort port;
     private volatile IntSupplier screenSignature; // null: no screen to watch, so no wait
     private boolean awaitingSettle;   // after a Return: emulation thread only
     private int waited;               // cycles since that Return
@@ -62,8 +64,9 @@ final class TypingFeeder {
     private volatile int queued; // keys queued since typing last started
     private volatile int typed;  // of those, keys already typed
 
-    TypingFeeder(KeyboardRegister keyboard) {
-        this.keyboard = keyboard;
+    /** @param port the keyboard connector keys are typed through */
+    TypingFeeder(KeyboardPort port) {
+        this.port = port;
     }
 
     /**
@@ -140,14 +143,14 @@ final class TypingFeeder {
      * @param cycles CPU cycles elapsed (unused -- the strobe, not time, paces typing)
      */
     void tick(int cycles) {
-        if (pending.isEmpty() || keyboard.isStrobeSet()) {
+        if (pending.isEmpty() || port.keyWaiting()) {
             return;
         }
         if (awaitingSettle && !settled(cycles)) {
             return;
         }
         int key = pending.poll();
-        keyboard.keyPressed(key);
+        port.send(key);
         typed++;
         if (key == RETURN && screenSignature != null) {
             awaitingSettle = true;
@@ -161,7 +164,8 @@ final class TypingFeeder {
 
     /**
      * Sets what tells whether the screen is still changing: any value that
-     * differs whenever what's displayed does, such as a hash of the text.
+     * differs whenever what's displayed does, such as a count of writes to
+     * screen memory.
      * Without one, lines follow each other as fast as the strobe allows.
      *
      * @param signature read on the emulation thread

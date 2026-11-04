@@ -79,6 +79,31 @@ it depends on are in HARDWARE-REFERENCE.md section 4.
   part of the change; Integer BASIC itself was then checked under the
   DOS 3.3 System Master, at its prompt and in `AUTO` mode, and in the
   running application.
+- **No latch or screen reads behind the CPU's back.** The CPU-socket
+  version still had recall check the motherboard's latch for a waiting key
+  (`KeyboardRegister.isStrobeSet()`), and `TypingFeeder` -- which recall
+  shares with Paste -- paced keys the same way and judged a line settled
+  from a hash of screen memory and the VideoTerm's text. A real device
+  can't read the latch; it can know the same things from what it sees. The
+  device now sits on the keyboard cable as well (`KeyboardPort`): every
+  key, typed or fed, passes through it to the connector, and a key is
+  waiting from when it's sent until the CPU touches `$C010`-`$C01F` --
+  exactly the latch's own rule, which nothing else, RESET included,
+  changes. The feeder types through it, and judges the screen settled from
+  a count of the CPU's writes to the text pages and the VideoTerm's
+  display-memory window (`$CC00`-`$CDFF`); on a stock II+ only the CPU
+  changes the screen. A write that leaves a character unchanged now counts
+  as activity, where the hash ignored it -- slightly more cautious, never
+  less. The device owns the feeder; `Apple2Plus.screenSignature` is gone,
+  and nothing in the application reads `isStrobeSet()` any more (test
+  harnesses that type straight into the latch still do). Tests:
+  `aKeySentIsWaitingUntilTheCpuClearsTheStrobe`,
+  `onlyWritesToScreenMemoryAreCounted` and
+  `pasteTypesAProgramThroughTheDeviceWithoutLosingAKey` in
+  `CommandRecallTest`, and `CommandRecallVideoTermTest`, which pastes and
+  runs a program and recalls a line with the real VideoTerm firmware 2.4
+  reading the keys in 80 columns. Typed keys, recall and Paste were then
+  checked in the running application.
 - **Recalls pressed faster than they type** build on the line the pending
   recall will leave, so repeated Up lands where expected.
 - **History per prompt** (`]`, `>`, `*`, `!`): a line means nothing to
@@ -157,6 +182,9 @@ clipboard integration that was originally set aside: see `EditMenu.java`,
   text's source differs. **Stop Typing** discards whatever is left.
 - **Pacing** is gated on the keyboard strobe, not a fixed delay: the next
   key loads only once software has cleared $C010 for the previous one.
+  (Since command history, the feeder learns that from the device on the
+  CPU's pins and keyboard cable rather than reading the latch -- see
+  "Command history at the Apple's prompts".)
   That retired the "live-paste timing races" concern from the original
   scope note -- injection is lossless at whatever pace the running
   software reads the keyboard.

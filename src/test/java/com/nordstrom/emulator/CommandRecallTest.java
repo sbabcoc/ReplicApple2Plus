@@ -25,9 +25,9 @@ class CommandRecallTest {
     private static final double KEY_SETTLE = 0.3; // seconds: plenty for GETLN to take a few dozen keys
 
     private final MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8]);
-    private final TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
     private final CommandHistory history = new CommandHistory();
-    private final CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), typing, history);
+    private final CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), history);
+    private final TypingFeeder typing = recall.typing();
     private final Cpu6502 cpu = new Cpu6502(recall, 0xFFFC);
     private final SystemClock clock = new SystemClock(cpu);
     private double seconds;
@@ -35,13 +35,6 @@ class CommandRecallTest {
     CommandRecallTest() {
         clock.addCycleListener(bus.videoScanner()::tick);
         clock.addCycleListener(bus.scanlineModes()::tick);
-        typing.setScreenSignature(() -> {
-            int hash = 1;
-            for (int address = 0x400; address < 0x800; address++) {
-                hash = 31 * hash + bus.read(address);
-            }
-            return hash;
-        });
         clock.addCycleListener(typing::tick);
     }
 
@@ -273,6 +266,47 @@ class CommandRecallTest {
         run(3);
         assertEquals(List.of("10 PRINT 1"), history.entries(']'),
             "the first line's prompt appeared before typing began; the others' during it");
+    }
+
+    @Test
+    void pasteTypesAProgramThroughTheDeviceWithoutLosingAKey() {
+        boot();
+        typing.enqueue("10 A = 5\n20 B = 7\n30 PRINT A * B\nRUN\n");
+        run(3);
+        assertTrue(!typing.isTyping(), "everything typed");
+        assertEquals("35", outputAbovePrompt(), "every line arrived intact:\n" + screen());
+    }
+
+    @Test
+    void aKeySentIsWaitingUntilTheCpuClearsTheStrobe() {
+        recall.send('A');
+        assertTrue(recall.keyWaiting());
+        assertTrue(bus.keyboardRegister().isStrobeSet(), "the key is in the latch");
+        assertEquals(0xC1, recall.read(0xC000), "reading the key doesn't take it");
+        assertTrue(recall.keyWaiting());
+        recall.read(0xC010);
+        assertTrue(!recall.keyWaiting(), "touching $C010 takes it");
+        assertTrue(!bus.keyboardRegister().isStrobeSet());
+
+        recall.send('B');
+        recall.write(0xC01F, 0); // any access to $C010-$C01F, read or write
+        assertTrue(!recall.keyWaiting());
+        assertTrue(!bus.keyboardRegister().isStrobeSet());
+    }
+
+    @Test
+    void onlyWritesToScreenMemoryAreCounted() {
+        int before = recall.screenWrites();
+        for (int address : new int[] {0x03FF, 0x0C00, 0xCBFF, 0xCE00, 0x2000}) {
+            recall.write(address, 0);
+        }
+        assertEquals(before, recall.screenWrites(), "not screen memory");
+        for (int address : new int[] {0x0400, 0x07FF, 0x0800, 0x0BFF, 0xCC00, 0xCDFF}) {
+            recall.write(address, 0);
+        }
+        assertEquals(before + 6, recall.screenWrites(), "both text pages and the VideoTerm's window");
+        recall.read(0x0400);
+        assertEquals(before + 6, recall.screenWrites(), "reads don't change the screen");
     }
 
     @Test

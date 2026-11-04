@@ -80,7 +80,8 @@ Companion documents:
   line-input routine (GETLN) as a person would type it, so it edits with
   the usual arrows and ESC moves and enters with Return. It's modeled as
   a device between the 6502 and its socket, seeing only the CPU's pins,
-  that types through the keyboard connector. DOS 3.3 and
+  that also sits on the keyboard cable: typed, pasted and recalled keys
+  all pass through it to the keyboard connector. DOS 3.3 and
   ProDOS BASIC.SYSTEM commands are kept like BASIC lines. History is kept
   across launches in the emulator folder. The arrows do nothing anywhere
   else -- in programs with their own input routines, at `INPUT` prompts,
@@ -165,7 +166,10 @@ Companion documents:
   pasted text is fed to the
   keyboard at exactly the pace the running software reads it, and a line
   at a time -- after each Return, the next line waits for the screen to
-  settle -- so software that buffers keys, like CP/M, isn't overrun.
+  settle -- so software that buffers keys, like CP/M, isn't overrun. Both
+  are judged as a device on the CPU's pins would: a key is taken when the
+  CPU touches `$C010`, and the screen has settled when the CPU stops
+  writing to screen memory, the VideoTerm's included.
 - **About ReplicApple2Plus**, **Settings...** and **Quit** are in the
   application menu on macOS; on Windows and Linux, Settings... and Quit
   end the File menu, and About is in the Help menu. The 80-column window

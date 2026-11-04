@@ -1,6 +1,5 @@
 package com.nordstrom.emulator;
 
-import com.nordstrom.emulator.system.KeyboardRegister;
 import com.nordstrom.emulator.system.ShiftKeyMod;
 
 import java.awt.event.KeyEvent;
@@ -8,9 +7,11 @@ import java.awt.event.KeyListener;
 import java.util.concurrent.Executor;
 
 /**
- * Feeds real Swing keyboard events into the emulated
- * {@link KeyboardRegister}, via {@link KeyboardMapper} for the actual
- * translation. This class is pure plumbing -- it owns no mapping logic
+ * Feeds real Swing keyboard events to the keyboard connector, via
+ * {@link KeyboardMapper} for the actual translation. Keys go through the
+ * device on the keyboard cable ({@link CommandRecall}, a
+ * {@link KeyboardPort}), as they would with it plugged in between the
+ * keyboard and the motherboard, so it knows when a key is waiting. This class is pure plumbing -- it owns no mapping logic
  * of its own -- so that the mapping rules stay in one place, already
  * tested independently of any real window or event dispatch thread.
  * <p>
@@ -24,24 +25,21 @@ import java.util.concurrent.Executor;
  */
 final class KeyboardInputListener implements KeyListener {
 
-    private final KeyboardRegister keyboardRegister;
+    private final CommandRecall device;
     private final ShiftKeyMod shiftKeyMod;
-    private final CommandRecall recall;
     private final Executor emulationThread;
 
     /**
-     * @param keyboardRegister the register keystrokes are delivered to
+     * @param device      the device on the keyboard cable: keystrokes go through it,
+     *                    and it's told when Up or Down is pressed
      * @param shiftKeyMod told when Shift or Control is pressed or released
-     * @param recall told when Up or Down is pressed
      * @param emulationThread runs each delivery on the emulation thread --
      *                        AWT calls this listener on the event thread, which
      *                        must not touch emulator state directly
      */
-    KeyboardInputListener(KeyboardRegister keyboardRegister, ShiftKeyMod shiftKeyMod, CommandRecall recall,
-                          Executor emulationThread) {
-        this.keyboardRegister = keyboardRegister;
+    KeyboardInputListener(CommandRecall device, ShiftKeyMod shiftKeyMod, Executor emulationThread) {
+        this.device = device;
         this.shiftKeyMod = shiftKeyMod;
-        this.recall = recall;
         this.emulationThread = emulationThread;
     }
 
@@ -49,7 +47,7 @@ final class KeyboardInputListener implements KeyListener {
     public void keyTyped(KeyEvent e) {
         int mapped = KeyboardMapper.mapTypedCharacter(e.getKeyChar());
         if (mapped >= 0) {
-            emulationThread.execute(() -> keyboardRegister.keyPressed(mapped));
+            emulationThread.execute(() -> device.send(mapped));
         }
     }
 
@@ -58,18 +56,18 @@ final class KeyboardInputListener implements KeyListener {
         reportModifier(e.getKeyCode(), true);
         switch (e.getKeyCode()) {
             case KeyEvent.VK_UP, KeyEvent.VK_KP_UP -> {
-                emulationThread.execute(recall::older);
+                emulationThread.execute(device::older);
                 return;
             }
             case KeyEvent.VK_DOWN, KeyEvent.VK_KP_DOWN -> {
-                emulationThread.execute(recall::newer);
+                emulationThread.execute(device::newer);
                 return;
             }
             default -> { }
         }
         int mapped = KeyboardMapper.mapSpecialKey(e.getKeyCode(), e.isControlDown());
         if (mapped >= 0) {
-            emulationThread.execute(() -> keyboardRegister.keyPressed(mapped));
+            emulationThread.execute(() -> device.send(mapped));
         }
     }
 

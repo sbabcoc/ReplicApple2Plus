@@ -3,7 +3,6 @@ package com.nordstrom.emulator;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.expansion.VideoTerm;
-import com.nordstrom.emulator.expansion.VideoTermRenderer;
 import com.nordstrom.emulator.transfer.HostTransferCard;
 import com.nordstrom.emulator.input.BusInputSink;
 import com.nordstrom.emulator.input.InputMapper;
@@ -41,7 +40,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -230,21 +228,6 @@ public final class Apple2Plus {
             wrapped.append('\n');
         }
         return wrapped.toString().stripTrailing();
-    }
-
-    /**
-     * What tells typing whether the screen has settled after a line: a
-     * hash of both text pages, and of the VideoTerm's screen if there is
-     * one -- whichever is showing, something typed changes it.
-     */
-    private static IntSupplier screenSignature(MotherboardBus bus, VideoTerm videoTerm) {
-        return () -> {
-            int hash = 1;
-            for (int address = 0x400; address < 0xC00; address++) {
-                hash = 31 * hash + bus.read(address);
-            }
-            return videoTerm != null ? 31 * hash + VideoTermRenderer.text(videoTerm).hashCode() : hash;
-        };
     }
 
     /** Whether a startup failure was a ROM image, missing or corrupt -- which the user can fix. */
@@ -824,9 +807,10 @@ public final class Apple2Plus {
 
         MotherboardBus bus = new MotherboardBus(slots);
         bus.shiftKeyMod().setWiring(ShiftKeyModSetting.remembered());
-        TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
-        // command history: a device between the CPU and its socket
-        CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), typing, COMMAND_HISTORY);
+        // a device between the CPU and its socket, and on the keyboard cable: command history, and the
+        // typing behind Paste and Type File...
+        CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), COMMAND_HISTORY);
+        TypingFeeder typing = recall.typing();
         Cpu6502 cpu = new Cpu6502(recall, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
@@ -838,7 +822,6 @@ public final class Apple2Plus {
                 clock.addCycleListener(card::tick);
             }
         }
-        typing.setScreenSignature(screenSignature(bus, videoTerm));
         clock.addCycleListener(typing::tick);
         if (videoTerm != null) {
             videoTerm.setDisplay(DisplayModeSelector.rememberedDisplay()); // the mode last chosen from the toolbar
@@ -1065,8 +1048,8 @@ public final class Apple2Plus {
         frame.setJMenuBar(menuBar(frame, next,
             EditMenu.build(next.bus(), next.screen(), next.typing(), frame, next.loop()), onReboot));
 
-        KeyboardInputListener keyboardInput = new KeyboardInputListener(next.bus().keyboardRegister(),
-            next.bus().shiftKeyMod(), next.recall(), next.loop());
+        KeyboardInputListener keyboardInput = new KeyboardInputListener(next.recall(), next.bus().shiftKeyMod(),
+            next.loop());
         frame.addKeyListener(keyboardInput);
         frame.setFocusTraversalKeysEnabled(false); // don't let Tab escape focus -- real software may want it
 

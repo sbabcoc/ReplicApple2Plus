@@ -15,6 +15,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TypingFeederTest {
 
+    /**
+     * A keyboard port with nothing between it and the latch, which says a
+     * key is waiting exactly when the latch's strobe is set -- what the
+     * device on the keyboard cable tracks from the keys it sends and the
+     * {@code $C010} accesses it sees, without needing a CPU here.
+     */
+    private static KeyboardPort port(KeyboardRegister keyboard) {
+        return new KeyboardPort() {
+            @Override public void send(int key) {
+                keyboard.keyPressed(key);
+            }
+
+            @Override public boolean keyWaiting() {
+                return keyboard.isStrobeSet();
+            }
+        };
+    }
+
     @Test
     void everyLineEndingStyleBecomesExactlyOneReturn() {
         assertArrayEquals(new int[] {'A', 0x0D, 'B', 0x0D, 'C', 0x0D, 'D'},
@@ -42,7 +60,7 @@ class TypingFeederTest {
         int[] expected = TypingFeeder.toKeystrokes(text);
 
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue(text);
         assertTrue(feeder.isTyping());
 
@@ -67,7 +85,7 @@ class TypingFeederTest {
     void nothingIsLoadedWhileAKeyIsStillUnacknowledged() {
         KeyboardRegister keyboard = new KeyboardRegister();
         keyboard.keyPressed('X'); // a live keypress nobody has read yet
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue("AB");
         for (int i = 0; i < 1000; i++) {
             feeder.tick(1);
@@ -86,7 +104,7 @@ class TypingFeederTest {
     @Test
     void reportsEachStartAndStopOfTypingOnce() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         List<Boolean> changes = new ArrayList<>();
         feeder.setTypingListener(changes::add);
 
@@ -108,7 +126,7 @@ class TypingFeederTest {
     @Test
     void countsProgressForEachRunOfTyping() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue("ABC");
         feeder.tick(1);
         KeyboardTestAccess.clearStrobe(keyboard);
@@ -130,7 +148,7 @@ class TypingFeederTest {
     @Test
     void cancelDiscardsWhatHasNotBeenTyped() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue("ABC");
         feeder.tick(1); // 'A' loads
         feeder.cancel();
@@ -146,7 +164,7 @@ class TypingFeederTest {
     @Test
     void laterTextQueuesBehindEarlierText() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue("A");
         feeder.enqueue("B");
         StringBuilder received = new StringBuilder();
@@ -164,7 +182,7 @@ class TypingFeederTest {
     @Test
     void queuesRawKeystrokes() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue("\u0003"); // skipped as text
         assertEquals(0, feeder.queuedCount());
         feeder.enqueueKeys(0x03);
@@ -194,7 +212,7 @@ class TypingFeederTest {
     @Test
     void waitsForTheScreenToSettleBetweenLines() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         int[] screen = {0};
         feeder.setScreenSignature(() -> screen[0]);
         feeder.enqueue("AB\nCD\n");
@@ -208,7 +226,7 @@ class TypingFeederTest {
     @Test
     void aScreenThatNeverSettlesDelaysTheNextLineOnlySoLong() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         int[] screen = {0};
         feeder.setScreenSignature(() -> screen[0]++); // different at every sample
         feeder.enqueue("A\nB");
@@ -219,7 +237,7 @@ class TypingFeederTest {
     @Test
     void withoutAScreenLinesFollowAtOnce() {
         KeyboardRegister keyboard = new KeyboardRegister();
-        TypingFeeder feeder = new TypingFeeder(keyboard);
+        TypingFeeder feeder = new TypingFeeder(port(keyboard));
         feeder.enqueue("A\nB\n");
         assertEquals("A\rB\r", drain(feeder, keyboard, 1_000, 100));
     }

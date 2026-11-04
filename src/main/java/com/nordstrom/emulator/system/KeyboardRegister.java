@@ -78,10 +78,12 @@ public final class KeyboardRegister {
 
     /**
      * Whether a key is waiting that software hasn't yet acknowledged by
-     * touching $C010. Public so injected typing (Paste, Type File...) can
-     * wait for it to clear before loading the next character: the real
-     * keyboard has a single-character latch and no buffer, so loading a
-     * new key while this is still set overwrites one software never saw.
+     * touching $C010. Public for test harnesses that type straight into the
+     * latch and must wait for it to clear before loading the next character:
+     * the real keyboard has a single-character latch and no buffer, so
+     * loading a new key while this is still set overwrites one software
+     * never saw. The application doesn't read it: the device on the keyboard
+     * cable tracks the strobe itself, from the {@code $C010} accesses it sees.
      *
      * @return true if the strobe (bit 7 of $C000) is set
      */

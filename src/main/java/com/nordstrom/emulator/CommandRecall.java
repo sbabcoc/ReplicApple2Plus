@@ -12,12 +12,21 @@ import java.util.List;
  * This is a device that plugs in between the 6502 and its socket and sees
  * only the CPU's pins: each access's address, data and direction, and SYNC
  * on opcode fetches ({@link MemoryBus#fetchOpcode}). It passes every
- * access through unchanged and makes none of its own. A second cable to the
- * keyboard connector lets it type: recalled lines go in through the
- * keyboard latch, by the same {@link TypingFeeder} as Paste, and from there
- * through whatever input routine is installed -- the ROM's, DOS 3.3's,
+ * access through unchanged and makes none of its own. It also sits on the
+ * keyboard cable ({@link KeyboardPort}): every key -- typed, pasted or
+ * recalled -- passes through it to the keyboard connector, so it knows when
+ * a key is waiting, and the strobe clears when it sees the CPU touch
+ * {@code $C010}. Recalled lines go in by the same {@link TypingFeeder} as
+ * Paste, which this device owns ({@link #typing}), and from there through
+ * whatever input routine is installed -- the ROM's, DOS 3.3's,
  * BASIC.SYSTEM's or the VideoTerm's -- exactly as if typed. It needs no
  * activation and changes nothing in the Apple's input chain.
+ * <p>
+ * For the feeder's line pacing it counts the CPU's writes to screen memory:
+ * the text pages ({@code $0400}-{@code $0BFF}) and the VideoTerm's
+ * display-memory window ({@code $CC00}-{@code $CDFF}). On a stock II+ only
+ * the CPU changes what's on screen, so a count that stops moving means a
+ * screen that has settled.
  * <p>
  * Everything it knows comes from the Monitor's line-input routine, GETLN,
  * which Applesoft and the Monitor read their command lines with, and whose
@@ -72,10 +81,10 @@ import java.util.List;
  * their prompt appeared, so typing a file in doesn't fill the history.
  * <p>
  * Threading: everything runs on the emulation thread -- the bus accesses
- * as the CPU makes them, {@link #older} and {@link #newer} posted by the
- * keyboard listener.
+ * as the CPU makes them, {@link #send}, {@link #older} and {@link #newer}
+ * posted by the keyboard listener.
  */
-final class CommandRecall implements MemoryBus {
+final class CommandRecall implements MemoryBus, KeyboardPort {
 
     /** Where every line starts: GETLN's {@code LDX #$01}. */
     static final int LINE_START = 0xFD6F;
@@ -101,6 +110,10 @@ final class CommandRecall implements MemoryBus {
     private static final int KEYBOARD_DATA = 0xC000;  // $C000-$C00F
     private static final int KEYBOARD_STROBE = 0xC010; // $C010-$C01F
     private static final int RESET_VECTOR = 0xFFFC;
+    private static final int TEXT_PAGES = 0x0400;     // $0400-$0BFF: text and lo-res pages 1 and 2
+    private static final int TEXT_PAGES_END = 0x0C00;
+    private static final int VIDEOTERM_WINDOW = 0xCC00; // $CC00-$CDFF: the VideoTerm's display memory
+    private static final int VIDEOTERM_WINDOW_END = 0xCE00;
     private static final int LEFT_ARROW = 0x08;
     private static final int SPACE = 0x20;
     private static final int RETURN = 0x0D;
@@ -114,6 +127,8 @@ final class CommandRecall implements MemoryBus {
     private final int[] buffer = new int[0x100]; // the CPU's writes to $0200-$02FF
     private int promptByte;     // the CPU's last read or write of $0033
     private int keyboardByte;   // the CPU's last read of $C000
+    private int screenWrites;   // the CPU's writes to screen memory, counted
+    private boolean keyWaiting; // a key sent whose strobe the CPU hasn't cleared
     private int instruction;    // the address of the current instruction's opcode fetch
     private int previous;       // the address of the one before it
 
@@ -141,15 +156,38 @@ final class CommandRecall implements MemoryBus {
 
     /**
      * @param board    the motherboard: the socket the CPU would otherwise plug into
-     * @param keyboard the keyboard latch, checked for a key not yet taken before typing
-     * @param feeder   types recalled lines
+     * @param keyboard the motherboard's keyboard latch: the connector's far side
      * @param history  the history recorded into and recalled from
      */
-    CommandRecall(MemoryBus board, KeyboardRegister keyboard, TypingFeeder feeder, CommandHistory history) {
+    CommandRecall(MemoryBus board, KeyboardRegister keyboard, CommandHistory history) {
         this.board = board;
         this.keyboard = keyboard;
-        this.feeder = feeder;
         this.history = history;
+        this.feeder = new TypingFeeder(this);
+        feeder.setScreenSignature(this::screenWrites);
+    }
+
+    /** @return the feeder that types Paste, Type File... and recalled lines through this device */
+    TypingFeeder typing() {
+        return feeder;
+    }
+
+    // ---- the keyboard cable ----
+
+    @Override
+    public void send(int key) {
+        keyboard.keyPressed(key);
+        keyWaiting = true;
+    }
+
+    @Override
+    public boolean keyWaiting() {
+        return keyWaiting;
+    }
+
+    /** @return how many writes the CPU has made to screen memory -- it changes whenever the screen does */
+    int screenWrites() {
+        return screenWrites;
     }
 
     // ---- the CPU's pins ----
@@ -220,6 +258,10 @@ final class CommandRecall implements MemoryBus {
     @Override
     public void write(int address, int value) {
         board.write(address, value);
+        if ((address >= TEXT_PAGES && address < TEXT_PAGES_END)
+                || (address >= VIDEOTERM_WINDOW && address < VIDEOTERM_WINDOW_END)) {
+            screenWrites++;
+        }
         if (address == PROMPT) {
             promptByte = value & 0xFF;
         } else if ((address & 0xFF00) == INPUT_BUFFER) {
@@ -272,6 +314,7 @@ final class CommandRecall implements MemoryBus {
     }
 
     private void strobeCleared() {
+        keyWaiting = false;
         if (active && ready && keyboardByte == (0x80 | RETURN)) {
             active = false;
             ready = false;
@@ -308,7 +351,7 @@ final class CommandRecall implements MemoryBus {
             if (feeder.isTyping()) {
                 return; // Paste or Type File... is typing; its keys go first and stay unaffected
             }
-            if (!ready || keyboard.isStrobeSet()) {
+            if (!ready || keyWaiting) {
                 return; // GETLN isn't waiting for the line's next key
             }
             typed = readyLength;
@@ -381,6 +424,6 @@ final class CommandRecall implements MemoryBus {
      * loaded but not yet taken.
      */
     private boolean typingRecall() {
-        return recallInFlight && (feeder.isTyping() || keyboard.isStrobeSet());
+        return recallInFlight && (feeder.isTyping() || keyWaiting);
     }
 }
