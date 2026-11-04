@@ -88,15 +88,4 @@ public final class KeyboardRegister {
     public boolean isStrobeSet() {
         return strobe;
     }
-
-    /**
-     * The last key pressed -- bits 0-6 of $C000, which stay there after the
-     * strobe clears. Public so command history can tell which key software
-     * just took when it sees the strobe clear.
-     *
-     * @return the key's 7-bit ASCII value
-     */
-    public int lastKey() {
-        return lastKey;
-    }
 }

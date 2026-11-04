@@ -1,6 +1,5 @@
 package com.nordstrom.emulator;
 
-import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.system.KeyboardRegister;
 
 import java.util.List;
@@ -10,42 +9,56 @@ import java.util.List;
  * arrows step through lines entered before at the same prompt, which then
  * edit and enter like anything typed.
  * <p>
- * Everything goes through the Monitor's line-input routine, GETLN, which
- * Applesoft, Integer BASIC and the Monitor read their command lines with.
- * This class only watches it -- the program counter, X, the stack and
- * memory, read after each instruction as a cycle listener -- and acts on
- * it only by typing keys, through the same {@link TypingFeeder} as Paste. It never writes the Apple's memory, so
- * GETLN keeps its own buffer, cursor and screen exactly as if a person had
- * typed the keys, whatever input or output hooks are in place.
+ * This is a device that plugs in between the 6502 and its socket and sees
+ * only the CPU's pins: each access's address, data and direction, and SYNC
+ * on opcode fetches ({@link MemoryBus#fetchOpcode}). It passes every
+ * access through unchanged and makes none of its own. A second cable to the
+ * keyboard connector lets it type: recalled lines go in through the
+ * keyboard latch, by the same {@link TypingFeeder} as Paste, and from there
+ * through whatever input routine is installed -- the ROM's, DOS 3.3's,
+ * BASIC.SYSTEM's or the VideoTerm's -- exactly as if typed. It needs no
+ * activation and changes nothing in the Apple's input chain.
  * <p>
- * The addresses below are the Autostart Monitor's; the original Monitor's
- * source has the same layout (HARDWARE-REFERENCE.md section 4). Before
- * following a line, the routine's code is checked at those addresses: with
- * other code mapped at {@code $F800}, nothing is followed and the arrows do
- * nothing.
+ * Everything it knows comes from the Monitor's line-input routine, GETLN,
+ * which Applesoft and the Monitor read their command lines with, and whose
+ * key loop Integer BASIC uses (HARDWARE-REFERENCE.md section 4):
  * <ul>
- *   <li><b>A line starts</b> each time {@code $FD6F} ({@code LDX #$01})
- *       runs -- every entry to GETLN passes it, and so does a line
- *       restarted by Ctrl-X or by backspacing past its start. The prompt
- *       that was just printed is in {@code PROMPT} ({@code $33}).</li>
- *   <li><b>GETLN waits for a key</b> when {@code RDCHAR} ({@code $FD35})
- *       runs with GETLN's return address ({@code $FD77}) on top of the
- *       stack. X then holds the line's length so far -- GETLN keeps its
- *       buffer index there -- and the next key read goes to the line.
- *       That stops being true when the key is taken: {@code RDCHAR} either
- *       returns to {@code $FD78}, or reads ESC and enters escape mode at
- *       {@code $FD2F}, where keys move the cursor instead. Escape mode
- *       ends by falling into {@code $FD35} again.</li>
- *   <li><b>A line is entered</b> when a Return is taken from the keyboard
- *       (the strobe clears with {@code $0D} in the latch) while GETLN is
- *       waiting for the line's next key. The line is then the input
- *       buffer's ({@code $0200}) first X characters. This is the only
- *       point every command interpreter shares: after it, GETLN may never
- *       store the Return or return to its caller. DOS 3.3 acts on its
- *       commands when GETLN echoes the Return through its output hook, and
- *       leaves with its own saved stack pointer; BASIC.SYSTEM's input hook
- *       takes the Return itself, runs the command, and hands GETLN a left
- *       arrow at index 0, which restarts the line.</li>
+ *   <li><b>A line starts</b> on the fetch of {@code $FD6F}
+ *       ({@code LDX #$01}), which GETLN's entries pass, as does a line
+ *       restarted by Ctrl-X or by backspacing past index 0; the line then
+ *       starts at index 0. Integer BASIC instead prints its own prompt and
+ *       enters GETLN's key loop directly ({@code JSR NXTCHAR}, {@code $FD75})
+ *       with its own X -- 0 at its prompt, 2 in {@code AUTO} mode, where
+ *       the buffer holds the line number first. So a fetch of {@code $FD75}
+ *       that doesn't follow GETLN's own {@code $FD74} or {@code $FD60} also
+ *       starts a line, at an index learned from the first key stored. The
+ *       prompt is the value of {@code PROMPT} ({@code $33}) last read or
+ *       written by the CPU. The opcode fetched must be GETLN's
+ *       ({@code $A2}, {@code $20}); anything else (other code mapped at
+ *       {@code $F800}) is not GETLN, and nothing is followed.</li>
+ *   <li><b>The line</b> is what GETLN stores, at {@code $FD84}
+ *       ({@code STA IN,X}): a write to {@code $0200+X} carrying the key,
+ *       so X is on the address bus. After a Return the line is complete;
+ *       after a left arrow ({@code $88}) the index is one less; otherwise
+ *       it is one more. The line's length is the index less the index it
+ *       started at -- which is also the most a recall may back up.
+ *       Every write to {@code $0200}-{@code $02FF} is kept in a copy of
+ *       the buffer -- the VideoTerm's lowercase corrections included.</li>
+ *   <li><b>GETLN waits for a key</b> from the fetch of {@code $FD35}
+ *       ({@code RDCHAR}) after GETLN's {@code JSR RDCHAR} at {@code $FD75},
+ *       until the fetch of {@code $FD78}, where {@code RDCHAR} returns with
+ *       the key, or of {@code $FD2F}, where it reads ESC and enters escape
+ *       mode instead. Escape mode ends by falling into {@code $FD35}
+ *       again.</li>
+ *   <li><b>A line is entered</b> when the CPU clears the keyboard strobe
+ *       ({@code $C010}) after reading a Return from {@code $C000}, while
+ *       GETLN waits. That is the one point every command interpreter
+ *       shares: DOS 3.3 acts on its commands when GETLN echoes the Return
+ *       and leaves with its own saved stack pointer, and BASIC.SYSTEM's
+ *       input hook takes the Return itself and makes GETLN restart the
+ *       line -- neither returns to GETLN's caller.</li>
+ *   <li><b>A RESET</b> -- the CPU reading the reset vector at
+ *       {@code $FFFC} -- abandons the line.</li>
  * </ul>
  * Recalling a line types: one left arrow for each character in the line
  * (GETLN backs its index up without erasing the screen; one more would
@@ -58,60 +71,64 @@ import java.util.List;
  * Lines are recorded only if no Paste or Type File... was typing when
  * their prompt appeared, so typing a file in doesn't fill the history.
  * <p>
- * Threading: everything runs on the emulation thread -- {@link #tick} as a
- * cycle listener, {@link #older} and {@link #newer} posted by the keyboard
- * listener.
+ * Threading: everything runs on the emulation thread -- the bus accesses
+ * as the CPU makes them, {@link #older} and {@link #newer} posted by the
+ * keyboard listener.
  */
-final class CommandRecall {
+final class CommandRecall implements MemoryBus {
 
     /** Where every line starts: GETLN's {@code LDX #$01}. */
     static final int LINE_START = 0xFD6F;
+    /** GETLN's {@code JSR RDCHAR} ({@code NXTCHAR}), asking for the line's next key. */
+    static final int CALLS_RDCHAR = 0xFD75;
+    /** GETLN's {@code DEX} falling into {@code NXTCHAR}. */
+    static final int BACKED_UP = 0xFD74;
+    /** GETLN's {@code BNE NXTCHAR} after moving on to the next index. */
+    static final int MOVED_ON = 0xFD60;
     /** The Monitor's read-a-key-for-GETLN routine. */
     static final int RDCHAR = 0xFD35;
-    /** What GETLN's {@code JSR RDCHAR} at $FD75 pushes: the address of its last byte. */
-    static final int RDCHAR_CALLED_FROM = 0xFD77;
     /** Where {@code RDCHAR} returns to GETLN with a key. */
     static final int KEY_TAKEN = 0xFD78;
     /** Escape mode, entered from {@code RDCHAR} when ESC is read. */
     static final int ESCAPE = 0xFD2F;
+    /** GETLN's {@code STA IN,X}, storing each key in the line. */
+    static final int STORES_KEY = 0xFD84;
 
+    private static final int LDX_IMMEDIATE = 0xA2;
+    private static final int JSR = 0x20;
     private static final int PROMPT = 0x33;
     private static final int INPUT_BUFFER = 0x0200;
-    private static final int STACK = 0x0100;
+    private static final int KEYBOARD_DATA = 0xC000;  // $C000-$C00F
+    private static final int KEYBOARD_STROBE = 0xC010; // $C010-$C01F
+    private static final int RESET_VECTOR = 0xFFFC;
     private static final int LEFT_ARROW = 0x08;
     private static final int SPACE = 0x20;
     private static final int RETURN = 0x0D;
 
-    /**
-     * The Monitor's own bytes, as {address, value} pairs, that the
-     * addresses above depend on: {@code LDX #$01} at the line start,
-     * {@code JSR RDCHAR} at $FD75, {@code JSR RDKEY} at {@code RDCHAR}, and
-     * {@code BEQ ESC} after it.
-     */
-    private static final int[][] SIGNATURE = {
-        {0xFD6F, 0xA2}, {0xFD70, 0x01},
-        {0xFD75, 0x20}, {0xFD76, 0x35}, {0xFD77, 0xFD},
-        {0xFD35, 0x20}, {0xFD36, 0x0C}, {0xFD37, 0xFD},
-        {0xFD3A, 0xF0}, {0xFD3B, 0xF3},
-    };
-
-    private final Cpu6502 cpu;
-    private final MemoryBus bus;
+    private final MemoryBus board;
     private final KeyboardRegister keyboard;
     private final TypingFeeder feeder;
     private final CommandHistory history;
 
+    // What has been seen on the pins.
+    private final int[] buffer = new int[0x100]; // the CPU's writes to $0200-$02FF
+    private int promptByte;     // the CPU's last read or write of $0033
+    private int keyboardByte;   // the CPU's last read of $C000
+    private int instruction;    // the address of the current instruction's opcode fetch
+    private int previous;       // the address of the one before it
+
     // The line GETLN is collecting.
     private boolean active;
     private char prompt;
-    private int resetsAtStart;
     private boolean startedWhileIdle;
+    private boolean placed; // whether the line's starting index is known yet
+    private int start;      // the index the line started at
+    private int index;      // GETLN's X
 
-    // Whether GETLN is waiting for the next key of the line, and the line's length then.
+    // Whether GETLN is waiting for the line's next key, and the line's length then.
+    private boolean inRdchar;
     private boolean ready;
-    /** Whether the keyboard strobe was set after the previous instruction. */
-    private boolean strobeWasSet;
-    private int readyIndex;
+    private int readyLength;
     /** How far the line has reached on screen: characters past the index may still show. */
     private int extent;
 
@@ -120,64 +137,152 @@ final class CommandRecall {
     private String draft;
     // A recall still being typed, and the line's length once it's done.
     private boolean recallInFlight;
-    private int projectedIndex;
+    private int projectedLength;
 
     /**
-     * @param cpu      the CPU whose registers are watched
-     * @param bus      the memory read for the prompt, the stack and the line
-     * @param keyboard the keyboard, checked for a key not yet taken
+     * @param board    the motherboard: the socket the CPU would otherwise plug into
+     * @param keyboard the keyboard latch, checked for a key not yet taken before typing
      * @param feeder   types recalled lines
      * @param history  the history recorded into and recalled from
      */
-    CommandRecall(Cpu6502 cpu, MemoryBus bus, KeyboardRegister keyboard, TypingFeeder feeder,
-                  CommandHistory history) {
-        this.cpu = cpu;
-        this.bus = bus;
+    CommandRecall(MemoryBus board, KeyboardRegister keyboard, TypingFeeder feeder, CommandHistory history) {
+        this.board = board;
         this.keyboard = keyboard;
         this.feeder = feeder;
         this.history = history;
     }
 
-    /**
-     * Cycle listener: follows GETLN after each instruction.
-     *
-     * @param cycles CPU cycles elapsed (unused -- only where execution is matters)
-     */
-    void tick(int cycles) {
-        boolean strobeSet = keyboard.isStrobeSet();
-        boolean keyTaken = strobeWasSet && !strobeSet;
-        strobeWasSet = strobeSet;
-        int pc = cpu.pc();
-        if (pc == LINE_START) {
-            lineStarted();
-            return;
-        }
-        if (!active) {
-            return;
-        }
-        if (cpu.resetCount() != resetsAtStart) {
-            active = false; // a RESET never returns to the line it interrupted
-            ready = false;
-            return;
-        }
-        if (keyTaken && ready && keyboard.lastKey() == RETURN) {
-            lineEntered();
-            return;
-        }
-        if (pc == RDCHAR) {
-            if (topOfStack() == RDCHAR_CALLED_FROM) {
-                ready = true;
-                readyIndex = cpu.x();
-                if (!typingRecall()) {
-                    recallInFlight = false;
-                    // a recall's own spaces reach past its line only to blank what was there
-                    extent = Math.max(extent, readyIndex);
+    // ---- the CPU's pins ----
+
+    @Override
+    public int fetchOpcode(int address) {
+        int opcode = board.fetchOpcode(address);
+        previous = instruction;
+        instruction = address;
+        switch (address) {
+            case LINE_START -> {
+                if (opcode == LDX_IMMEDIATE) {
+                    lineStarted(true);
+                } else {
+                    active = false; // not GETLN
+                    ready = false;
                 }
             }
-        } else if (pc == KEY_TAKEN || pc == ESCAPE) {
+            case CALLS_RDCHAR -> {
+                if (opcode != JSR) {
+                    active = false; // not GETLN
+                    ready = false;
+                } else {
+                    if (previous != BACKED_UP && previous != MOVED_ON) {
+                        lineStarted(false); // entered from outside, as Integer BASIC does
+                    }
+                    inRdchar = active;
+                }
+            }
+            case RDCHAR -> {
+                if (inRdchar && opcode == JSR) {
+                    ready = true;
+                    readyLength = length();
+                    if (!typingRecall()) {
+                        recallInFlight = false;
+                        // a recall's own spaces reach past its line only to blank what was there
+                        extent = Math.max(extent, readyLength);
+                    }
+                }
+            }
+            case ESCAPE -> ready = false;
+            case KEY_TAKEN -> {
+                ready = false;
+                inRdchar = false;
+            }
+            default -> { }
+        }
+        return opcode;
+    }
+
+    @Override
+    public int read(int address) {
+        int value = board.read(address);
+        if (address == PROMPT) {
+            promptByte = value;
+        } else if ((address & 0xFFF0) == KEYBOARD_DATA) {
+            keyboardByte = value;
+        } else if ((address & 0xFFF0) == KEYBOARD_STROBE) {
+            strobeCleared();
+        } else if (address == RESET_VECTOR) {
+            active = false; // a RESET never returns to the line it interrupted
             ready = false;
+            inRdchar = false;
+        }
+        return value;
+    }
+
+    @Override
+    public void write(int address, int value) {
+        board.write(address, value);
+        if (address == PROMPT) {
+            promptByte = value & 0xFF;
+        } else if ((address & 0xFF00) == INPUT_BUFFER) {
+            int at = address & 0xFF;
+            buffer[at] = value & 0xFF;
+            if (active && instruction == STORES_KEY) {
+                keyStored(at, value & 0xFF);
+            }
+        } else if ((address & 0xFFF0) == KEYBOARD_STROBE) {
+            strobeCleared();
         }
     }
+
+    // ---- following GETLN ----
+
+    /** @param atZero whether the line starts at index 0 (GETLN's own start) rather than at an index learned later */
+    private void lineStarted(boolean atZero) {
+        active = true;
+        prompt = (char) (promptByte & 0x7F);
+        startedWhileIdle = !feeder.isTyping();
+        placed = atZero;
+        start = 0;
+        index = 0;
+        inRdchar = false;
+        ready = false;
+        extent = 0;
+        position = -1;
+        draft = null;
+        recallInFlight = false;
+    }
+
+    /** GETLN stored {@code key} at index {@code at}: where its index goes next. */
+    private void keyStored(int at, int key) {
+        if (!placed) {
+            start = at; // the first key stored is at the index the line started at
+            placed = true;
+        }
+        // Ctrl-X, a left arrow at index 0, and a key past index $FF restart
+        // the line; the fetch of LINE_START that follows resets the index.
+        switch (key) {
+            case 0x88 -> index = Math.max(0, at - 1); // left arrow
+            case 0x8D -> { }                           // Return: the line is complete
+            default -> index = (at + 1) & 0xFF;
+        }
+    }
+
+    /** The line's length: keys in it since it started. */
+    private int length() {
+        return placed ? Math.max(0, index - start) : 0;
+    }
+
+    private void strobeCleared() {
+        if (active && ready && keyboardByte == (0x80 | RETURN)) {
+            active = false;
+            ready = false;
+            inRdchar = false;
+            if (startedWhileIdle) {
+                history.add(prompt, line(readyLength));
+            }
+        }
+    }
+
+    // ---- recall ----
 
     /** Recalls the line before the one shown, if there is one. */
     void older() {
@@ -189,39 +294,15 @@ final class CommandRecall {
         recall(1);
     }
 
-    private void lineStarted() {
-        active = false;
-        ready = false;
-        if (!romMatches()) {
-            return;
-        }
-        active = true;
-        resetsAtStart = cpu.resetCount();
-        prompt = (char) (bus.read(PROMPT) & 0x7F);
-        startedWhileIdle = !feeder.isTyping();
-        extent = 0;
-        position = -1;
-        draft = null;
-        recallInFlight = false;
-    }
-
-    private void lineEntered() {
-        active = false;
-        ready = false;
-        if (startedWhileIdle) {
-            history.add(prompt, readLine(readyIndex));
-        }
-    }
-
     private void recall(int direction) {
-        if (!active || cpu.resetCount() != resetsAtStart || !CommandHistory.isCommandPrompt(prompt)) {
+        if (!active || !CommandHistory.isCommandPrompt(prompt)) {
             return;
         }
-        int index;
+        int typed;
         int shown;
         if (typingRecall()) {
-            index = projectedIndex; // build on the recall still being typed
-            shown = projectedIndex;
+            typed = projectedLength; // build on the recall still being typed
+            shown = projectedLength;
         } else {
             recallInFlight = false;
             if (feeder.isTyping()) {
@@ -230,8 +311,8 @@ final class CommandRecall {
             if (!ready || keyboard.isStrobeSet()) {
                 return; // GETLN isn't waiting for the line's next key
             }
-            index = readyIndex;
-            shown = Math.max(extent, readyIndex);
+            typed = readyLength;
+            shown = Math.max(extent, readyLength);
         }
 
         List<String> entries = history.entries(prompt);
@@ -239,7 +320,7 @@ final class CommandRecall {
             if (direction > 0) {
                 return; // nothing is newer than the line being typed
             }
-            draft = readLine(index);
+            draft = line(typed);
             position = entries.size();
         }
         int target = position + direction;
@@ -248,9 +329,9 @@ final class CommandRecall {
         }
         String text = (target == entries.size()) ? draft : entries.get(target);
         position = target;
-        feeder.enqueueKeys(replacement(index, shown, text));
+        feeder.enqueueKeys(replacement(typed, shown, text));
         recallInFlight = true;
-        projectedIndex = text.length();
+        projectedLength = text.length();
         extent = text.length();
     }
 
@@ -258,7 +339,7 @@ final class CommandRecall {
      * The keys that turn a line of {@code index} characters, reaching
      * {@code shown} characters on screen, into {@code text}.
      *
-     * @param index the line's length, GETLN's index
+     * @param index the line's length: keys in it since it started
      * @param shown how many characters of it may show on screen, at least {@code index}
      * @param text  the line wanted
      * @return the keys to type
@@ -282,11 +363,11 @@ final class CommandRecall {
         return keys;
     }
 
-    /** The input buffer's first {@code limit} characters, or up to its carriage return, whichever comes first. */
-    private String readLine(int limit) {
+    /** The line's first {@code length} characters, from the copy of the buffer. */
+    private String line(int length) {
         StringBuilder line = new StringBuilder();
-        for (int i = 0; i < limit; i++) {
-            int c = bus.read(INPUT_BUFFER + i) & 0x7F;
+        for (int i = 0; i < length; i++) {
+            int c = buffer[(start + i) & 0xFF] & 0x7F;
             if (c == RETURN) {
                 break;
             }
@@ -301,19 +382,5 @@ final class CommandRecall {
      */
     private boolean typingRecall() {
         return recallInFlight && (feeder.isTyping() || keyboard.isStrobeSet());
-    }
-
-    private int topOfStack() {
-        int sp = cpu.sp();
-        return bus.read(STACK | ((sp + 1) & 0xFF)) | bus.read(STACK | ((sp + 2) & 0xFF)) << 8;
-    }
-
-    private boolean romMatches() {
-        for (int[] expected : SIGNATURE) {
-            if (bus.read(expected[0]) != expected[1]) {
-                return false;
-            }
-        }
-        return true;
     }
 }

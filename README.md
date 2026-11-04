@@ -78,7 +78,9 @@ Companion documents:
   their own, up to 100 lines. **Down** past the newest brings back the
   line that was being typed. A recalled line is typed into the Monitor's
   line-input routine (GETLN) as a person would type it, so it edits with
-  the usual arrows and ESC moves and enters with Return. DOS 3.3 and
+  the usual arrows and ESC moves and enters with Return. It's modeled as
+  a device between the 6502 and its socket, seeing only the CPU's pins,
+  that types through the keyboard connector. DOS 3.3 and
   ProDOS BASIC.SYSTEM commands are kept like BASIC lines. History is kept
   across launches in the emulator folder. The arrows do nothing anywhere
   else -- in programs with their own input routines, at `INPUT` prompts,

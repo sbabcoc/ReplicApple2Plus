@@ -824,7 +824,10 @@ public final class Apple2Plus {
 
         MotherboardBus bus = new MotherboardBus(slots);
         bus.shiftKeyMod().setWiring(ShiftKeyModSetting.remembered());
-        Cpu6502 cpu = new Cpu6502(bus, 0xFFFC); // the real, unmodified Autostart reset vector
+        TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
+        // command history: a device between the CPU and its socket
+        CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), typing, COMMAND_HISTORY);
+        Cpu6502 cpu = new Cpu6502(recall, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
         clock.addCycleListener(bus.scanlineModes()::tick);
@@ -835,11 +838,8 @@ public final class Apple2Plus {
                 clock.addCycleListener(card::tick);
             }
         }
-        TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
         typing.setScreenSignature(screenSignature(bus, videoTerm));
         clock.addCycleListener(typing::tick);
-        CommandRecall recall = new CommandRecall(cpu, bus, bus.keyboardRegister(), typing, COMMAND_HISTORY);
-        clock.addCycleListener(recall::tick);
         if (videoTerm != null) {
             videoTerm.setDisplay(DisplayModeSelector.rememberedDisplay()); // the mode last chosen from the toolbar
         }

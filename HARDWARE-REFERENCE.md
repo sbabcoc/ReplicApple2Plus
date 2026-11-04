@@ -613,8 +613,12 @@ document.
 ## 4. Monitor Line Input, GETLN (Confirmed, Implemented — command history)
 
 `CommandRecall` follows the Monitor's line-input routine to give the
-host's Up and Down arrows a command history. It depends on the addresses
-and behavior below, and nothing else in the ROM.
+host's Up and Down arrows a command history. It is modeled as a device
+between the 6502 and its socket: it sees only the CPU's pins -- each
+access's address, data and direction, and SYNC on opcode fetches -- and
+types through the keyboard connector. Everything it knows about GETLN
+comes from the accesses below, as the CPU makes them. It depends on these
+addresses and behavior, and nothing else in the ROM.
 
 Sources: the annotated Monitor source in
 [cmosher01/Apple-II-Source](https://github.com/cmosher01/Apple-II-Source)
@@ -622,7 +626,8 @@ Sources: the annotated Monitor source in
 Autostart Monitors, and `math.m4` for the Autostart escape loop), and an
 Autostart ROM image whose six CRC32s match `SystemRom`'s (341-0020,
 `079589C4`, for `$F800`-`$FFFF`). Every byte `CommandRecall` checks was
-compared against that image. The original Monitor shares `keyin.m4` and
+compared against that image, and the device checks the opcodes it sees
+fetched at those addresses. The original Monitor shares `keyin.m4` and
 differs only in the 3-byte call at `$FD32` (`JSR ESC1` instead of
 `JSR $FBA5`), so its addresses are the same — from the source only; no
 original-Monitor binary was checked.
@@ -644,12 +649,20 @@ original-Monitor binary was checked.
 
 Facts command history relies on:
 
-- **Every line passes `$FD6F`**, whether GETLN was entered at `$FD67`,
-  `$FD6A` or `$FD6F`, and so does a line restarted by Ctrl-X (`CANCEL`
-  falls into `GETLNZ`) or by a left arrow at index 0 (`BCKSPC` branches
-  to `GETLNZ`). The caller's return address is on top of the stack there.
-- **X is the line's length** at each `JSR RDCHAR`: GETLN keeps its buffer
-  index in X, and the characters before it are the line.
+- **A line entered through GETLN passes `$FD6F`**, whether GETLN was
+  entered at `$FD67`, `$FD6A` or `$FD6F`, and so does a line restarted by
+  Ctrl-X (`CANCEL` falls into `GETLNZ`) or by a left arrow at index 0
+  (`BCKSPC` branches to `GETLNZ`). Such a line starts at index 0.
+- **Integer BASIC doesn't call GETLN.** It prints its own prompt
+  (`DOPROMPT`: `STA PROMPT` / `JMP COUT`) and enters GETLN's key loop
+  directly: `TYA` / `TAX` / `JSR NXTCHAR` (`$FD75`, `LE3CE` in
+  `src/system/intbasic/intbasic.m4`), never passing `$FD6F`. Its X there
+  was measured in this emulator under the DOS 3.3 System Master: 0 at its
+  `>` prompt, 2 in `AUTO` mode, where the buffer holds the line number
+  first. Within GETLN, `$FD75` is reached only from `$FD74` (`DEX`) and
+  `$FD60` (`BNE NXTCHAR`).
+- **X is the buffer index** at each `JSR RDCHAR`: GETLN keeps it in X,
+  and the characters from where the line started up to it are the line.
 - **A left arrow backs the index up without erasing the screen.** `NOTCR`
   echoes `$88` through `COUT`, which only moves the cursor, back onto the
   previous row from column 0. One left arrow too many restarts the line.
@@ -675,9 +688,23 @@ Facts command history relies on:
 Plain GETLN stores the Return and returns to its caller, but the two disk
 operating systems act on their commands before that can happen. The one
 event all three share is the Return being **taken from the keyboard**
-(the strobe clears with `$0D` in the latch) while GETLN waits at
-`RDCHAR` with `$FD77` on the stack. At that moment X is the line's length
-and `$0200` holds the line, so that is where command history records it.
+while GETLN waits at `RDCHAR`: the CPU reads `$8D` from `$C000`, then
+accesses `$C010`. At that moment the line is complete in `$0200`, so that
+is where command history records it.
+
+On the CPU's pins, "GETLN waits at `RDCHAR`" is the fetch of `$FD35`
+after the fetch of GETLN's `JSR RDCHAR` at `$FD75`, until the fetch of
+`$FD78` (key taken) or `$FD2F` (escape mode). The line's length is not
+read from X: GETLN's `STA IN,X` at `$FD84` is a write to `$0200+X`
+carrying the key, so each key's index is on the address bus, and the
+index after it follows from the key (one less after a left arrow, one
+more otherwise; a restarted line passes `$FD6F` again). A line Integer
+BASIC enters at `$FD75` -- a fetch there not following `$FD74` or
+`$FD60` -- starts at an index the device can't see until the first key is
+stored at it; until then the line is known to be empty, which is all a
+recall needs. The prompt is the CPU's last read or write of `$0033`
+(GETLN's read at `$FD6A`, Integer BASIC's `STA PROMPT`), and a RESET is
+the CPU's read of the reset vector at `$FFFC`.
 
 - **DOS 3.3** acts when GETLN echoes the Return through the output hook
   (`CSW`), runs the command, and leaves through `DOSEXIT` (`LDX STKSAVED`

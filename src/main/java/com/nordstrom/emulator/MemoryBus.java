@@ -25,4 +25,19 @@ public interface MemoryBus {
      * @param value the byte to write; only its low 8 bits matter
      */
     void write(int address, int value);
+
+    /**
+     * Reads an instruction's opcode: a {@link #read} during which the 6502
+     * drives its SYNC pin high, the one signal that tells a device watching
+     * the CPU's pins that an instruction is starting at {@code address}.
+     * Nothing on the motherboard uses SYNC, so by default this is a plain
+     * read; a device between the CPU and its socket overrides it to see
+     * where execution goes (see {@code CommandRecall}).
+     *
+     * @param address the address of the opcode -- the program counter
+     * @return the opcode, 0..255
+     */
+    default int fetchOpcode(int address) {
+        return read(address);
+    }
 }

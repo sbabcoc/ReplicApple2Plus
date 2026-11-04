@@ -15,8 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Command history on a real machine: the Apple II+ ROM's own GETLN,
- * Applesoft and the Monitor reading the lines, with recalled lines typed
- * through the {@link TypingFeeder} exactly as the application does.
+ * Applesoft and the Monitor reading the lines, with the device between the
+ * CPU and the motherboard and recalled lines typed through the
+ * {@link TypingFeeder}, wired exactly as the application does.
  */
 @RequiresRoms(Rom.SYSTEM)
 class CommandRecallTest {
@@ -24,11 +25,11 @@ class CommandRecallTest {
     private static final double KEY_SETTLE = 0.3; // seconds: plenty for GETLN to take a few dozen keys
 
     private final MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8]);
-    private final Cpu6502 cpu = new Cpu6502(bus, 0xFFFC);
-    private final SystemClock clock = new SystemClock(cpu);
     private final TypingFeeder typing = new TypingFeeder(bus.keyboardRegister());
     private final CommandHistory history = new CommandHistory();
-    private final CommandRecall recall = new CommandRecall(cpu, bus, bus.keyboardRegister(), typing, history);
+    private final CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), typing, history);
+    private final Cpu6502 cpu = new Cpu6502(recall, 0xFFFC);
+    private final SystemClock clock = new SystemClock(cpu);
     private double seconds;
 
     CommandRecallTest() {
@@ -42,7 +43,6 @@ class CommandRecallTest {
             return hash;
         });
         clock.addCycleListener(typing::tick);
-        clock.addCycleListener(recall::tick);
     }
 
     @Test
@@ -123,6 +123,58 @@ class CommandRecallTest {
         assertEquals("]PREFIX", cursorRow());
     }
 
+    /**
+     * Integer BASIC prints its own prompt and enters GETLN's key loop
+     * directly ({@code JSR NXTCHAR}, {@code $FD75}), never passing
+     * {@code $FD6F}: with X = 0 at its prompt, and with X = 2 in
+     * {@code AUTO} mode, where the line number comes first in the buffer.
+     * This loop does the same, from the ROM alone.
+     */
+    @Test
+    void aLineEnteredAtNxtcharIsRecordedAndRecalled() {
+        integerStyleInput(0);
+        enter("HELLO");
+        assertEquals(List.of("HELLO"), history.entries('>'));
+        up();
+        assertEquals(">HELLO", cursorRow());
+    }
+
+    @Test
+    void aLineEnteredPartWayIntoTheBufferIsRecordedWithoutWhatPrecedesIt() {
+        integerStyleInput(2);
+        enter("LIST");
+        assertEquals(List.of("LIST"), history.entries('>'), "not the two characters already in the buffer");
+        up();
+        assertEquals(">LIST", cursorRow());
+        enter("");
+        StringBuilder entered = new StringBuilder();
+        for (int i = 0; i < 4; i++) {
+            entered.append((char) (bus.read(0x202 + i) & 0x7F));
+        }
+        assertEquals("LIST", entered.toString(), "the recalled line went in after them, where typing goes");
+    }
+
+    /** Boots, then runs a prompt loop that enters GETLN at NXTCHAR with X = {@code index}. */
+    private void integerStyleInput(int index) {
+        boot();
+        int[] loop = {
+            0xA9, 0xBE,       // $0300 LDA #'>'
+            0x85, 0x33,       //       STA PROMPT
+            0x20, 0xED, 0xFD, //       JSR COUT
+            0xA9, 0xD8,       //       LDA #'X'
+            0x8D, 0x00, 0x02, //       STA $0200 -- what comes before the line
+            0x8D, 0x01, 0x02, //       STA $0201
+            0xA2, index,      //       LDX #index
+            0x20, 0x75, 0xFD, //       JSR NXTCHAR
+            0x4C, 0x00, 0x03, //       JMP $0300
+        };
+        for (int i = 0; i < loop.length; i++) {
+            bus.write(0x300 + i, loop[i]);
+        }
+        enter("CALL 768");
+        assertEquals(">", cursorRow());
+    }
+
     @Test
     void aShorterRecallBlanksTheRestOfTheLongerLineItReplaces() {
         boot();
@@ -148,6 +200,20 @@ class CommandRecallTest {
         assertEquals("", row(bus.read(0x25) + 1).strip(), "nothing left on the row the long line wrapped onto");
         enter("");
         assertEquals("8", outputAbovePrompt());
+    }
+
+    @Test
+    void recallBacksUpOnlyAsFarAsTheLineAfterLeftArrows() {
+        boot();
+        enter("PRINT 5");
+        type("PRINT 123");
+        typing.enqueueKeys(0x08, 0x08); // the line is now "PRINT 1", with "23" still on screen
+        run(KEY_SETTLE);
+        up();
+        assertEquals("]PRINT 5", cursorRow(), "the line replaced in place, leftovers blanked");
+        assertEquals("5", outputAbovePrompt(), "the line was not restarted by backing up too far");
+        enter("");
+        assertEquals("5", outputAbovePrompt());
     }
 
     @Test

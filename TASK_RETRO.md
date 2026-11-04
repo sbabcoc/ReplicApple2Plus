@@ -21,9 +21,10 @@ The host's Up and Down arrows recall lines entered before at the same
 prompt. See `CommandRecall.java` and `CommandHistory.java`; the ROM facts
 it depends on are in HARDWARE-REFERENCE.md section 4.
 
-- **Approach:** the emulator follows the Monitor's GETLN and types
-  recalled lines as keystrokes, rather than writing the input buffer or
-  screen memory. GETLN then keeps its own buffer, cursor and echo, under
+- **Approach:** a device between the 6502 and its socket follows the
+  Monitor's GETLN from the CPU's pins, and types recalled lines as
+  keystrokes through the keyboard connector, rather than writing the
+  input buffer or screen memory. GETLN then keeps its own buffer, cursor and echo, under
   whatever hooks are installed, and a recalled line edits like a typed
   one. A guest-side alternative (a resident routine on the input hook)
   was set aside because DOS already owns that hook.
@@ -31,9 +32,11 @@ it depends on are in HARDWARE-REFERENCE.md section 4.
   keys -- so they could be given to history without taking anything
   away. Ctrl-K and Ctrl-J, which software such as Davex treats as up and
   down, are left alone.
-- **Knowing the line's length** without guessing: GETLN holds its buffer
-  index in X when it calls `RDCHAR`, so X is read at `$FD35` when the
-  return address on the stack is GETLN's (`$FD77`). Escape mode was the
+- **Knowing the line's length** without guessing: GETLN stores each key
+  with `STA IN,X`, a write to `$0200+X`, so the index is on the address
+  bus, and the index after each key follows from the key. GETLN is
+  waiting for the next key from the fetch of `$FD35` after its
+  `JSR RDCHAR` at `$FD75`. Escape mode was the
   trap: after ESC, keys move the cursor, and `RDCHAR` is left via `$FD2F`;
   recall is refused until execution is back at `$FD35`. Removing that
   guard makes `nothingIsTypedInEscapeMode` fail with the recalled keys
@@ -55,12 +58,27 @@ it depends on are in HARDWARE-REFERENCE.md section 4.
   command, and handing GETLN a left arrow at index 0, so GETLN never sees
   a Return at all. What every case shares is the Return being taken from
   the keyboard while GETLN waits at `RDCHAR`, and that is where a line is
-  now recorded -- `KeyboardRegister` gained `lastKey()` to tell which key
-  was taken. Two ROM-only tests reproduce each operating system's
+  now recorded. Two ROM-only tests reproduce each operating system's
   behavior with a small hook in place of the disk (an output hook that
   resets the stack and restarts BASIC; an input hook that swallows the
   Return), and fail against the earlier versions; both commands were then
   checked in the running application under the real DOS 3.3 and ProDOS.
+- **Integer BASIC** -- found on real use: nothing was recorded or
+  recalled at its `>` prompt. A trace showed it never fetches `$FD6F`:
+  it prints its own prompt and enters GETLN's key loop directly with
+  `JSR NXTCHAR` (`$FD75`), with its own X -- 0 at its prompt, 2 in
+  `AUTO` mode, where the line number comes first in the buffer. (The
+  register-based first version detected lines at `$FD6F` too, so it had
+  the same gap.) A fetch of `$FD75` that doesn't follow GETLN's own
+  `$FD74` or `$FD60` now also starts a line. X isn't on the bus until a
+  key is stored, so the device tracks the line's length -- keys since it
+  started -- and learns where it started from the first key stored:
+  recall backs up by that length, and the recorded line leaves out the
+  `AUTO` prefix. Two ROM-only tests enter GETLN at `NXTCHAR` the way
+  Integer BASIC does, at index 0 and at index 2, and fail without each
+  part of the change; Integer BASIC itself was then checked under the
+  DOS 3.3 System Master, at its prompt and in `AUTO` mode, and in the
+  running application.
 - **Recalls pressed faster than they type** build on the line the pending
   recall will leave, so repeated Up lands where expected.
 - **History per prompt** (`]`, `>`, `*`, `!`): a line means nothing to
@@ -71,9 +89,29 @@ it depends on are in HARDWARE-REFERENCE.md section 4.
 - **Persistence:** `command-history.txt` in the emulator folder, one entry
   per line with its prompt first, written by the shutdown hook; the store
   is shared across Reboot.
-- **CPU:** `Cpu6502` gained read-only `pc()`, `x()`, `sp()` and
-  `resetCount()` -- the last because a RESET never returns through the
-  line it interrupted.
+- **Faithful emulation -- rebuilt as a CPU-socket device.** The first
+  version watched GETLN with emulator-only access no real device has: a
+  cycle listener reading the program counter, X and the stack after every
+  instruction (`Cpu6502` gained `pc()`, `x()`, `sp()` and `resetCount()`;
+  `KeyboardRegister` gained `lastKey()`), and memory read behind the
+  CPU's back. That broke the rule that features use only what real
+  hardware could. Alternatives were weighed against the VideoTerm and
+  against needing activation: a slot card would have to be the input
+  routine (`IN#n`), every `PR#3` takes that back, recalled keys can't go
+  through the VideoTerm's input routine (only the keyboard feeds `$C000`),
+  and the card would depend on VideoTerm firmware 2.4's `$C332` and
+  `$0678`; a keyboard-only device can't see the prompt; a keyboard and
+  video device would have to judge the prompt from the screen. The 6502
+  is socketed, and a device between it and its socket sees every pin,
+  SYNC included -- enough to follow GETLN exactly. `CommandRecall` is now
+  that device: a `MemoryBus` the CPU is built with, passing every access
+  through to the motherboard unchanged and making none of its own.
+  `MemoryBus.fetchOpcode` models SYNC (`Cpu6502` fetches opcodes through
+  it), and the register accessors, `lastKey()` and the cycle listener are
+  gone. `Cpu6502SyncTest` checks that only opcode fetches are marked.
+  Behavior is unchanged: every test passed without changes to what it
+  checks, and the running application was checked again under the ROM
+  alone, DOS 3.3 and ProDOS BASIC.SYSTEM.
 - **Verification:** `CommandRecallTest` runs the real ROM (Applesoft and
   the Monitor) with the feeder and recall wired as in the application;
   `CommandHistoryTest` covers the store and its file. The ROM bytes the
