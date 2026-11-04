@@ -104,6 +104,25 @@ it depends on are in HARDWARE-REFERENCE.md section 4.
   runs a program and recalls a line with the real VideoTerm firmware 2.4
   reading the keys in 80 columns. Typed keys, recall and Paste were then
   checked in the running application.
+- **Interrupts** -- reported by Scott from reading the code: an IRQ
+  taken between GETLN's `$FD74` (or `$FD60`) and `$FD75` would make the
+  fetch after `RTI` look like an entry from outside, so `lineStarted(false)`
+  would discard the line being typed. Reproduced with an NMI timed in
+  `CommandRecallTest` (`aLineSurvivesAnInterruptInsideGetlnsKeyLoop`): the
+  line was lost. No card in the emulator raises IRQ or NMI today, but
+  `InterruptLines` exists for cards that do. The first suggestion -- ignore
+  what came before after an `RTI` -- breaks the opposite case: an
+  interrupt between Integer BASIC's `JSR NXTCHAR` and the fetch of `$FD75`,
+  where that fetch really does start a line
+  (`aLineEnteredAtNxtcharStartsEvenWhenAnInterruptPrecedesIt` failed with
+  it). The fix restores what came before instead: the CPU takes an
+  interrupt with no opcode fetch -- three stack pushes, then a read of
+  `$FFFE` or `$FFFA` -- so the device remembers the instruction fetched
+  before it and, after the handler's `RTI`, treats that as the previous
+  instruction. It keeps a short stack for nested interrupts, forgetting
+  the oldest when a handler never returns, and requires the three pushes
+  so a data read of a vector isn't mistaken for an interrupt. Both tests
+  pass.
 - **Recalls pressed faster than they type** build on the line the pending
   recall will leave, so repeated Up lands where expected.
 - **History per prompt** (`]`, `>`, `*`, `!`): a line means nothing to

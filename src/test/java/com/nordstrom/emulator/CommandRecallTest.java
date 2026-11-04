@@ -28,9 +28,38 @@ class CommandRecallTest {
     private final CommandHistory history = new CommandHistory();
     private final CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), history);
     private final TypingFeeder typing = recall.typing();
-    private final Cpu6502 cpu = new Cpu6502(recall, 0xFFFC);
+    private final FetchProbe probe = new FetchProbe(recall);
+    private final Cpu6502 cpu = new Cpu6502(probe, 0xFFFC);
     private final SystemClock clock = new SystemClock(cpu);
     private double seconds;
+    /** An address whose fetch is followed by an NMI, or -1: see {@link #nmiAfterFetchOf}. */
+    private int nmiAfter = -1;
+
+    /**
+     * Passes every access between the CPU and the device through unchanged,
+     * noting the last opcode fetched -- only so a test can time an interrupt.
+     */
+    private static final class FetchProbe implements MemoryBus {
+        private final MemoryBus device;
+        private int lastFetch = -1;
+
+        FetchProbe(MemoryBus device) {
+            this.device = device;
+        }
+
+        @Override public int read(int address) {
+            return device.read(address);
+        }
+
+        @Override public void write(int address, int value) {
+            device.write(address, value);
+        }
+
+        @Override public int fetchOpcode(int address) {
+            lastFetch = address;
+            return device.fetchOpcode(address);
+        }
+    }
 
     CommandRecallTest() {
         clock.addCycleListener(bus.videoScanner()::tick);
@@ -166,6 +195,43 @@ class CommandRecallTest {
         }
         enter("CALL 768");
         assertEquals(">", cursorRow());
+    }
+
+    /**
+     * An interrupt taken between GETLN's {@code DEX} at {@code $FD74} and its
+     * {@code JSR RDCHAR} at {@code $FD75}: the fetch of {@code $FD75} after the
+     * RTI must still be seen as GETLN carrying on with the line, not a new
+     * line starting.
+     */
+    @Test
+    void aLineSurvivesAnInterruptInsideGetlnsKeyLoop() {
+        boot();
+        bus.write(0x03FB, 0x40); // the NMI vector's target: RTI
+        type("PRINT 12");
+        nmiAfterFetchOf(0xFD74);
+        typing.enqueueKeys(0x08); // left arrow: BCKSPC's DEX at $FD74, then $FD75
+        run(KEY_SETTLE);
+        assertEquals(-1, nmiAfter, "the NMI was taken");
+        enter("");
+        assertEquals(List.of("PRINT 1"), history.entries(']'));
+        up();
+        assertEquals("]PRINT 1", cursorRow());
+    }
+
+    /**
+     * An interrupt taken between Integer BASIC's {@code JSR NXTCHAR} and the
+     * fetch of {@code $FD75}: after the RTI, that fetch still starts a line --
+     * what came before the interrupt decides, not the RTI.
+     */
+    @Test
+    void aLineEnteredAtNxtcharStartsEvenWhenAnInterruptPrecedesIt() {
+        integerStyleInput(0);
+        bus.write(0x03FB, 0x40); // the NMI vector's target: RTI
+        nmiAfterFetchOf(0x0311); // the loop's JSR NXTCHAR, for the line after FIRST
+        enter("FIRST");
+        assertEquals(-1, nmiAfter, "the NMI was taken");
+        enter("SECOND");
+        assertEquals(List.of("FIRST", "SECOND"), history.entries('>'));
     }
 
     @Test
@@ -347,7 +413,18 @@ class CommandRecallTest {
         double until = seconds + s;
         while (seconds < until) {
             seconds += clock.step() / 1_023_000.0;
+            if (nmiAfter >= 0 && probe.lastFetch == nmiAfter) {
+                cpu.raiseNmi(); // taken before the next instruction's fetch
+                cpu.lowerNmi();
+                nmiAfter = -1;
+            }
         }
+    }
+
+    /** Raises an NMI right after the next fetch of {@code address}, before the instruction after it. */
+    private void nmiAfterFetchOf(int address) {
+        nmiAfter = address;
+        probe.lastFetch = -1;
     }
 
     /** The row {@code n} above the cursor's, trailing spaces trimmed. */

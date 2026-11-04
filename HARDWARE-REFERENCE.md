@@ -710,6 +710,15 @@ recall needs. The prompt is the CPU's last read or write of `$0033`
 (GETLN's read at `$FD6A`, Integer BASIC's `STA PROMPT`), and a RESET is
 the CPU's read of the reset vector at `$FFFC`.
 
+An interrupt can be taken between any two instructions, including GETLN's
+`$FD74` or `$FD60` and its `$FD75`. The CPU takes one without an opcode
+fetch -- three pushes to the stack, then a read of the IRQ/BRK vector
+(`$FFFE`) or the NMI vector (`$FFFA`) -- so the device can tell it from a
+data read of those addresses, remember the instruction it came after, and
+after the handler's `RTI` judge the next fetch by that instruction, as if
+the interrupt never happened. No card in the emulator raises IRQ or NMI
+today; `InterruptLines` lets one.
+
 - **DOS 3.3** acts when GETLN echoes the Return through the output hook
   (`CSW`), runs the command, and leaves through `DOSEXIT` (`LDX STKSAVED`
   / `TXS`), with its own saved stack pointer. GETLN does store the Return

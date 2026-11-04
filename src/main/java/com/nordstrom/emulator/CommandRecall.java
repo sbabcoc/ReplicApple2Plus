@@ -68,6 +68,14 @@ import java.util.List;
  *       line -- neither returns to GETLN's caller.</li>
  *   <li><b>A RESET</b> -- the CPU reading the reset vector at
  *       {@code $FFFC} -- abandons the line.</li>
+ *   <li><b>An interrupt</b> doesn't count as what came before an
+ *       instruction. The CPU takes one without an opcode fetch: three pushes
+ *       to the stack, then a read of the IRQ/BRK vector ({@code $FFFE}) or
+ *       the NMI vector ({@code $FFFA}). The device remembers the last
+ *       instruction fetched before it, and after the handler's {@code RTI}
+ *       treats that as the one before the next fetch -- so whether a fetch of
+ *       {@code $FD75} continues GETLN's loop or starts a line is decided as if
+ *       the interrupt never happened. Interrupts can nest.</li>
  * </ul>
  * Recalling a line types: one left arrow for each character in the line
  * (GETLN backs its index up without erasing the screen; one more would
@@ -110,6 +118,10 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
     private static final int KEYBOARD_DATA = 0xC000;  // $C000-$C00F
     private static final int KEYBOARD_STROBE = 0xC010; // $C010-$C01F
     private static final int RESET_VECTOR = 0xFFFC;
+    private static final int NMI_VECTOR = 0xFFFA;
+    private static final int IRQ_VECTOR = 0xFFFE; // IRQ and BRK
+    private static final int RTI = 0x40;
+    private static final int STACK_PAGE = 0x0100;
     private static final int TEXT_PAGES = 0x0400;     // $0400-$0BFF: text and lo-res pages 1 and 2
     private static final int TEXT_PAGES_END = 0x0C00;
     private static final int VIDEOTERM_WINDOW = 0xCC00; // $CC00-$CDFF: the VideoTerm's display memory
@@ -130,7 +142,11 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
     private int screenWrites;   // the CPU's writes to screen memory, counted
     private boolean keyWaiting; // a key sent whose strobe the CPU hasn't cleared
     private int instruction;    // the address of the current instruction's opcode fetch
-    private int previous;       // the address of the one before it
+    private int previous;       // the address of the one before it, interrupts aside
+    private int stackWrites;    // the CPU's writes to the stack since that fetch
+    private boolean returning;  // the instruction fetched was RTI
+    private final int[] interrupted = new int[8]; // the instruction before each interrupt in progress
+    private int interrupts;
 
     // The line GETLN is collecting.
     private boolean active;
@@ -195,8 +211,10 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
     @Override
     public int fetchOpcode(int address) {
         int opcode = board.fetchOpcode(address);
-        previous = instruction;
+        previous = (returning && interrupts > 0) ? interrupted[--interrupts] : instruction;
+        returning = opcode == RTI;
         instruction = address;
+        stackWrites = 0;
         switch (address) {
             case LINE_START -> {
                 if (opcode == LDX_IMMEDIATE) {
@@ -251,6 +269,9 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
             active = false; // a RESET never returns to the line it interrupted
             ready = false;
             inRdchar = false;
+            interrupts = 0;
+        } else if ((address == IRQ_VECTOR || address == NMI_VECTOR) && stackWrites >= 3) {
+            interruptTaken(); // PC and status pushed, now the vector: not a data read
         }
         return value;
     }
@@ -258,6 +279,9 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
     @Override
     public void write(int address, int value) {
         board.write(address, value);
+        if ((address & 0xFF00) == STACK_PAGE) {
+            stackWrites++;
+        }
         if ((address >= TEXT_PAGES && address < TEXT_PAGES_END)
                 || (address >= VIDEOTERM_WINDOW && address < VIDEOTERM_WINDOW_END)) {
             screenWrites++;
@@ -273,6 +297,16 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
         } else if ((address & 0xFFF0) == KEYBOARD_STROBE) {
             strobeCleared();
         }
+    }
+
+    /** Remembers the instruction an interrupt came after, for the fetch after its RTI. */
+    private void interruptTaken() {
+        if (interrupts == interrupted.length) {
+            // a handler that never returns (a BRK into the Monitor, say): forget the oldest
+            System.arraycopy(interrupted, 1, interrupted, 0, interrupted.length - 1);
+            interrupts--;
+        }
+        interrupted[interrupts++] = instruction;
     }
 
     // ---- following GETLN ----
