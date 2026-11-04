@@ -181,10 +181,12 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
     }
 
     /**
-     * The keyboard register wired into $C000-$C01F -- the only way anything
-     * outside this class can feed a real keypress in via
-     * {@link KeyboardRegister#keyPressed}, since this class has no
-     * dependency on any specific UI toolkit itself.
+     * The keyboard register wired into $C000-$C01F: the motherboard side of
+     * the keyboard connector, where whatever drives the connector delivers
+     * each keypress via {@link KeyboardRegister#keyPressed} -- this class has
+     * no dependency on any specific UI toolkit itself. In the application,
+     * keys arrive through the device on the keyboard cable
+     * ({@code CommandRecall}).
      *
      * @return this machine's keyboard register
      */

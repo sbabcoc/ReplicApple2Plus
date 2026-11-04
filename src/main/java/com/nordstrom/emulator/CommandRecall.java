@@ -156,7 +156,7 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
 
     /**
      * @param board    the motherboard: the socket the CPU would otherwise plug into
-     * @param keyboard the motherboard's keyboard latch: the connector's far side
+     * @param keyboard the motherboard side of the keyboard connector, where keys sent through this device arrive
      * @param history  the history recorded into and recalled from
      */
     CommandRecall(MemoryBus board, KeyboardRegister keyboard, CommandHistory history) {

@@ -350,12 +350,14 @@ public final class Apple2Plus {
      * individually.
      *
      * @param disk the disk controller found in {@code slots}, or null if none was configured
-     * @param bus the motherboard bus this machine's CPU, screen, and keyboard register all share
+     * @param bus the motherboard bus: the screen and keyboard register are on it, and the CPU reaches it
+     *            through the device in its socket ({@code recall})
      * @param screen the panel currently showing this machine's video output
      * @param loop the emulation thread currently running this machine
      * @param padPoller the thread currently polling a gamepad into this machine
      * @param toolbar the toolbar currently wired to this machine's CPU
-     * @param recall this machine's command history recall, which the keyboard listener drives
+     * @param recall the device in the CPU's socket and on the keyboard cable: command history, and the
+     *               way every key -- typed, pasted or recalled -- reaches the keyboard connector
      */
     private record Machine(Disk2Controller disk, MotherboardBus bus, ScreenPanel screen, EmulationLoop loop,
                             PadPoller padPoller, JToolBar toolbar, TypingFeeder typing,

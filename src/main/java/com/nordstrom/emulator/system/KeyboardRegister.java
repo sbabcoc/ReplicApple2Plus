@@ -36,9 +36,12 @@ package com.nordstrom.emulator.system;
  * key events into this class, not here.
  * <p>
  * Deliberately has no dependency on any specific UI toolkit -- no AWT
- * or Swing import anywhere in this class. Whatever eventually captures
- * real keystrokes calls {@link #keyPressed} with a plain ASCII value;
- * this class has no opinion about where that call comes from.
+ * or Swing import anywhere in this class. It's the motherboard side of the
+ * keyboard connector: whatever drives the connector calls
+ * {@link #keyPressed} with a plain ASCII value, and this class has no
+ * opinion about where that call comes from. In the application that's the
+ * device on the keyboard cable ({@code CommandRecall}), which every key --
+ * typed, pasted or recalled -- passes through.
  */
 public final class KeyboardRegister {
 

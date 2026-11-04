@@ -129,7 +129,7 @@ final class TypingFeeder {
         setTyping(!pending.isEmpty());
     }
 
-    /** Discards everything not yet typed. A key already in the latch stays there. */
+    /** Discards everything not yet typed. A key already sent stays waiting for software to take it. */
     void cancel() {
         pending.clear();
         awaitingSettle = false;
