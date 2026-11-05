@@ -41,6 +41,7 @@ class CommandRecallVideoTermTest {
         SlotCard[] slots = new SlotCard[8];
         slots[3] = card;
         bus = MotherboardBus.withoutAudio(slots);
+        RomBoot.coldStart(bus);
         recall = new CommandRecall(bus, bus.keyboardRegister(), history);
         typing = recall.typing();
         clock = new SystemClock(new Cpu6502(recall, 0xFFFC));
@@ -77,7 +78,7 @@ class CommandRecallVideoTermTest {
     private void run(double s) {
         double until = seconds + s;
         while (seconds < until) {
-            seconds += clock.step() / 1_023_000.0;
+            seconds += RomBoot.notHalted(clock.step()) / 1_023_000.0;
         }
     }
 

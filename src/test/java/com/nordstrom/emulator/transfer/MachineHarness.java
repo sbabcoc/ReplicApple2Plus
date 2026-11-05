@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.transfer;
 
+import com.nordstrom.emulator.RomBoot;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.expansion.LanguageCard;
@@ -67,6 +68,7 @@ final class MachineHarness implements AutoCloseable {
         slots[6] = disk2;
         disk2.removableDrives().get(0).insert(disk);
         bus = MotherboardBus.withoutAudio(slots);
+        RomBoot.coldStart(bus);
         cpu = new Cpu6502(bus, 0xFFFC);
         clock = new SystemClock(cpu);
         clock.addCycleListener(bus.videoScanner()::tick);
@@ -78,7 +80,7 @@ final class MachineHarness implements AutoCloseable {
         if (!keys.isEmpty() && !bus.keyboardRegister().isStrobeSet()) {
             bus.keyboardRegister().keyPressed(keys.poll());
         }
-        seconds += clock.step() / 1_023_000.0;
+        seconds += RomBoot.notHalted(clock.step()) / 1_023_000.0;
     }
 
     void run(double s) {

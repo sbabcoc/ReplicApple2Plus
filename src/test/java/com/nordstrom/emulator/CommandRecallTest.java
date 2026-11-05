@@ -62,6 +62,7 @@ class CommandRecallTest {
     }
 
     CommandRecallTest() {
+        RomBoot.coldStart(bus);
         clock.addCycleListener(bus.videoScanner()::tick);
         clock.addCycleListener(bus.scanlineModes()::tick);
         clock.addCycleListener(typing::tick);
@@ -412,7 +413,7 @@ class CommandRecallTest {
     private void run(double s) {
         double until = seconds + s;
         while (seconds < until) {
-            seconds += clock.step() / 1_023_000.0;
+            seconds += RomBoot.notHalted(clock.step()) / 1_023_000.0;
             if (nmiAfter >= 0 && probe.lastFetch == nmiAfter) {
                 cpu.raiseNmi(); // taken before the next instruction's fetch
                 cpu.lowerNmi();

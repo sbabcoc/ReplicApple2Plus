@@ -1,5 +1,6 @@
 package com.nordstrom.emulator.transfer;
 
+import com.nordstrom.emulator.RomBoot;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.expansion.Disk2Controller;
 import com.nordstrom.emulator.expansion.LanguageCard;
@@ -48,7 +49,7 @@ class ProDosTransferIntegrationTest {
         if (!keys.isEmpty() && !bus.keyboardRegister().isStrobeSet()) {
             bus.keyboardRegister().keyPressed(keys.poll());
         }
-        seconds += clock.step() / 1_023_000.0;
+        seconds += RomBoot.notHalted(clock.step()) / 1_023_000.0;
     }
 
     private void run(double s) {
@@ -118,6 +119,7 @@ class ProDosTransferIntegrationTest {
         disk2.removableDrives().get(0).insert(disk);
         try (MotherboardBus b = MotherboardBus.withoutAudio(slots)) {
             bus = b;
+            RomBoot.coldStart(bus);
             clock = new SystemClock(new Cpu6502(bus, 0xFFFC));
             clock.addCycleListener(bus.videoScanner()::tick);
             clock.addCycleListener(bus.scanlineModes()::tick);

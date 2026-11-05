@@ -123,6 +123,24 @@ it depends on are in HARDWARE-REFERENCE.md section 4.
   the oldest when a handler never returns, and requires the three pushes
   so a data read of a vector isn't mistaken for an interrupt. Both tests
   pass.
+- **A frozen test run** -- reported by Scott: the Gradle build froze in
+  `CommandRecallTest`. RAM powers up random (`PowerOnRam`), and the
+  Autostart ROM warm-starts through `$03F2` whenever page 3 happens to look
+  powered up (`$03F4` = `$03F3` XOR `$A5`) -- about one power-on in 256.
+  In 1,500 boots of the ROM-only machine, 4 did: 2 halted the CPU on a JAM
+  opcode and 2 hit an unsupported unstable opcode; the other 1,496 reached
+  the prompt. A halted CPU's `step()` returns 0 cycles, so the test's
+  time-based `run()` loop never ended. `CommandRecallTest` boots about 20
+  times a run, which made this likely enough to see. Every test that boots
+  the ROM now uses `RomBoot`: `coldStart` fails the warm-start check before
+  the first instruction (3,000 boots out of 3,000 reached the prompt that
+  way), and `notHalted` fails the test with "the CPU halted" instead of
+  spinning if the CPU ever stops. That's `CommandRecallTest`,
+  `CommandRecallVideoTermTest`, `VideoTermFirmwareIntegrationTest`,
+  `MachineHarness` (the print and reset-during-session tests), and the DOS
+  and ProDOS transfer tests. The CPU tests that set the program counter
+  directly don't boot the ROM, and their loops count iterations, so they
+  can't hang this way.
 - **Recalls pressed faster than they type** build on the line the pending
   recall will leave, so repeated Up lands where expected.
 - **History per prompt** (`]`, `>`, `*`, `!`): a line means nothing to

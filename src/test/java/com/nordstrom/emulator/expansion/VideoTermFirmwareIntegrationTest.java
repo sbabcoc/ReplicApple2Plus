@@ -2,6 +2,7 @@ package com.nordstrom.emulator.expansion;
 
 import com.nordstrom.emulator.RequiresRoms;
 import com.nordstrom.emulator.RequiresRoms.Rom;
+import com.nordstrom.emulator.RomBoot;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.emulator.system.MotherboardBus;
 import com.nordstrom.emulator.system.SlotCard;
@@ -45,6 +46,7 @@ class VideoTermFirmwareIntegrationTest {
         SlotCard[] slots = new SlotCard[8];
         slots[3] = card;
         bus = MotherboardBus.withoutAudio(slots);
+        RomBoot.coldStart(bus);
         clock = new SystemClock(new Cpu6502(bus, 0xFFFC));
         clock.addCycleListener(bus.videoScanner()::tick);
         clock.addCycleListener(bus.scanlineModes()::tick);
@@ -58,7 +60,7 @@ class VideoTermFirmwareIntegrationTest {
             if (!keys.isEmpty() && !bus.keyboardRegister().isStrobeSet()) {
                 bus.keyboardRegister().keyPressed(keys.poll());
             }
-            cycles += clock.step();
+            cycles += RomBoot.notHalted(clock.step());
         }
     }
 
