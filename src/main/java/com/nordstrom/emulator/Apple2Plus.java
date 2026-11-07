@@ -562,6 +562,9 @@ public final class Apple2Plus {
             // not be silently lost the same way the whole point of
             // persisting at all is to avoid.
             persistDiskQuietly(old.disk());
+            // The old machine never runs again, so its audio line goes now,
+            // before the fresh machine opens one of its own.
+            old.bus().close();
             // A power cycle keeps the disks in the drives -- unless the slot
             // configuration has changed (chosen in Settings), whose own drives
             // then apply.
@@ -577,6 +580,10 @@ public final class Apple2Plus {
                 failure = e;
                 fresh = buildMachine(cli, finalClassLoader, finalInputMapping, null, frame, onRebootHolder[0], true);
             }
+            // After buildMachine has read the old drives' media, and before
+            // the fresh machine runs, so its cards can take up whatever
+            // host resources the old ones held (a listening port, say).
+            old.bus().releaseCards();
             rewireFrame(frame, old, fresh, onRebootHolder[0]);
             current.set(fresh);
             fresh.loop().start();

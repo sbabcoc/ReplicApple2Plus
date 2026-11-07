@@ -112,6 +112,18 @@ public final class MotherboardBus implements MemoryBus, AutoCloseable {
         }
     }
 
+    /**
+     * Tells every configured card its machine is being discarded -- see
+     * {@link SlotCard#release}. Call once the emulation loop has stopped.
+     */
+    public void releaseCards() {
+        for (SlotCard card : slots) {
+            if (card != null) {
+                card.release();
+            }
+        }
+    }
+
     private MotherboardBus(SlotCard[] slots, boolean openAudioDevice) {
         speakerOutput = openAudioDevice ? new SpeakerOutput(speakerToggle) : new SpeakerOutput(speakerToggle, null);
         if (slots.length != 8) {

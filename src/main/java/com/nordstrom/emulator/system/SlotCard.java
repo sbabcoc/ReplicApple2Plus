@@ -138,6 +138,24 @@ public interface SlotCard {
     }
 
     /**
+     * This card's machine is being discarded: a Reboot has replaced it with
+     * one built from fresh cards. A card holding host resources -- sockets,
+     * files, threads -- lets go of them here, so the card that replaces it
+     * can take them up again (a listening port, say). Called once, on the
+     * thread performing the Reboot, after the old machine's emulation loop
+     * has stopped; no other method is called afterwards. Most cards hold
+     * nothing, which is the default.
+     * <p>
+     * Not called on a card configured only to check a slot configuration,
+     * which is discarded without running, nor at exit, where the host
+     * releases everything anyway. So {@link #configure} shouldn't take host
+     * resources: take them when guest software first needs them.
+     */
+    default void release() {
+        // most cards hold nothing on the host
+    }
+
+    /**
      * Whether this card has a ROM in its own $Cn00-$CnFF page. A card
      * without one (a pure RAM expansion, say) leaves that page undriven,
      * so reads there see the floating bus, exactly as with an empty slot,
