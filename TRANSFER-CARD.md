@@ -680,7 +680,10 @@ apart the way real cards did, by checking whether the output vector
 - **The listing path** is a few instructions in the `$Cn00` page: in
   phase 2 the character goes to register `$4` and nowhere else -- no
   echo, the screen cursor never moves (see below), nothing borrowed --
-  and every register is kept.
+  and every register is kept. The card keeps what's written to `$4` only
+  in phase 2: a write at any other time didn't come from a BASIC listing
+  -- another program probing the slots for its own card, say -- and is
+  ignored, so it can't turn into a listing to save.
 - **Saving:** the listing collects in the card's spool; once nothing has
   arrived for 1.5 seconds, a dialog, **Save Program Listing**, asks for
   the host file's name and folder, opening in the last folder used, else

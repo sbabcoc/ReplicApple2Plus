@@ -21,7 +21,8 @@ import java.util.Set;
  * whenever no session is open); {@code $1} write = completion code ending the
  * adapter's message; {@code $2} = data port; {@code $3} read = protocol
  * version plus "host available" bit, write = ROM bank select; {@code $4}
- * write = a printed character, for the {@link #printSpool print spool};
+ * write = a printed character, for the {@link #printSpool print spool},
+ * kept only while a listing is being captured;
  * {@code $5} = where the firmware has got to in typing a recipe, 0 when not
  * typing; {@code $6} = the listing capture's phase (0 idle, 1 typing, 2
  * capturing); {@code $7} write = trim the capture to its non-blank lines.
@@ -70,6 +71,7 @@ public final class HostTransferCard implements SlotCard {
     private int romBank;
     private int typing; // the firmware's place in a recipe; 0 = not typing
     private int phase;  // the listing capture: 0 idle, 1 typing the command, 2 capturing
+    private static final int CAPTURING = 2;
 
     @Override
     public String getShortName() {
@@ -211,7 +213,15 @@ public final class HostTransferCard implements SlotCard {
             case Protocol.REG_DATA -> fromAdapter.write(value);
             case Protocol.REG_COMPLETE -> complete(value & 0xFF);
             case Protocol.REG_STATUS -> romBank = value & 0xFF;
-            case Protocol.REG_PRINT -> printSpool.append(value & 0xFF);
+            case Protocol.REG_PRINT -> {
+                // Only the firmware's listing path prints, and only in phase 2. A
+                // write at any other time didn't come from a BASIC listing -- a
+                // program probing the slots for some other card, say -- and isn't
+                // offered for saving.
+                if (phase == CAPTURING) {
+                    printSpool.append(value & 0xFF);
+                }
+            }
             case Protocol.REG_TYPING -> typing = value & 0xFF;
             case Protocol.REG_PHASE -> phase = value & 0xFF;
             case Protocol.REG_TRIM -> printSpool.trimListing();

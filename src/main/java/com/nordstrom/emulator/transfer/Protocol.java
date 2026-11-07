@@ -21,7 +21,7 @@ public final class Protocol {
     public static final int REG_DATA = 0x2;
     /** Read: version and host-available bit; write: ROM bank select. */
     public static final int REG_STATUS = 0x3;
-    /** Write: the next printed character (PR#n). */
+    /** Write: the next printed character (PR#n); kept only while capturing (phase 2). */
     public static final int REG_PRINT = 0x4;
     /** Read/write: the firmware's place in a recipe it's typing; 0 = not typing. */
     public static final int REG_TYPING = 0x5;

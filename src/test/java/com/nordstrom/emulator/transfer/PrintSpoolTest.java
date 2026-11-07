@@ -32,10 +32,27 @@ class PrintSpoolTest {
     }
 
     @Test
-    void theCardsPrintRegisterFeedsTheSpool() {
+    void theCardsPrintRegisterFeedsTheSpoolWhileCapturing() {
         HostTransferCard card = new HostTransferCard();
+        card.writeIoSwitch(Protocol.REG_PHASE, 2); // capturing, as the firmware sets it
         card.writeIoSwitch(Protocol.REG_PRINT, 0xC1);
         assertArrayEquals(new byte[] {(byte) 0xC1}, card.printSpool().takeIfIdle(0));
+    }
+
+    /**
+     * A program probing the slots for an Uthernet II wrote $80 then $03 to
+     * the card's $C0n4 -- the print register -- with no listing under way,
+     * and the two bytes were offered as a program listing to save.
+     */
+    @Test
+    void printingOutsideACaptureIsIgnored() {
+        HostTransferCard card = new HostTransferCard();
+        card.writeIoSwitch(Protocol.REG_PRINT, 0x80);
+        card.writeIoSwitch(Protocol.REG_PRINT, 0x03);
+        assertFalse(card.printSpool().hasJob(), "phase 0: nothing to save");
+        card.writeIoSwitch(Protocol.REG_PHASE, 1); // typing LIST: its echo goes to the screen, not here
+        card.writeIoSwitch(Protocol.REG_PRINT, 0xCC);
+        assertFalse(card.printSpool().hasJob(), "phase 1: nothing to save");
     }
 
     @Test
