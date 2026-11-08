@@ -18,6 +18,16 @@ interface KeyboardPort {
     void send(int key);
 
     /**
+     * Presses a key with the shift-key mod's Shift held for it, as a person
+     * types a capital. A port with no shift-key mod to hold just presses it.
+     *
+     * @param key the key's Apple II ASCII value
+     */
+    default void sendShifted(int key) {
+        send(key);
+    }
+
+    /**
      * Whether a key sent is still waiting: the CPU hasn't cleared the
      * strobe since. Sending another now would replace a key software never
      * saw -- the II+ keyboard is a single-character latch with no buffer.

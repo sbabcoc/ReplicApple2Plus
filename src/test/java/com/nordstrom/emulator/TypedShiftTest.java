@@ -83,6 +83,18 @@ class TypedShiftTest {
     }
 
     @Test
+    void pasteAndTypeFileSendCapitalsShiftedToo() {
+        TypingFeeder feeder = recall.typing();
+        feeder.enqueue("Hi");
+        feeder.tick(1);
+        assertEquals(HELD, recall.read(SHIFT_WIRE), "the pasted capital, shifted");
+        assertEquals(0xC8, takeKey());
+        feeder.tick(1);
+        assertEquals(UP, recall.read(SHIFT_WIRE), "the pasted lowercase letter, not");
+        assertEquals(0xC9, takeKey());
+    }
+
+    @Test
     void theKeyboardSendsCapitalsShiftedAndLowercaseNot() {
         KeyboardInputListener listener = new KeyboardInputListener(recall, bus.shiftKeyMod(), Runnable::run);
         JPanel source = new JPanel();

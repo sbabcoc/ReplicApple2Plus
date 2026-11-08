@@ -42,6 +42,35 @@ class TypingFeederTest {
     }
 
     @Test
+    void capitalsAreTypedWithShiftAndLowercaseWithout() {
+        List<String> sent = new ArrayList<>();
+        KeyboardRegister keyboard = new KeyboardRegister();
+        KeyboardPort recording = new KeyboardPort() {
+            @Override public void send(int key) {
+                sent.add(String.valueOf((char) key));
+                keyboard.keyPressed(key);
+            }
+
+            @Override public void sendShifted(int key) {
+                sent.add("Shift+" + (char) key);
+                keyboard.keyPressed(key);
+            }
+
+            @Override public boolean keyWaiting() {
+                return keyboard.isStrobeSet();
+            }
+        };
+        TypingFeeder feeder = new TypingFeeder(recording);
+        feeder.enqueue("Hi 5!");
+        for (int i = 0; i < 100 && feeder.isTyping(); i++) {
+            feeder.tick(1);
+            KeyboardTestAccess.clearStrobe(keyboard);
+        }
+        assertEquals(List.of("Shift+H", "I", " ", "5", "!"), sent,
+            "only the capital goes shifted; all reach the II+ keyboard as uppercase");
+    }
+
+    @Test
     void textIsMappedExactlyLikeTypedText() {
         // Lowercase folds to uppercase; tab and non-ASCII are skipped, the same as KeyboardMapper does for live typing.
         assertArrayEquals(new int[] {'P', 'R', 'I', 'N', 'T', ' ', '"', 'H', 'I', '"'},

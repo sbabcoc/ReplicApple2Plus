@@ -219,7 +219,8 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
      *
      * @param key the key's Apple II ASCII value
      */
-    void sendShifted(int key) {
+    @Override
+    public void sendShifted(int key) {
         send(key);
         shiftKeyMod.setShiftTyped(true);
         shiftedKeyWaiting = true;

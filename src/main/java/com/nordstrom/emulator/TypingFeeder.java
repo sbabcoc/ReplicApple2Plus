@@ -50,6 +50,8 @@ final class TypingFeeder {
     /** How often the screen is sampled while waiting. */
     private static final int SAMPLE_CYCLES = 10_000;
     private static final int RETURN = 0x0D;
+    /** Marks a queued key typed from a capital letter: it goes with Shift held. */
+    private static final int SHIFTED = 0x100;
 
     private final KeyboardPort port;
     private volatile IntSupplier screenSignature; // null: no screen to watch, so no wait
@@ -82,6 +84,20 @@ final class TypingFeeder {
      * @return the Apple II ASCII values to press, in order
      */
     static int[] toKeystrokes(CharSequence text) {
+        int[] keys = convert(text);
+        for (int i = 0; i < keys.length; i++) {
+            keys[i] &= ~SHIFTED;
+        }
+        return keys;
+    }
+
+    /**
+     * {@link #toKeystrokes}, with each key typed from a capital letter
+     * marked {@link #SHIFTED}: as on the live keyboard, a capital goes with
+     * the shift-key mod's Shift held, so software that reads the mod tells
+     * it from lowercase.
+     */
+    private static int[] convert(CharSequence text) {
         int[] keys = new int[text.length()];
         int count = 0;
         for (int i = 0; i < text.length(); i++) {
@@ -95,7 +111,7 @@ final class TypingFeeder {
             }
             int mapped = KeyboardMapper.mapTypedCharacter(c);
             if (mapped >= 0) {
-                keys[count++] = mapped;
+                keys[count++] = (c >= 'A' && c <= 'Z') ? mapped | SHIFTED : mapped;
             }
         }
         return java.util.Arrays.copyOf(keys, count);
@@ -107,7 +123,7 @@ final class TypingFeeder {
      * @param text the text to type
      */
     void enqueue(CharSequence text) {
-        enqueueKeys(toKeystrokes(text));
+        enqueueKeys(convert(text));
     }
 
     /**
@@ -150,7 +166,12 @@ final class TypingFeeder {
             return;
         }
         int key = pending.poll();
-        port.send(key);
+        if ((key & SHIFTED) != 0) {
+            key &= ~SHIFTED;
+            port.sendShifted(key);
+        } else {
+            port.send(key);
+        }
         typed++;
         if (key == RETURN && screenSignature != null) {
             awaitingSettle = true;
