@@ -43,10 +43,22 @@ final class KeyboardInputListener implements KeyListener {
         this.emulationThread = emulationThread;
     }
 
+    /**
+     * A capital letter goes with the shift-key mod's Shift held for it,
+     * whatever the host says about its own Shift key: an on-screen keyboard
+     * sends a capital as a capital, with no Shift key held around it, or
+     * with one released before the program reads the key.
+     */
     @Override
     public void keyTyped(KeyEvent e) {
-        int mapped = KeyboardMapper.mapTypedCharacter(e.getKeyChar());
-        if (mapped >= 0) {
+        char c = e.getKeyChar();
+        int mapped = KeyboardMapper.mapTypedCharacter(c);
+        if (mapped < 0) {
+            return;
+        }
+        if (c >= 'A' && c <= 'Z') {
+            emulationThread.execute(() -> device.sendShifted(mapped));
+        } else {
             emulationThread.execute(() -> device.send(mapped));
         }
     }

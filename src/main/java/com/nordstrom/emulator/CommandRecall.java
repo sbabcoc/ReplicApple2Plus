@@ -1,6 +1,7 @@
 package com.nordstrom.emulator;
 
 import com.nordstrom.emulator.system.KeyboardRegister;
+import com.nordstrom.emulator.system.ShiftKeyMod;
 
 import java.util.List;
 
@@ -129,11 +130,21 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
     private static final int LEFT_ARROW = 0x08;
     private static final int SPACE = 0x20;
     private static final int RETURN = 0x0D;
+    /**
+     * How long Shift stays down after a capital's strobe clears, in bus
+     * accesses (about one per cycle): some 50 ms, as a finger lifts off
+     * Shift after the key, so software that reads the shift-key mod after
+     * taking the key still sees it held.
+     */
+    static final int SHIFT_RELEASE_ACCESSES = 50_000;
 
     private final MemoryBus board;
     private final KeyboardRegister keyboard;
     private final TypingFeeder feeder;
     private final CommandHistory history;
+    private final ShiftKeyMod shiftKeyMod;
+    private boolean shiftedKeyWaiting; // the key waiting was sent with Shift held for it
+    private int shiftRelease = -1;     // accesses until that Shift lets go, once the key is taken
 
     // What has been seen on the pins.
     private final int[] buffer = new int[0x100]; // the CPU's writes to $0200-$02FF
@@ -174,11 +185,13 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
      * @param board    the motherboard: the socket the CPU would otherwise plug into
      * @param keyboard the motherboard side of the keyboard connector, where keys sent through this device arrive
      * @param history  the history recorded into and recalled from
+     * @param shiftKeyMod the shift-key mod, whose Shift a capital is sent with
      */
-    CommandRecall(MemoryBus board, KeyboardRegister keyboard, CommandHistory history) {
+    CommandRecall(MemoryBus board, KeyboardRegister keyboard, CommandHistory history, ShiftKeyMod shiftKeyMod) {
         this.board = board;
         this.keyboard = keyboard;
         this.history = history;
+        this.shiftKeyMod = shiftKeyMod;
         this.feeder = new TypingFeeder(this);
         feeder.setScreenSignature(this::screenWrites);
     }
@@ -192,8 +205,39 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
 
     @Override
     public void send(int key) {
+        releaseShift();
         keyboard.keyPressed(key);
         keyWaiting = true;
+    }
+
+    /**
+     * Presses a key with Shift held for it, as a person types a capital:
+     * Shift goes down first, and lets go {@link #SHIFT_RELEASE_ACCESSES}
+     * after the CPU takes the key -- or as soon as another key is sent. The
+     * host's own Shift key, if it's held, holds the shift-key mod's wire
+     * regardless.
+     *
+     * @param key the key's Apple II ASCII value
+     */
+    void sendShifted(int key) {
+        send(key);
+        shiftKeyMod.setShiftTyped(true);
+        shiftedKeyWaiting = true;
+    }
+
+    private void releaseShift() {
+        if (shiftedKeyWaiting || shiftRelease >= 0) {
+            shiftKeyMod.setShiftTyped(false);
+            shiftedKeyWaiting = false;
+            shiftRelease = -1;
+        }
+    }
+
+    /** Counts down to letting go of a capital's Shift, once its key has been taken. */
+    private void countShiftRelease() {
+        if (shiftRelease > 0 && --shiftRelease == 0) {
+            releaseShift();
+        }
     }
 
     @Override
@@ -210,6 +254,7 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
 
     @Override
     public int fetchOpcode(int address) {
+        countShiftRelease();
         int opcode = board.fetchOpcode(address);
         previous = (returning && interrupts > 0) ? interrupted[--interrupts] : instruction;
         returning = opcode == RTI;
@@ -258,6 +303,7 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
 
     @Override
     public int read(int address) {
+        countShiftRelease();
         int value = board.read(address);
         if (address == PROMPT) {
             promptByte = value;
@@ -278,6 +324,7 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
 
     @Override
     public void write(int address, int value) {
+        countShiftRelease();
         board.write(address, value);
         if ((address & 0xFF00) == STACK_PAGE) {
             stackWrites++;
@@ -349,6 +396,10 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
 
     private void strobeCleared() {
         keyWaiting = false;
+        if (shiftedKeyWaiting) {
+            shiftedKeyWaiting = false;
+            shiftRelease = SHIFT_RELEASE_ACCESSES;
+        }
         if (active && ready && keyboardByte == (0x80 | RETURN)) {
             active = false;
             ready = false;

@@ -69,6 +69,7 @@ public final class ShiftKeyMod {
 
     private Wiring wiring = Wiring.NOT_CONNECTED;
     private boolean shiftHeld;
+    private boolean shiftTyped;
     private boolean controlHeld;
 
     /**
@@ -93,6 +94,18 @@ public final class ShiftKeyMod {
      */
     public void setShiftHeld(boolean held) {
         shiftHeld = held;
+    }
+
+    /**
+     * Sets whether Shift is held on behalf of a capital letter the host
+     * delivered without a Shift key of its own -- an on-screen keyboard
+     * sends a capital as a capital, with no Shift held around it. The wire
+     * reads held while either this or the host's Shift key is.
+     *
+     * @param held true while held
+     */
+    public void setShiftTyped(boolean held) {
+        shiftTyped = held;
     }
 
     /**
@@ -121,7 +134,7 @@ public final class ShiftKeyMod {
      * @return 0x00 while the wired key is held, 0x80 while it's up
      */
     int read(int input) {
-        boolean held = (input == wiring.shiftInput) ? shiftHeld : controlHeld;
+        boolean held = (input == wiring.shiftInput) ? (shiftHeld || shiftTyped) : controlHeld;
         return held ? 0x00 : 0x80;
     }
 }

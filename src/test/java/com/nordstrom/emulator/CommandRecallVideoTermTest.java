@@ -42,7 +42,7 @@ class CommandRecallVideoTermTest {
         slots[3] = card;
         bus = MotherboardBus.withoutAudio(slots);
         RomBoot.coldStart(bus);
-        recall = new CommandRecall(bus, bus.keyboardRegister(), history);
+        recall = new CommandRecall(bus, bus.keyboardRegister(), history, bus.shiftKeyMod());
         typing = recall.typing();
         clock = new SystemClock(new Cpu6502(recall, 0xFFFC));
         clock.addCycleListener(bus.videoScanner()::tick);

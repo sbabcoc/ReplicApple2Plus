@@ -26,7 +26,7 @@ class CommandRecallTest {
 
     private final MotherboardBus bus = MotherboardBus.withoutAudio(new SlotCard[8]);
     private final CommandHistory history = new CommandHistory();
-    private final CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), history);
+    private final CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), history, bus.shiftKeyMod());
     private final TypingFeeder typing = recall.typing();
     private final FetchProbe probe = new FetchProbe(recall);
     private final Cpu6502 cpu = new Cpu6502(probe, 0xFFFC);

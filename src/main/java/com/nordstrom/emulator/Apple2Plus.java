@@ -818,7 +818,7 @@ public final class Apple2Plus {
         bus.shiftKeyMod().setWiring(ShiftKeyModSetting.remembered());
         // a device between the CPU and its socket, and on the keyboard cable: command history, and the
         // typing behind Paste and Type File...
-        CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), COMMAND_HISTORY);
+        CommandRecall recall = new CommandRecall(bus, bus.keyboardRegister(), COMMAND_HISTORY, bus.shiftKeyMod());
         TypingFeeder typing = recall.typing();
         Cpu6502 cpu = new Cpu6502(recall, 0xFFFC); // the real, unmodified Autostart reset vector
         SystemClock clock = new SystemClock(cpu);
