@@ -61,3 +61,5 @@ Thumbs.db
 # tooling, not Apple firmware -- the blanket *.bin rule above was aimed at
 # copyrighted ROM/disk assets and would otherwise catch this incidentally.
 !src/test/resources/6502_functional_test.bin
+
+CLAUDE.md
