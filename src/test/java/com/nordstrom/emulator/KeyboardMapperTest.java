@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.awt.event.KeyEvent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Locks in KeyboardMapper's ASCII mapping, uppercase-forcing, and Ctrl-combination rules. */
 class KeyboardMapperTest {
@@ -64,5 +66,16 @@ class KeyboardMapperTest {
     void letterKeyWithoutCtrlIsUnmappedBySpecialKeyHandler() {
         // Plain letters are handled by mapTypedCharacter, not mapSpecialKey
         assertEquals(-1, KeyboardMapper.mapSpecialKey(KeyEvent.VK_A, false));
+    }
+
+    @Test
+    void theKeyboardHasNoKeysForBracketsBracesAndTheirKin() {
+        for (char c : "[\\_`{|}~".toCharArray()) {
+            assertFalse(KeyboardMapper.keyboardHasKey(KeyboardMapper.mapTypedCharacter(c)), String.valueOf(c));
+        }
+        for (char c : "]^@!(AZ09 ".toCharArray()) {
+            assertTrue(KeyboardMapper.keyboardHasKey(KeyboardMapper.mapTypedCharacter(c)), String.valueOf(c));
+        }
+        assertTrue(KeyboardMapper.keyboardHasKey(KeyboardMapper.mapSpecialKey(KeyEvent.VK_V, true)));
     }
 }

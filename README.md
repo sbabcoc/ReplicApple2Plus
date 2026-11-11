@@ -71,6 +71,14 @@ Companion documents:
 
 **Input**
 - Keyboard, with the II+'s single-character latch and strobe.
+- Characters the II+ keyboard has no keys for -- `[ \ _ { } | ~` and
+  the backquote -- reach every program, from `$C000` like any key. Type
+  **Ctrl-V** and then a key standing for one: `(` `[`, `)` `]`, `/` `\`,
+  `-` `_`, `'` the backquote, `<` `{`, `>` `}`, `!` `|`, `^` `~`. Ctrl-V
+  twice types Ctrl-V; any other key after Ctrl-V types itself. The
+  host's own keys for them work too. Like command history, this is the
+  device on the keyboard cable, which puts the codes on the connector's
+  seven data lines itself.
 - Command history at the Apple's own prompts. The host's **Up** and
   **Down** arrows -- keys the II+ keyboard doesn't have -- step through
   lines entered before at the same prompt: Applesoft's `]`, Integer

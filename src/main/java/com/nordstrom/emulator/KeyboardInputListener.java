@@ -22,6 +22,11 @@ import java.util.concurrent.Executor;
  * The Up and Down arrows, which the II+ keyboard doesn't have and
  * {@link KeyboardMapper} leaves unmapped, step through command history
  * ({@link CommandRecall}); away from a command prompt they still do nothing.
+ * <p>
+ * Keys the II+ keyboard has go to the device as the keyboard's
+ * ({@link CommandRecall#keyboardKey}), which composes Ctrl-V sequences;
+ * host characters it has no key for ({@code [ \ _ ` { | } ~}) go to the
+ * device to supply itself ({@link CommandRecall#supply}), like Up and Down.
  */
 final class KeyboardInputListener implements KeyListener {
 
@@ -57,9 +62,11 @@ final class KeyboardInputListener implements KeyListener {
             return;
         }
         if (c >= 'A' && c <= 'Z') {
-            emulationThread.execute(() -> device.sendShifted(mapped));
+            emulationThread.execute(() -> device.keyboardKeyShifted(mapped));
+        } else if (KeyboardMapper.keyboardHasKey(mapped)) {
+            emulationThread.execute(() -> device.keyboardKey(mapped));
         } else {
-            emulationThread.execute(() -> device.send(mapped));
+            emulationThread.execute(() -> device.supply(mapped));
         }
     }
 
@@ -79,7 +86,7 @@ final class KeyboardInputListener implements KeyListener {
         }
         int mapped = KeyboardMapper.mapSpecialKey(e.getKeyCode(), e.isControlDown());
         if (mapped >= 0) {
-            emulationThread.execute(() -> device.send(mapped));
+            emulationThread.execute(() -> device.keyboardKey(mapped));
         }
     }
 

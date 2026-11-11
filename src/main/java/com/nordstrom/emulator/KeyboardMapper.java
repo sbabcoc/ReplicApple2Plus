@@ -37,6 +37,12 @@ import java.awt.event.KeyEvent;
  * BASIC/Monitor prompt (letters, digits, common punctuation, RETURN,
  * left- and right-arrow, ESC, and Ctrl-combinations) -- not full fidelity to every
  * key the real keyboard and its era-specific quirks had.
+ * <p>
+ * {@link #mapTypedCharacter} also maps the host characters the II+
+ * keyboard has no keys for ({@code [ \ _ `} and {@code { | } ~}), since
+ * Paste and Type File... type them; {@link #keyboardHasKey} tells them
+ * apart, so a host key the II+ lacks goes to the device on the keyboard
+ * cable rather than being sent as if the keyboard had it.
  */
 public final class KeyboardMapper {
 
@@ -72,6 +78,21 @@ public final class KeyboardMapper {
             case KeyEvent.VK_RIGHT -> 0x15;
             case KeyEvent.VK_ESCAPE -> 0x1B;
             default -> -1;
+        };
+    }
+
+    /**
+     * Whether the II+ keyboard has a key for {@code code}, a value from
+     * {@link #mapTypedCharacter} or {@link #mapSpecialKey}. It sends only
+     * uppercase, and has no key for {@code [ \ _ `} or {@code { | } ~}.
+     *
+     * @param code an Apple II ASCII value, 0-127
+     * @return false for a code only a device on the keyboard cable can supply
+     */
+    public static boolean keyboardHasKey(int code) {
+        return switch (code) {
+            case 0x5B, 0x5C, 0x5F, 0x60, 0x7B, 0x7C, 0x7D, 0x7E -> false;
+            default -> code < 0x61 || code > 0x7A;
         };
     }
 

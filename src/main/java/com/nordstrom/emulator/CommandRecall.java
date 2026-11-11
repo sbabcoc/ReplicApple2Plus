@@ -89,6 +89,26 @@ import java.util.List;
  * Lines are recorded only if no Paste or Type File... was typing when
  * their prompt appeared, so typing a file in doesn't fill the history.
  * <p>
+ * <b>Characters the II+ keyboard has no keys for</b> -- {@code [ \ _ `}
+ * and {@code { | } ~} -- the device puts on the connector itself: its data
+ * lines carry all seven bits, though the keyboard's encoder never sends
+ * these codes. Software anywhere reads them from {@code $C000} like any
+ * key. They come in two ways:
+ * <ul>
+ *   <li><b>Typed on the II+ keyboard</b> as Ctrl-V and then a key standing
+ *       for one, after Unix's literal-next key; the pairs for
+ *       {@code [ \ { | }} follow C's trigraphs, which exist for keyboards
+ *       lacking them ({@link #COMPOSED}). The device holds the Ctrl-V back
+ *       and sends the composed code in place of the second key. Ctrl-V
+ *       twice sends Ctrl-V; any other key after Ctrl-V sends itself. Only
+ *       keys every II+ keyboard has are used, so it needs nothing else --
+ *       no shift-key mod, no software.</li>
+ *   <li><b>From host keys</b> the II+ keyboard lacks, which the device
+ *       takes, as it takes Up and Down ({@link #supply}).</li>
+ * </ul>
+ * Paste, Type File... and recalled lines go straight to the connector
+ * ({@link #send}), never composed.
+ * <p>
  * Threading: everything runs on the emulation thread -- the bus accesses
  * as the CPU makes them, {@link #send}, {@link #older} and {@link #newer}
  * posted by the keyboard listener.
@@ -138,11 +158,34 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
      */
     static final int SHIFT_RELEASE_ACCESSES = 50_000;
 
+    /** Ctrl-V: the key that starts a composed character. */
+    static final int COMPOSE = 0x16;
+
+    /**
+     * What the key after Ctrl-V sends, by that key's code, or -1 where it
+     * sends itself.
+     */
+    static final int[] COMPOSED = new int[0x80];
+
+    static {
+        java.util.Arrays.fill(COMPOSED, -1);
+        COMPOSED['('] = '[';
+        COMPOSED[')'] = ']';
+        COMPOSED['/'] = '\\';
+        COMPOSED['-'] = '_';
+        COMPOSED['\''] = '`';
+        COMPOSED['<'] = '{';
+        COMPOSED['>'] = '}';
+        COMPOSED['!'] = '|';
+        COMPOSED['^'] = '~';
+    }
+
     private final MemoryBus board;
     private final KeyboardRegister keyboard;
     private final TypingFeeder feeder;
     private final CommandHistory history;
     private final ShiftKeyMod shiftKeyMod;
+    private boolean composing;         // the keyboard sent Ctrl-V: its next key is composed
     private boolean shiftedKeyWaiting; // the key waiting was sent with Shift held for it
     private int shiftRelease = -1;     // accesses until that Shift lets go, once the key is taken
 
@@ -224,6 +267,57 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
         send(key);
         shiftKeyMod.setShiftTyped(true);
         shiftedKeyWaiting = true;
+    }
+
+    /**
+     * A key from the II+ keyboard: composed if it follows Ctrl-V, held
+     * back if it is a Ctrl-V starting one, otherwise sent.
+     *
+     * @param key the key's Apple II ASCII value
+     */
+    void keyboardKey(int key) {
+        fromKeyboard(key, false);
+    }
+
+    /**
+     * A key from the II+ keyboard, typed with Shift held for it, as a
+     * capital is ({@link #sendShifted}); composed or held back as by
+     * {@link #keyboardKey}.
+     *
+     * @param key the key's Apple II ASCII value
+     */
+    void keyboardKeyShifted(int key) {
+        fromKeyboard(key, true);
+    }
+
+    /**
+     * A character the II+ keyboard has no key for, from a host key: the
+     * device sends it, and drops a Ctrl-V the keyboard sent before it.
+     *
+     * @param key the character's Apple II ASCII value
+     */
+    void supply(int key) {
+        composing = false;
+        send(key);
+    }
+
+    private void fromKeyboard(int key, boolean shifted) {
+        if (composing) {
+            composing = false;
+            int composed = COMPOSED[key & 0x7F];
+            if (composed >= 0) {
+                send(composed);
+                return;
+            }
+        } else if (key == COMPOSE) {
+            composing = true;
+            return;
+        }
+        if (shifted) {
+            sendShifted(key);
+        } else {
+            send(key);
+        }
     }
 
     private void releaseShift() {
