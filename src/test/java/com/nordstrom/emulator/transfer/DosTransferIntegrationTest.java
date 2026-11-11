@@ -122,6 +122,10 @@ class DosTransferIntegrationTest {
         Disk2Controller disk2 = new Disk2Controller();
         slots[6] = disk2;
         disk2.removableDrives().get(0).insert(disk);
+        // Preserved images are often write-protected, as the original disks
+        // were; these tests write to the disk, and its protection isn't
+        // what they test, so the temp copy is made writable.
+        disk2.removableDrives().get(0).setWriteProtected(false);
         try (MotherboardBus b = MotherboardBus.withoutAudio(slots)) {
             bus = b;
             RomBoot.coldStart(bus);

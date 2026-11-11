@@ -67,6 +67,10 @@ final class MachineHarness implements AutoCloseable {
         Disk2Controller disk2 = new Disk2Controller();
         slots[6] = disk2;
         disk2.removableDrives().get(0).insert(disk);
+        // Preserved images are often write-protected, as the original disks
+        // were; these tests write to the disk, and its protection isn't
+        // what they test, so the temp copy is made writable.
+        disk2.removableDrives().get(0).setWriteProtected(false);
         bus = MotherboardBus.withoutAudio(slots);
         RomBoot.coldStart(bus);
         cpu = new Cpu6502(bus, 0xFFFC);
