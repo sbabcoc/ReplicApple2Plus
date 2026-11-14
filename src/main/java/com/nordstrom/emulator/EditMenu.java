@@ -34,7 +34,8 @@ import java.util.concurrent.Executor;
  * Deliberately no keyboard shortcuts: these are menu actions only.
  * <p>
  * Item enablement is refreshed each time the menu opens, the same pattern
- * {@link DiskMenu} uses: Copy Screen Text only when some row on screen is text,
+ * {@link DiskMenu} uses: Copy Screen Text only when some row on screen is text
+ * or full-screen hi-res is showing marked text (see {@link ScreenText}),
  * Paste only when the clipboard holds text.
  */
 final class EditMenu {
@@ -82,7 +83,10 @@ final class EditMenu {
         menu.addMenuListener(new MenuListener() {
             @Override
             public void menuSelected(MenuEvent e) {
-                copyText.setEnabled(screen.showingEightyColumns() || anyTextRow(bus.scanlineModes().completedFrame()));
+                ScanlineModes.LineMode[] frame = bus.scanlineModes().completedFrame();
+                // Searching memory for the marker from this thread is the same accepted read race as painting.
+                copyText.setEnabled(screen.showingEightyColumns() || anyTextRow(frame)
+                    || ScreenText.markedTextShown(bus, frame));
                 paste.setEnabled(clipboardHasText());
             }
 

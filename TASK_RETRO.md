@@ -1253,6 +1253,35 @@ each failing when its rule is broken, and by rendering the patterns to
 images. Not yet seen on real hardware. The color path keeps the simplified
 artifact model, with lo-res as solid blocks.
 
+### Copy Screen Text on Soft-70 screens -- done
+
+At Scott's request, for a2lib's Soft-70 display (70 of 80 columns drawn
+on hi-res page 1), whose text never reaches the text page. Recognising
+characters in the hi-res image was rejected as too complicated; instead
+a2lib writes a documented 16-byte marker directly before its 80 x 24
+buffer (a2lib DESIGN.md 3.9), and Copy finds it in memory -- the same
+kind of memory read the text-page copy already does, with no CPU hooks.
+See `system/MarkedScreenText.java` and `system/ScreenText.java`.
+
+- **When:** only when every scan line of the completed frame is hi-res.
+  Then `$0800`-`$1FFF` is searched for `A2SCR80` followed by version 1;
+  if found, all 80 x 24 characters are copied, trimmed as the text-page
+  copy is; if not, nothing is, as before. Mixed mode and text mode are
+  unchanged. Copy Screen Text is enabled in full-screen hi-res only when
+  a marker is found; that search runs on the event thread, the same
+  accepted read race as painting.
+- **The buffer** is read from marker + 16, where the format places it,
+  not from the marker's address field: a stale marker's field could point
+  into the I/O space, where reads have side effects.
+- **Decoding:** byte XOR `$A0`, bit 7 dropped; `$00`-`$1F` become
+  `$40`-`$5F`. Lowercase is kept, since Soft-70's font has it.
+- **Accepted limit:** a marker left by a program that crashed or was
+  reset reads as live, as the format documents.
+- **Verified** by `ScreenTextTest`: 80 columns with lowercase, inverse,
+  a control code and text beyond column 70; an all-zero buffer; markers
+  with another version or outside the range ignored; a marker ignored in
+  mixed and lo-res modes.
+
 ---
 
 ## Component development history (moved from README.md)
