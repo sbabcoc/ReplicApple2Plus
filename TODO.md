@@ -35,6 +35,14 @@ Left: a disk-full install hasn't been run; and when the protocol
 version changes, the menu item gains the reinstall of an older XFER
 (TRANSFER-CARD.md 8.5).
 
+## Hi-res monochrome: the palette bit's half-pixel shift
+
+A monochrome monitor shows hi-res at 560 dots, and a byte with bit 7 set
+draws its pixels one dot later. `ScreenPanel` already paints every line
+as 560 dots (lo-res uses them), but `HiResRenderer.monochrome` still
+gives each lit bit both dots of its pixel. Left: shift palette-bit bytes
+by a dot, including how the last dot of such a byte meets the next byte.
+
 ## Known issues and leads
 
 Problems observed, limitations accepted, and leads noticed in passing.

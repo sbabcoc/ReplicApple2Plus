@@ -66,6 +66,11 @@ Companion documents:
 - Text (normal, inverse and flashing), lo-res, and hi-res graphics with
   NTSC artifact color; page 1/page 2 and mixed mode, tracked per scan
   line so mid-frame mode changes render correctly.
+- A color or monochrome (white, green or amber) monitor, chosen at any
+  time from the toolbar and remembered. On a color monitor text shows
+  white, as the II+'s color killer makes it; on a monochrome one, lo-res
+  colors show as their real dot patterns and every lit hi-res bit in the
+  phosphor's color.
 - Speaker output to the host's audio device, which also paces emulation
   to real time (with no audio device, a timer paces it instead).
 
@@ -162,6 +167,9 @@ Companion documents:
     Switch.
 
   The chosen mode is remembered across Reboot and launches.
+  In the main window the 80 columns follow the main monitor's choice;
+  the Dual Monitor window has its own white, green or amber monitor
+  (green by default).
 - Peripherals are plug-ins: cards are discovered through Java's standard
   `ServiceLoader`, and new ones can be added from external jars without
   rebuilding the emulator.
@@ -211,8 +219,9 @@ Companion documents:
 - Typing that runs longer than a moment shows a progress window, with a
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
-  cycle that keeps the inserted disks), and -- with a VideoTerm
-  configured -- the display mode drop-down.
+  cycle that keeps the inserted disks), the monitor drop-down, and --
+  with a VideoTerm configured -- the display mode drop-down and the
+  80-column monitor's.
 
 ## Architecture
 

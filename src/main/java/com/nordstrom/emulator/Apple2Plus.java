@@ -836,7 +836,11 @@ public final class Apple2Plus {
             videoTerm.setDisplay(DisplayModeSelector.rememberedDisplay()); // the mode last chosen from the toolbar
         }
         ScreenPanel screen = new ScreenPanel(bus, bus.scanlineModes(), videoTerm);
+        screen.setMonitor(MonitorSelector.remembered(MonitorSelector.Monitor.MAIN));
         EightyColumnView eightyColumns = videoTerm != null ? new EightyColumnView(videoTerm, screen.getPreferredSize()) : null;
+        if (eightyColumns != null) {
+            eightyColumns.setMonitor(MonitorSelector.remembered(MonitorSelector.Monitor.EIGHTY_COLUMN));
+        }
 
         int[] ticksSinceFlash = {0}; // touched only by the emulation thread
         EmulationLoop loop = new EmulationLoop(clock::step, CYCLES_PER_TICK, TICK_NANOS,
@@ -868,14 +872,27 @@ public final class Apple2Plus {
         padPoller.start();
 
         JToolBar toolbar = (onReboot != null) ? ToolbarControls.build(cpu, bus::resetCards, loop, onReboot) : null;
+        if (toolbar != null) {
+            new MonitorSelector(MonitorSelector.Monitor.MAIN, type -> {
+                screen.setMonitor(type);
+                screen.repaint();
+            }).addTo(toolbar);
+        }
         DisplayModeSelector displayModes = null;
         if (toolbar != null && videoTerm != null) {
             VideoTerm card = videoTerm;
+            MonitorSelector eightyColumnMonitor = new MonitorSelector(MonitorSelector.Monitor.EIGHTY_COLUMN, type -> {
+                eightyColumns.setMonitor(type);
+                eightyColumns.repaint();
+            });
+            eightyColumnMonitor.setEnabled(card.display() == VideoTerm.Display.SEPARATE);
             displayModes = new DisplayModeSelector(card, () -> {
                 updateEightyColumnWindow(frame, card);
+                eightyColumnMonitor.setEnabled(card.display() == VideoTerm.Display.SEPARATE);
                 screen.repaint();
             });
             displayModes.addTo(toolbar);
+            eightyColumnMonitor.addTo(toolbar);
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, recall, eightyColumns, displayModes,

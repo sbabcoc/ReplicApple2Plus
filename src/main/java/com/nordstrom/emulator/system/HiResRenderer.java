@@ -78,31 +78,56 @@ public final class HiResRenderer {
      */
     public static Color[][] render(MemoryBus bus, VideoSoftSwitches videoSoftSwitches) {
         Color[][] pixels = new Color[LINES][COLUMNS * PIXELS_PER_BYTE];
-        int pageBase = videoSoftSwitches.isPage2() ? 0x4000 : 0x2000;
+        int pageBase = pageBase(videoSoftSwitches);
 
         for (int y = 0; y < LINES; y++) {
-            int rowBase = pageBase + (y & 7) * 0x400 + ((y >> 3) & 7) * 0x80 + (y >> 6) * 0x28;
-
             // Decode the whole line's bits first (plus each bit's own
             // palette flag) so the white-merge rule can look at real
             // neighboring bits, including across a byte boundary.
             boolean[] bit = new boolean[COLUMNS * PIXELS_PER_BYTE];
             boolean[] palette = new boolean[COLUMNS * PIXELS_PER_BYTE];
-            for (int col = 0; col < COLUMNS; col++) {
-                int b = bus.read(rowBase + col) & 0xFF;
-                boolean paletteBit = (b & 0x80) != 0;
-                for (int p = 0; p < PIXELS_PER_BYTE; p++) {
-                    int x = col * PIXELS_PER_BYTE + p;
-                    bit[x] = ((b >> p) & 1) != 0;
-                    palette[x] = paletteBit;
-                }
-            }
+            decodeLine(bus, pageBase, y, bit, palette);
 
             for (int x = 0; x < bit.length; x++) {
                 pixels[y][x] = colorAt(bit, palette, x);
             }
         }
         return pixels;
+    }
+
+    /**
+     * Renders the current hi-res screen as a monochrome monitor shows it:
+     * every "on" bit lit, whatever its neighbors and palette bit.
+     *
+     * @param bus the memory bus to read screen bytes from
+     * @param videoSoftSwitches which page is active
+     * @return a {@link #LINES} x (COLUMNS*PIXELS_PER_BYTE) grid; true means a lit pixel
+     */
+    public static boolean[][] monochrome(MemoryBus bus, VideoSoftSwitches videoSoftSwitches) {
+        boolean[][] pixels = new boolean[LINES][COLUMNS * PIXELS_PER_BYTE];
+        int pageBase = pageBase(videoSoftSwitches);
+        boolean[] palette = new boolean[COLUMNS * PIXELS_PER_BYTE];
+        for (int y = 0; y < LINES; y++) {
+            decodeLine(bus, pageBase, y, pixels[y], palette);
+        }
+        return pixels;
+    }
+
+    private static int pageBase(VideoSoftSwitches videoSoftSwitches) {
+        return videoSoftSwitches.isPage2() ? 0x4000 : 0x2000;
+    }
+
+    private static void decodeLine(MemoryBus bus, int pageBase, int y, boolean[] bit, boolean[] palette) {
+        int rowBase = pageBase + (y & 7) * 0x400 + ((y >> 3) & 7) * 0x80 + (y >> 6) * 0x28;
+        for (int col = 0; col < COLUMNS; col++) {
+            int b = bus.read(rowBase + col) & 0xFF;
+            boolean paletteBit = (b & 0x80) != 0;
+            for (int p = 0; p < PIXELS_PER_BYTE; p++) {
+                int x = col * PIXELS_PER_BYTE + p;
+                bit[x] = ((b >> p) & 1) != 0;
+                palette[x] = paletteBit;
+            }
+        }
     }
 
     private static Color colorAt(boolean[] bit, boolean[] palette, int x) {
