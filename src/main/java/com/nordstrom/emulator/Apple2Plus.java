@@ -881,18 +881,11 @@ public final class Apple2Plus {
         DisplayModeSelector displayModes = null;
         if (toolbar != null && videoTerm != null) {
             VideoTerm card = videoTerm;
-            MonitorSelector eightyColumnMonitor = new MonitorSelector(MonitorSelector.Monitor.EIGHTY_COLUMN, type -> {
-                eightyColumns.setMonitor(type);
-                eightyColumns.repaint();
-            });
-            eightyColumnMonitor.setEnabled(card.display() == VideoTerm.Display.SEPARATE);
             displayModes = new DisplayModeSelector(card, () -> {
                 updateEightyColumnWindow(frame, card);
-                eightyColumnMonitor.setEnabled(card.display() == VideoTerm.Display.SEPARATE);
                 screen.repaint();
             });
             displayModes.addTo(toolbar);
-            eightyColumnMonitor.addTo(toolbar);
         }
 
         return new Machine(disk, bus, screen, loop, padPoller, toolbar, typing, recall, eightyColumns, displayModes,
@@ -939,6 +932,9 @@ public final class Apple2Plus {
     /** The separate 80-column window, created the first time a machine has a VideoTerm and kept across reboots. */
     private static JFrame eightyColumnFrame;
 
+    /** The 80-column window's toolbar, holding its monitor drop-down; replaced with each machine's view. */
+    private static JToolBar eightyColumnToolbar;
+
     /** The current machine's display-mode selector, for the 80-column window's close handler; null if none. */
     private static DisplayModeSelector currentDisplayModes;
 
@@ -952,6 +948,9 @@ public final class Apple2Plus {
                                                  KeyboardInputListener keyboardInput, Runnable onReboot) {
         if (eightyColumnFrame != null && previous != null && previous.eightyColumns() != null) {
             eightyColumnFrame.getContentPane().remove(previous.eightyColumns());
+            if (eightyColumnToolbar != null) {
+                eightyColumnFrame.getContentPane().remove(eightyColumnToolbar);
+            }
             for (var listener : eightyColumnFrame.getKeyListeners()) {
                 eightyColumnFrame.removeKeyListener(listener);
             }
@@ -978,7 +977,15 @@ public final class Apple2Plus {
                 }
             });
         }
-        eightyColumnFrame.getContentPane().add(next.eightyColumns());
+        EightyColumnView view = next.eightyColumns();
+        eightyColumnToolbar = new JToolBar();
+        eightyColumnToolbar.setFloatable(false);
+        new MonitorSelector(MonitorSelector.Monitor.EIGHTY_COLUMN, type -> {
+            view.setMonitor(type);
+            view.repaint();
+        }).addTo(eightyColumnToolbar);
+        eightyColumnFrame.getContentPane().add(eightyColumnToolbar, BorderLayout.NORTH);
+        eightyColumnFrame.getContentPane().add(view, BorderLayout.CENTER);
         eightyColumnFrame.setJMenuBar(menuBar(eightyColumnFrame, next,
             EditMenu.buildForEightyColumnWindow(next.eightyColumns(), eightyColumnFrame, next.loop()), onReboot));
         eightyColumnFrame.addKeyListener(keyboardInput);

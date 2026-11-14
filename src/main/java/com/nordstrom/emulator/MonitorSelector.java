@@ -11,8 +11,9 @@ import java.util.prefs.Preferences;
 
 /**
  * Toolbar drop-down choosing the kind of monitor one of the emulator's
- * screens is shown on. Each screen has its own, since a real II+ owner could
- * have a color monitor on the Apple and a monochrome one on the VideoTerm.
+ * screens is shown on, in that screen's own window. Each screen has its own,
+ * since a real II+ owner could have a color monitor on the Apple and a
+ * monochrome one on the VideoTerm.
  * Like {@link DisplayModeSelector}, it isn't focusable, so the Apple's
  * keyboard keeps the focus, and the choice is remembered with the JDK's user
  * preferences for every machine built later.
@@ -28,7 +29,7 @@ final class MonitorSelector {
          * The Dual Monitor window. No color choice: the VideoTerm's video has
          * no color burst, so a color monitor would show it as White does.
          */
-        EIGHTY_COLUMN("80-Column Monitor:", "eightyColumnMonitor", MonitorType.GREEN,
+        EIGHTY_COLUMN("Monitor:", "eightyColumnMonitor", MonitorType.GREEN,
             MonitorType.WHITE, MonitorType.GREEN, MonitorType.AMBER);
 
         private final String caption;
@@ -89,18 +90,15 @@ final class MonitorSelector {
         comboBox.addActionListener(e -> apply((MonitorType) comboBox.getSelectedItem()));
     }
 
-    /** Adds a caption and the drop-down to the end of a toolbar, set apart from what's already there. */
+    /** Adds a caption and the drop-down to the end of a toolbar, set apart from anything already there. */
     void addTo(JToolBar toolbar) {
-        toolbar.addSeparator();
+        if (toolbar.getComponentCount() > 0) {
+            toolbar.addSeparator();
+        }
         JLabel caption = new JLabel(monitor.caption);
         caption.setLabelFor(comboBox);
         toolbar.add(caption);
         toolbar.add(comboBox);
-    }
-
-    /** @param enabled false while the screen this controls isn't shown */
-    void setEnabled(boolean enabled) {
-        comboBox.setEnabled(enabled);
     }
 
     private void apply(MonitorType type) {

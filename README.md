@@ -169,7 +169,7 @@ Companion documents:
   The chosen mode is remembered across Reboot and launches.
   In the main window the 80 columns follow the main monitor's choice;
   the Dual Monitor window has its own white, green or amber monitor
-  (green by default).
+  (green by default), chosen from that window's toolbar.
 - Peripherals are plug-ins: cards are discovered through Java's standard
   `ServiceLoader`, and new ones can be added from external jars without
   rebuilding the emulator.
@@ -220,8 +220,7 @@ Companion documents:
   Stop Typing button to cancel it.
 - Toolbar: Reset (a real press-and-release RESET line), Reboot (a power
   cycle that keeps the inserted disks), the monitor drop-down, and --
-  with a VideoTerm configured -- the display mode drop-down and the
-  80-column monitor's.
+  with a VideoTerm configured -- the display mode drop-down.
 
 ## Architecture
 
