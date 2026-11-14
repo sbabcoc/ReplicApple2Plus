@@ -103,8 +103,9 @@ import java.util.List;
  *       twice sends Ctrl-V; any other key after Ctrl-V sends itself. Only
  *       keys every II+ keyboard has are used, so it needs nothing else --
  *       no shift-key mod, no software.</li>
- *   <li><b>From host keys</b> the II+ keyboard lacks, which the device
- *       takes, as it takes Up and Down ({@link #supply}).</li>
+ *   <li><b>From host keys</b> the II+ keyboard lacks, which the host
+ *       types as their Ctrl-V sequences ({@link #composeKey}), so they
+ *       reach the device by the same path as a person typing them.</li>
  * </ul>
  * Paste, Type File... and recalled lines go straight to the connector
  * ({@link #send}), never composed.
@@ -178,6 +179,22 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
         COMPOSED['>'] = '}';
         COMPOSED['!'] = '|';
         COMPOSED['^'] = '~';
+    }
+
+    /**
+     * The key that, typed after Ctrl-V, sends {@code code}: the reverse of
+     * {@link #COMPOSED}.
+     *
+     * @param code an Apple II ASCII value, 0-127
+     * @return the key to type after Ctrl-V, or -1 if no sequence sends {@code code}
+     */
+    static int composeKey(int code) {
+        for (int key = 0; key < COMPOSED.length; key++) {
+            if (COMPOSED[key] == code) {
+                return key;
+            }
+        }
+        return -1;
     }
 
     private final MemoryBus board;
@@ -288,17 +305,6 @@ final class CommandRecall implements MemoryBus, KeyboardPort {
      */
     void keyboardKeyShifted(int key) {
         fromKeyboard(key, true);
-    }
-
-    /**
-     * A character the II+ keyboard has no key for, from a host key: the
-     * device sends it, and drops a Ctrl-V the keyboard sent before it.
-     *
-     * @param key the character's Apple II ASCII value
-     */
-    void supply(int key) {
-        composing = false;
-        send(key);
     }
 
     private void fromKeyboard(int key, boolean shifted) {

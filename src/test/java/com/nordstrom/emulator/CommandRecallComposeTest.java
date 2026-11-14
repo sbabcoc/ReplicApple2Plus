@@ -55,12 +55,21 @@ class CommandRecallComposeTest {
     }
 
     @Test
-    void aHostKeyTheKeyboardLacksIsSuppliedAndEndsComposing() {
-        device.keyboardKey(CommandRecall.COMPOSE);
-        device.supply('{');
-        assertEquals(0x80 | '{', takeKey());
-        device.keyboardKey('(');
-        assertEquals(0x80 | '(', takeKey());
+    void everyCharacterTheKeyboardLacksHasASequenceThatSendsIt() {
+        for (char c : "[\\_`{|}~".toCharArray()) {
+            assertFalse(KeyboardMapper.keyboardHasKey(c), String.valueOf(c));
+            int key = CommandRecall.composeKey(c);
+            assertTrue(key >= 0 && KeyboardMapper.keyboardHasKey(key), "a typable key for " + c);
+            device.keyboardKey(CommandRecall.COMPOSE);
+            device.keyboardKey(key);
+            assertEquals(0x80 | c, takeKey(), "Ctrl-V " + (char) key);
+        }
+    }
+
+    @Test
+    void codesNoSequenceSendsHaveNoComposeKey() {
+        assertEquals(-1, CommandRecall.composeKey('A'));
+        assertEquals(-1, CommandRecall.composeKey(CommandRecall.COMPOSE));
     }
 
     @Test

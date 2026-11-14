@@ -41,8 +41,8 @@ import java.awt.event.KeyEvent;
  * {@link #mapTypedCharacter} also maps the host characters the II+
  * keyboard has no keys for ({@code [ \ _ `} and {@code { | } ~}), since
  * Paste and Type File... type them; {@link #keyboardHasKey} tells them
- * apart, so a host key the II+ lacks goes to the device on the keyboard
- * cable rather than being sent as if the keyboard had it.
+ * apart, so a host key the II+ lacks is typed as its Ctrl-V sequence
+ * rather than sent as if the keyboard had it.
  */
 public final class KeyboardMapper {
 
@@ -87,7 +87,8 @@ public final class KeyboardMapper {
      * uppercase, and has no key for {@code [ \ _ `} or {@code { | } ~}.
      *
      * @param code an Apple II ASCII value, 0-127
-     * @return false for a code only a device on the keyboard cable can supply
+     * @return false for a code the keyboard can't send, which only a Ctrl-V
+     *         sequence through the device on the keyboard cable can
      */
     public static boolean keyboardHasKey(int code) {
         return switch (code) {

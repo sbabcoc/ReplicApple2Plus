@@ -76,7 +76,7 @@ Companion documents:
   **Ctrl-V** and then a key standing for one: `(` `[`, `)` `]`, `/` `\`,
   `-` `_`, `'` the backquote, `<` `{`, `>` `}`, `!` `|`, `^` `~`. Ctrl-V
   twice types Ctrl-V; any other key after Ctrl-V types itself. The
-  host's own keys for them work too. Like command history, this is the
+  host's own keys for them type the same sequences. Like command history, this is the
   device on the keyboard cable, which puts the codes on the connector's
   seven data lines itself.
 - Command history at the Apple's own prompts. The host's **Up** and

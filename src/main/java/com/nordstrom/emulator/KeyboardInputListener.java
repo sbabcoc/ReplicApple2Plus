@@ -25,8 +25,9 @@ import java.util.concurrent.Executor;
  * <p>
  * Keys the II+ keyboard has go to the device as the keyboard's
  * ({@link CommandRecall#keyboardKey}), which composes Ctrl-V sequences;
- * host characters it has no key for ({@code [ \ _ ` { | } ~}) go to the
- * device to supply itself ({@link CommandRecall#supply}), like Up and Down.
+ * host characters it has no key for ({@code [ \ _ ` { | } ~}) are typed
+ * as their Ctrl-V sequences ({@link CommandRecall#composeKey}), exactly as
+ * a person would type them on the II+ keyboard.
  */
 final class KeyboardInputListener implements KeyListener {
 
@@ -66,7 +67,13 @@ final class KeyboardInputListener implements KeyListener {
         } else if (KeyboardMapper.keyboardHasKey(mapped)) {
             emulationThread.execute(() -> device.keyboardKey(mapped));
         } else {
-            emulationThread.execute(() -> device.supply(mapped));
+            int key = CommandRecall.composeKey(mapped);
+            if (key >= 0) {
+                emulationThread.execute(() -> {
+                    device.keyboardKey(CommandRecall.COMPOSE);
+                    device.keyboardKey(key);
+                });
+            }
         }
     }
 
