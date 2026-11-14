@@ -1206,6 +1206,53 @@ The firmware now starts a new line and prints the prompt character (`$33`)
 before waiting for a key -- after a session and after an early exit
 alike. Both end-to-end tests check for it, and fail without the fix.
 
+### Monitor type: color and monochrome, at 560 dots -- done
+
+At Scott's request, ahead of a2lib's Soft-70 hi-res text: Soft-70 was
+used on monochrome monitors, and full hi-res on a color monitor always
+fringes, since the II+'s color killer acts only in text mode. Each screen
+now has a **Monitor:** drop-down in its own window's toolbar, chosen at
+any time and remembered (`MonitorSelector`): Color, White, Green or Amber
+for the main window; White, Green or Amber for the Dual Monitor window,
+whose VideoTerm video has no color burst, so a color monitor would show
+it white. Text on a color monitor is white, as the color killer makes it.
+
+- **560 dots.** A monochrome monitor shows detail finer than a pixel, so
+  `ScreenPanel` paints every line as the 560 dots of the video signal. At
+  scale 3 a dot is 1.5 screen pixels; each column takes its share of the
+  dots it covers (`screenColumns`), so equal dot pairs stay crisp 3-pixel
+  cells. Scott chose accuracy over a 280-wide approximation, which would
+  have collapsed the 16 lo-res colors to 9 looks.
+- **Lo-res** (`LoResRenderer.dots`): each 14-dot block repeats its color
+  number's bits, dot *d* lit by bit `d & 3`, with the phase counted across
+  the line, so odd columns start two bits in (as izapple2 also does). Bit
+  *k* at phase *k* is fixed by the hi-res equivalences `HiResRenderer`
+  already used -- violet 3, green 12, blue 6, orange 9 -- equal colors
+  meaning equal phase; reversed or rotated bit orders swap 3 and 12.
+- **Hi-res** (`HiResRenderer.dots`), per Sather, *Understanding the Apple
+  II*, pp. 8-18 to 8-22: two dots a bit, bit 0 first; a byte with bit 7
+  set is delayed a dot, and that first dot "is controlled by the last dot
+  of the previous pattern" -- the delay flip-flop still holds it. So a
+  delayed byte extends an undelayed byte's bit 6 by a dot, and an
+  undelayed byte cuts a delayed one's in half. At the left edge the held
+  bit is D6 "of the last byte of HBL scanned memory", taken from
+  `VideoScanner`, not assumed: in the line's own 128-byte block, the
+  byte before the line -- for the top third, the block's last byte, a
+  screen hole (Sather's `$207F TO $3FFF STEP $80` loop); for the rest,
+  the last byte of the line 64 above, so dot (279,0) extends to (0,64).
+  At the right edge the delayed last dot is blanked. A IIe double hi-res
+  write-up found first named `$207F` for the line at `$2080`; Sather and
+  `VideoScanner` agree on `$20FF`. Tests tie `leadInAddress` to
+  `VideoScanner` for all 192 lines on both pages, and reproduce both of
+  Sather's examples.
+
+Verified by unit tests (dot patterns, odd-column phase, lo-res and hi-res
+violet lighting the same dots, the delay, the hold, the cut, the lead-in,
+Sather's left-edge examples),
+each failing when its rule is broken, and by rendering the patterns to
+images. Not yet seen on real hardware. The color path keeps the simplified
+artifact model, with lo-res as solid blocks.
+
 ---
 
 ## Component development history (moved from README.md)

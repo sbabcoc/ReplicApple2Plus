@@ -43,8 +43,9 @@ import java.awt.image.BufferedImage;
  * the natural owner of it, not the thing being painted.
  * <p>
  * Each line is assembled as the 560 dots of the video signal, two per
- * emulated pixel, because a monochrome monitor shows lo-res colors as dot
- * patterns finer than a pixel. At {@link #SCALE} 3 a dot is a screen pixel
+ * emulated pixel, because a monochrome monitor shows detail finer than a
+ * pixel: lo-res colors as dot patterns, and hi-res bytes with the palette
+ * bit set a dot late. At {@link #SCALE} 3 a dot is a screen pixel
  * and a half wide, so each screen column is drawn with the share of each dot
  * it covers ({@link #screenColumns}): a pair of equal dots stays a crisp
  * 3-pixel cell, and a lone dot stays where it really is.
@@ -126,7 +127,7 @@ final class ScreenPanel extends JPanel {
         Color[][] loResColors = color ? LoResRenderer.render(bus, bus.videoSoftSwitches()) : null;
         boolean[][] loResDots = color ? null : LoResRenderer.dots(bus, bus.videoSoftSwitches());
         Color[][] hiResColors = color ? HiResRenderer.render(bus, bus.videoSoftSwitches()) : null;
-        boolean[][] hiResPixels = color ? null : HiResRenderer.monochrome(bus, bus.videoSoftSwitches());
+        boolean[][] hiResDots = color ? null : HiResRenderer.dots(bus, bus.videoSoftSwitches());
         ScanlineModes.LineMode[] modes = scanlineModes.completedFrame();
 
         int pixelsPerLine = textPixels[0].length;
@@ -145,7 +146,14 @@ final class ScreenPanel extends JPanel {
                             dots[2 * x + 1] = loResDots[row][2 * x + 1] ? lit : 0;
                         }
                     }
-                    case HIRES -> setPair(dots, x, color ? hiResColors[row][x].getRGB() : hiResPixels[row][x] ? lit : 0);
+                    case HIRES -> {
+                        if (color) {
+                            setPair(dots, x, hiResColors[row][x].getRGB());
+                        } else {
+                            dots[2 * x] = hiResDots[row][2 * x] ? lit : 0;
+                            dots[2 * x + 1] = hiResDots[row][2 * x + 1] ? lit : 0;
+                        }
+                    }
                 }
             }
             image.setRGB(0, row, image.getWidth(), 1, screenColumns(dots, SCALE), 0, image.getWidth());

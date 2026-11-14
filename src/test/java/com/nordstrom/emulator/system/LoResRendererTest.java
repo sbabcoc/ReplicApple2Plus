@@ -75,10 +75,9 @@ class LoResRendererTest {
         bus.write(0x2001, 0x2A);
         VideoSoftSwitches video = new VideoSoftSwitches();
         boolean[] loRes = LoResRenderer.dots(bus, video)[0];
-        boolean[] hiRes = HiResRenderer.monochrome(bus, video)[0];
-        for (int x = 0; x < 14; x++) {
-            assertEquals(hiRes[x], loRes[2 * x], "first dot of pixel " + x);
-            assertEquals(hiRes[x], loRes[2 * x + 1], "second dot of pixel " + x);
+        boolean[] hiRes = HiResRenderer.dots(bus, video)[0];
+        for (int d = 0; d < 28; d++) {
+            assertEquals(hiRes[d], loRes[d], "dot " + d);
         }
     }
 

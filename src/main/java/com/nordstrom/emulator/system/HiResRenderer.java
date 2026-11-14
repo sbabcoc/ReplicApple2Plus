@@ -50,6 +50,19 @@ import java.awt.Color;
  * hi-res color equals). Reusing {@link GraphicsRenderer#PALETTE} keeps
  * both renderers consistent with a single verified source rather than
  * risking two independently-sourced tables silently drifting apart.
+ * <p>
+ * <b>Dots</b>: {@link #dots} gives the video signal itself, 560 dots a
+ * line, as a monochrome monitor shows it, per Sather, <i>Understanding the
+ * Apple II</i>, pp. 8-18 to 8-22. Each bit is two dots, bit 0
+ * first. A byte with its palette bit set is delayed by one dot (70 ns, a
+ * 14M clock), and for that first dot the output holds the level it was
+ * already at: the previous byte's bit 6, which this extends by a dot. An
+ * undelayed byte after a delayed one starts on time, cutting that byte's
+ * bit 6 to a single dot. At a line's left edge the held level comes from
+ * the byte the scanner fetched in the last clock of horizontal blanking
+ * ({@link #leadInAddress}); its dots are blanked, but the hold isn't, so
+ * that byte's bit 6 can show as a half-dot before a delayed first byte.
+ * A delayed last byte's final dot falls past the visible line.
  */
 public final class HiResRenderer {
 
@@ -57,6 +70,8 @@ public final class HiResRenderer {
     public static final int COLUMNS = 40;
     /** Pixels per byte. */
     public static final int PIXELS_PER_BYTE = 7;
+    /** Dots per byte, two per pixel. */
+    public static final int DOTS_PER_BYTE = PIXELS_PER_BYTE * 2;
     /** Visible scan lines. */
     public static final int LINES = 192;
 
@@ -96,29 +111,55 @@ public final class HiResRenderer {
     }
 
     /**
-     * Renders the current hi-res screen as a monochrome monitor shows it:
-     * every "on" bit lit, whatever its neighbors and palette bit.
+     * Renders the current hi-res screen as the dots of the video signal.
      *
      * @param bus the memory bus to read screen bytes from
      * @param videoSoftSwitches which page is active
-     * @return a {@link #LINES} x (COLUMNS*PIXELS_PER_BYTE) grid; true means a lit pixel
+     * @return a {@link #LINES} x (COLUMNS*DOTS_PER_BYTE) grid; true means a lit dot
      */
-    public static boolean[][] monochrome(MemoryBus bus, VideoSoftSwitches videoSoftSwitches) {
-        boolean[][] pixels = new boolean[LINES][COLUMNS * PIXELS_PER_BYTE];
+    public static boolean[][] dots(MemoryBus bus, VideoSoftSwitches videoSoftSwitches) {
+        boolean[][] dots = new boolean[LINES][COLUMNS * DOTS_PER_BYTE];
         int pageBase = pageBase(videoSoftSwitches);
-        boolean[] palette = new boolean[COLUMNS * PIXELS_PER_BYTE];
         for (int y = 0; y < LINES; y++) {
-            decodeLine(bus, pageBase, y, pixels[y], palette);
+            int rowBase = rowBase(pageBase, y);
+            boolean held = (bus.read(leadInAddress(rowBase)) & 0x40) != 0;
+            for (int col = 0; col < COLUMNS; col++) {
+                int b = bus.read(rowBase + col) & 0xFF;
+                boolean delayed = (b & 0x80) != 0;
+                for (int k = 0; k < DOTS_PER_BYTE; k++) {
+                    int bitDot = delayed ? k - 1 : k;
+                    dots[y][col * DOTS_PER_BYTE + k] = bitDot < 0 ? held : ((b >> (bitDot >> 1)) & 1) != 0;
+                }
+                held = (b & 0x40) != 0;
+            }
         }
-        return pixels;
+        return dots;
+    }
+
+    /**
+     * The address the scanner fetches in the last clock of horizontal
+     * blanking before a line, matching {@link VideoScanner}: in a line's
+     * own 128-byte block, the byte before it. For the top third of the
+     * screen that wraps to the block's last byte, a screen hole; for the
+     * rest it's the last byte of the line 64 above (Sather, p. 8-22).
+     *
+     * @param rowBase the address of the line's first byte
+     * @return the address fetched just before it
+     */
+    static int leadInAddress(int rowBase) {
+        return (rowBase & ~0x7F) | ((rowBase - 1) & 0x7F);
     }
 
     private static int pageBase(VideoSoftSwitches videoSoftSwitches) {
         return videoSoftSwitches.isPage2() ? 0x4000 : 0x2000;
     }
 
+    private static int rowBase(int pageBase, int y) {
+        return pageBase + (y & 7) * 0x400 + ((y >> 3) & 7) * 0x80 + (y >> 6) * 0x28;
+    }
+
     private static void decodeLine(MemoryBus bus, int pageBase, int y, boolean[] bit, boolean[] palette) {
-        int rowBase = pageBase + (y & 7) * 0x400 + ((y >> 3) & 7) * 0x80 + (y >> 6) * 0x28;
+        int rowBase = rowBase(pageBase, y);
         for (int col = 0; col < COLUMNS; col++) {
             int b = bus.read(rowBase + col) & 0xFF;
             boolean paletteBit = (b & 0x80) != 0;

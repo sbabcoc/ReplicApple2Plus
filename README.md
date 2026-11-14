@@ -69,8 +69,8 @@ Companion documents:
 - A color or monochrome (white, green or amber) monitor, chosen at any
   time from the toolbar and remembered. On a color monitor text shows
   white, as the II+'s color killer makes it; on a monochrome one, lo-res
-  colors show as their real dot patterns and every lit hi-res bit in the
-  phosphor's color.
+  colors show as their real dot patterns, and hi-res as its real dots in
+  the phosphor's color, a byte with bit 7 set drawn half a pixel later.
 - Speaker output to the host's audio device, which also paces emulation
   to real time (with no audio device, a timer paces it instead).
 
