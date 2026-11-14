@@ -987,7 +987,7 @@ public final class Apple2Plus {
         eightyColumnFrame.getContentPane().add(eightyColumnToolbar, BorderLayout.NORTH);
         eightyColumnFrame.getContentPane().add(view, BorderLayout.CENTER);
         eightyColumnFrame.setJMenuBar(menuBar(eightyColumnFrame, next,
-            EditMenu.buildForEightyColumnWindow(next.eightyColumns(), eightyColumnFrame, next.loop()), onReboot));
+            EditMenu.buildForEightyColumnWindow(next.eightyColumns(), next.typing(), eightyColumnFrame, next.loop()), onReboot));
         eightyColumnFrame.addKeyListener(keyboardInput);
         eightyColumnFrame.setFocusTraversalKeysEnabled(false);
         eightyColumnFrame.getContentPane().revalidate();

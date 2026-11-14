@@ -76,13 +76,7 @@ final class EditMenu {
         copyImage.addActionListener(event -> setClipboard(new ImageSelection(snapshot(screen)), parent));
         menu.add(copyImage);
 
-        JMenuItem paste = new JMenuItem("Paste");
-        paste.addActionListener(event -> {
-            String text = clipboardText(parent);
-            if (text != null) {
-                emulationThread.execute(() -> feeder.enqueue(text));
-            }
-        });
+        JMenuItem paste = pasteItem(feeder, parent, emulationThread);
         menu.add(paste);
 
         menu.addMenuListener(new MenuListener() {
@@ -103,15 +97,18 @@ final class EditMenu {
     }
 
     /**
-     * Builds the Edit menu for a separate 80-column window: copying only,
-     * since typing goes to the one keyboard either window feeds.
+     * Builds the Edit menu for a separate 80-column window. Its copies come
+     * from the card's screen; Paste types into the one keyboard both windows
+     * feed, the same as the main window's.
      *
      * @param view            the 80-column window's display
+     * @param feeder          types pasted text into the machine's keyboard
      * @param parent          the component to anchor dialogs to
-     * @param emulationThread runs everything that reads the card's memory
+     * @param emulationThread runs everything that reads the card's memory or queues typing
      * @return the built menu
      */
-    static JMenu buildForEightyColumnWindow(EightyColumnView view, Component parent, Executor emulationThread) {
+    static JMenu buildForEightyColumnWindow(EightyColumnView view, TypingFeeder feeder, Component parent,
+                                            Executor emulationThread) {
         JMenu menu = new JMenu("Edit");
         JMenuItem copyText = new JMenuItem("Copy Screen Text");
         copyText.addActionListener(event -> emulationThread.execute(() -> {
@@ -122,7 +119,32 @@ final class EditMenu {
         JMenuItem copyImage = new JMenuItem("Copy Screen Image");
         copyImage.addActionListener(event -> setClipboard(new ImageSelection(snapshot(view)), parent));
         menu.add(copyImage);
+        JMenuItem paste = pasteItem(feeder, parent, emulationThread);
+        menu.add(paste);
+        menu.addMenuListener(new MenuListener() {
+            @Override
+            public void menuSelected(MenuEvent e) {
+                paste.setEnabled(clipboardHasText());
+            }
+
+            @Override
+            public void menuDeselected(MenuEvent e) { /* nothing to do */ }
+
+            @Override
+            public void menuCanceled(MenuEvent e) { /* nothing to do */ }
+        });
         return menu;
+    }
+
+    private static JMenuItem pasteItem(TypingFeeder feeder, Component parent, Executor emulationThread) {
+        JMenuItem paste = new JMenuItem("Paste");
+        paste.addActionListener(event -> {
+            String text = clipboardText(parent);
+            if (text != null) {
+                emulationThread.execute(() -> feeder.enqueue(text));
+            }
+        });
+        return paste;
     }
 
     /** Whether any scan line of this frame is text -- completedFrame() is safe to read from any thread. */
