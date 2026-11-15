@@ -653,12 +653,57 @@ type=hostfiles
 
 See [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8 for the details.
 
+### Running a program headless
+
+`HeadlessRunner` runs an Apple II program with no window -- for test
+programs whose results are read off the screen, from a script or a
+Makefile. It boots drive 1 to the `]` prompt, types a script through the
+emulated keyboard, runs unthrottled until given text is on screen, and
+writes the screen's text out. `./gradlew installDist` puts its launcher
+beside the application's:
+
+```
+build/install/ReplicApple2Plus/bin/replicapple2plus-run \
+    --d1 "DOS 3.3 System Master.woz" --d2 a2libtests.dsk --videoterm \
+    --type 'BRUN CSWTEST,D2\r' --expect 'TYPE A WORD' --type 'HELLO\r' \
+    --until 'PRESS A KEY' --timeout 60 --screen cswtest.txt
+```
+
+- **Machine:** the system ROM and a Disk II in slot 6; `--videoterm` adds
+  the VideoTerm in slot 3, `--language-card` a Language Card in slot 0.
+  ROMs come from `--roms DIR`, else the emulator folder's `roms/`, else
+  the classpath, as for the application; only `system-rom.rom` is
+  needed (plus the VideoTerm's two with `--videoterm`).
+- **Disks:** `--d1` (to boot) and `--d2`, DSK or WOZ. The runner works on
+  copies, so the images given are never changed.
+- **Script:** `--type TEXT` and `--expect TEXT`, any number, in order.
+  Typing goes through the same feeder as Paste, paced by the keyboard
+  strobe; in `TEXT`, `\r` or `\n` is Return, `\\` a backslash and `\xHH`
+  the key with Apple II code `HH` (`\x03` is Ctrl-C). `--expect` waits for
+  `TEXT` on screen; `--until TEXT` ends the run.
+- **Screen:** the display the main window would show -- the VideoTerm's
+  80 columns when the Soft Video Switch selects them, otherwise the text
+  page, or a marked Soft-70 screen in full-screen hi-res -- as Copy
+  Screen Text reads it. It goes to `--screen FILE`, or stdout, whatever
+  the outcome.
+- **Time** is emulated seconds: `--boot-timeout` (default 60) to reach
+  the prompt, which must stand unchanged, with the drive stopped, for a
+  second; `--timeout`
+  (default 120) for the script and the `--until` text. A boot that fails
+  is retried with a fresh power-on, up to three in all.
+- **Exit status:** 0 finished; 1 bad arguments or setup (a missing disk or
+  ROM); 2 didn't boot; 3 timed out; 4 the machine stopped (the CPU
+  halted).
+
 ### Useful Gradle tasks
 
 - `./gradlew runCardCatalog [-PpluginsDir=DIR[:DIR...]]` — list every available
   peripheral and what it needs.
 - `./gradlew runSlotConfigTemplate [-PpluginsDir=DIR[:DIR...]] [-PoutputFile=FILE]` —
   generate a starter slot configuration file.
+- `./gradlew -q runHeadless --args="..."` — run a program headless (above)
+  without installing; a failing run fails the build, so use the launcher
+  when the exit status matters.
 - `./gradlew assembleHostFilesFirmware` — rebuild the host file transfer
   card's firmware image from source (needs ca65 and ld65 on the PATH).
 
@@ -704,7 +749,8 @@ lands in `build/jpackage` too.
   `Apple2Plus` (entry point and machine assembly), `EmulationLoop`
   (audio-paced emulation thread), `ScreenPanel`, `DiskMenu`, `EditMenu`,
   `ToolbarControls`, keyboard input, text injection and command history
-  (`CommandRecall`, `CommandHistory`), plus the
+  (`CommandRecall`, `CommandHistory`), the headless runner
+  (`HeadlessRunner`, `RunnerOptions`), plus the
   `MemoryBus` and `InterruptLines` contracts shared by `cpu` and
   `system`.
 - `.../cpu/` -- the 6502 core.

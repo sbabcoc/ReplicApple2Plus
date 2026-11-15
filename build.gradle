@@ -297,6 +297,45 @@ tasks.register('runSlotConfigTemplate', JavaExec) {
     args taskArgs
 }
 
+/* Headless runner -- runs an Apple II program from the command line, with no
+ * window, and writes the screen's text out (HeadlessRunner). installDist puts
+ * a launcher for it, bin/replicapple2plus-run, beside the application's.
+ *
+ * Usage:
+ *   ./gradlew installDist
+ *   build/install/ReplicApple2Plus/bin/replicapple2plus-run --help
+ *   ./gradlew -q runHeadless --args="--d1 master.dsk --type 'PRINT 1\\r' --until 1 --screen out.txt"
+ * (Through Gradle, any failing run fails the build, so the runner's own exit
+ * status is only seen when it's run from the launcher.)
+ */
+def headlessStartScripts = tasks.register('headlessStartScripts', CreateStartScripts) {
+    description = 'Creates the headless runner\'s launch scripts.'
+    applicationName = 'replicapple2plus-run'
+    mainClass = 'com.nordstrom.emulator.HeadlessRunner'
+    classpath = tasks.named('startScripts', CreateStartScripts).get().classpath
+    outputDir = layout.buildDirectory.dir('headless-scripts').get().asFile
+    defaultJvmOpts = ['-Djava.awt.headless=true']
+}
+
+distributions {
+    main {
+        contents {
+            from(headlessStartScripts) {
+                into 'bin'
+                filePermissions { unix('rwxr-xr-x') }
+            }
+        }
+    }
+}
+
+tasks.register('runHeadless', JavaExec) {
+    group = 'Application'
+    description = 'Runs an Apple II program headless; pass its options with --args'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.nordstrom.emulator.HeadlessRunner'
+    jvmArgs '-Djava.awt.headless=true'
+}
+
 dependencies {
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'

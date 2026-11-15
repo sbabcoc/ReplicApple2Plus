@@ -3,6 +3,7 @@ package com.nordstrom.emulator.expansion;
 import com.nordstrom.emulator.system.CardParameter;
 import com.nordstrom.emulator.system.PowerOnRam;
 import com.nordstrom.emulator.system.SlotCard;
+import com.nordstrom.emulator.system.VideoSoftSwitches;
 
 import java.util.List;
 import java.util.Properties;
@@ -106,6 +107,21 @@ public final class VideoTerm implements SlotCard {
      */
     public void setDisplay(Display display) {
         this.display = display;
+    }
+
+    /**
+     * Whether the main window is showing this card's 80 columns rather than
+     * the Apple's own video, under the current display mode.
+     *
+     * @param switches the motherboard's video switches, which the Soft Video Switch reads
+     * @return true when the main window shows the 80 columns
+     */
+    public boolean shownInMainWindow(VideoSoftSwitches switches) {
+        return switch (display) {
+            case SLOT3 -> true;
+            case SWITCHED -> switches.softVideoSwitchSelects80Columns();
+            case APPLE, SEPARATE -> false;
+        };
     }
 
     @Override

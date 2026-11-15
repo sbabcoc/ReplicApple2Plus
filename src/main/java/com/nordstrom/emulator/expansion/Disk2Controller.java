@@ -472,8 +472,13 @@ public final class Disk2Controller implements SlotCard {
         return phaseOn[n];
     }
 
-    /** Package-visible for tests. */
-    boolean isMotorOn() {
+    /**
+     * Whether the motor is spinning -- what the drive's IN USE light shows,
+     * including the grace period after software switches it off.
+     *
+     * @return true while the selected drive's motor runs
+     */
+    public boolean isMotorOn() {
         return motorOn;
     }
 

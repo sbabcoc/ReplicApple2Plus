@@ -1282,6 +1282,54 @@ See `system/MarkedScreenText.java` and `system/ScreenText.java`.
   with another version or outside the range ignored; a marker ignored in
   mixed and lo-res modes.
 
+### Headless test runner -- done
+
+At Scott's request, so a2lib can have a `make emutest` in place of
+booting DOS 3.3, BRUNning each test program and reading its result
+screen by hand, on macOS and on Termux/PRoot Debian alike. See
+`HeadlessRunner.java` and `RunnerOptions.java`; usage is in README.md.
+
+- **Built from what exists:** the machine is assembled as the
+  application assembles it, with the CPU on `CommandRecall`, the device
+  between it and the motherboard, so the script is typed by the same
+  strobe-paced feeder as Paste, through the keyboard cable -- no CPU or
+  memory hooks. The headless JUnit harnesses (`MachineHarness`,
+  `DosTransferIntegrationTest`) supplied the boot-and-wait pattern; the
+  screen is read with Copy Screen Text's own code (`ScreenText`, which
+  already handles the Soft-70 marker, and `VideoTermRenderer.text`).
+- **Which display:** the one the main window would show. The VideoTerm's
+  Display-mode check moved from `ScreenPanel` into
+  `VideoTerm.shownInMainWindow`, so the window and the runner share it.
+  The runner leaves the card in its default `SWITCHED` mode rather than
+  reading the toolbar's remembered choice, and likewise sets the shift-key
+  mod to the application's default (SW2) rather than the remembered one,
+  so a run doesn't depend on the host's GUI settings.
+- **Boot:** done when the screen ends in `]`, the drive has stopped, and
+  both stand unchanged for a second. Waiting for the screen alone wasn't
+  enough, found in the first run on real ROMs: the timeout test's screen
+  showed the System Master's HELLO banner with no prompt, 2 s after the
+  boot had been taken as done (at about 5 s) -- DOS shows `]` while it
+  loads HELLO, for over a second, before HELLO clears the screen. The
+  drive's motor (`Disk2Controller.isMotorOn`, its IN USE light) tells
+  them apart. The tests' `RomBoot.coldStart` (a write to `$03F4`) is a host
+  hook into memory, which the faithful-emulation rule rules out; instead,
+  a boot that doesn't reach the prompt is powered on again, as a person
+  would, up to three times.
+- **Disks are copies,** in a temporary folder, since the Disk II persists
+  writes on a track change: a run can't change its inputs, and each run
+  starts from the same images.
+- **Command line:** the ROMs come from a folder, `--roms DIR`, as for the
+  application, rather than one flag per file; `--type` and `--expect`
+  repeat in order, which `CliArgs` can't express, hence `RunnerOptions`.
+  `--timeout` covers the script after the prompt; booting has its own
+  `--boot-timeout`, so a slow test doesn't eat into the boot's allowance
+  or the reverse.
+- **Tests:** `RunnerOptionsTest` (step order, escapes, refused
+  arguments) and `HeadlessRunnerTest` (System Master booted, `PRINT 6*7`
+  typed, `42` seen and written, the image unchanged; a timeout's status
+  and screen; a missing disk), the latter needing the system ROM and the
+  System Master image the transfer tests use.
+
 ---
 
 ## Component development history (moved from README.md)

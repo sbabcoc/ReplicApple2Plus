@@ -104,14 +104,7 @@ final class ScreenPanel extends JPanel {
 
     /** @return true when this panel is currently showing the VideoTerm's 80 columns rather than the Apple's video */
     boolean showingEightyColumns() {
-        if (switchedVideoTerm == null) {
-            return false;
-        }
-        return switch (switchedVideoTerm.display()) {
-            case SLOT3 -> true;
-            case SWITCHED -> bus.videoSoftSwitches().softVideoSwitchSelects80Columns();
-            case APPLE, SEPARATE -> false;
-        };
+        return switchedVideoTerm != null && switchedVideoTerm.shownInMainWindow(bus.videoSoftSwitches());
     }
 
     @Override
