@@ -41,6 +41,13 @@ Problems observed, limitations accepted, and leads noticed in passing.
 Unless an entry says it was observed, treat it as a lead to confirm
 with a real failing case before changing code.
 
+- **Packaging tasks reach `Task.project` at execution time.** Observed:
+  `./gradlew jpackageImage --warning-mode all` reports it as deprecated,
+  to fail in Gradle 10, at `jpackageImage`'s `doFirst`
+  (`tasks.named('jar', Jar)`); `project.name`, `layout`, `application`
+  and `javaToolchains` (through `jdkTool`) are used the same way there and
+  in `runtime` and `jpackage`. Gradle reports the first use only, so
+  `--warning-mode fail` after each fix shows whether any remain.
 - **Blank WOZ images leave INFO "optimal bit timing" at 0.**
   `WozDiskImage.buildBlankFileBytes` doesn't set INFO byte 39; the WOZ
   spec gives 32 (4 µs) for 5.25" disks. Not known to cause a problem.

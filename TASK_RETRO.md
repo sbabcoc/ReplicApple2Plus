@@ -1333,11 +1333,22 @@ screen by hand, on macOS and on Termux/PRoot Debian alike. See
   states the pause in the script rather than slowing all typing.
 - **In the installers:** jpackage builds `replicapple2plus-run` into the
   application image as a second launcher (`--add-launcher`), so an
-  installed copy can run headless too. Its properties make it headless,
-  a console launcher on Windows (a GUI launcher there has no stdout), and
-  keep it out of the menus and desktop. Checked on Linux with a jpackage
-  app image: the launcher passes the runner's stdout and exit status
-  through.
+  installed copy can run headless too. Its properties make it headless
+  and a console launcher on Windows (a GUI launcher there has no stdout).
+  Verified on all three platforms: a Linux app image and the installed
+  arm64 `.deb` (`/opt/replicapple2plus/bin`), the macOS app image, and the
+  installed `.msi` on Windows 10 (`C:\Program Files\ReplicApple2Plus`, in
+  a real console) -- output and exit status come through, failures
+  included, and installed copies find the ROMs through the emulator folder.
+- **Menu entries kept:** the properties first also set `win-menu`,
+  `win-shortcut` and `linux-shortcut` to false, but the installers still
+  gave the runner a Start-menu entry and desktop shortcut on Windows and a
+  menu entry on Debian. JDK 17's jpackage source (jdk17u) explains it:
+  `AddLauncherArguments` reads none of those keys, and the Windows and
+  Linux installer steps give every launcher the main launcher's entries.
+  JDK 21's jpackage does read them, but packaging with JDK 21 would change
+  the bundled runtime; Scott chose to keep JDK 17 and the runner's
+  entries, and the ignored keys were dropped.
 - **Tests:** `RunnerOptionsTest` (step order, escapes, refused
   arguments) and `HeadlessRunnerTest` (System Master booted, `PRINT 6*7`
   typed, `42` seen and written, the image unchanged; a timeout's status

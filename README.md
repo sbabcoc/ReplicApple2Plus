@@ -669,6 +669,9 @@ writes the screen's text out. The installers include its launcher,
 | Windows | `C:\Program Files\ReplicApple2Plus\replicapple2plus-run.exe` |
 
 Installed, it finds the ROMs in the emulator folder chosen at first start.
+The installers also give it a menu entry (and, on Windows, a desktop
+shortcut) beside the application's; opened from there, it only shows its
+usage.
 From a checkout, `./gradlew installDist` puts the launcher beside the
 application's:
 
@@ -749,8 +752,9 @@ on each:
 The Windows installer adds a Start-menu entry and a desktop shortcut, and
 the Linux one a desktop menu entry; on macOS, the `.dmg` offers the app
 for the Applications folder. Each installer also carries the headless runner's
-launcher, `replicapple2plus-run` (see Running a program headless), with no
-menu entry or shortcut of its own; on Windows it's a console program.
+launcher, `replicapple2plus-run` (see Running a program headless), a
+console program on Windows. JDK 17's jpackage gives an added launcher the
+same menu entry and shortcut as the application, so it gets those too.
 
 Related tasks: `./gradlew runtime` (just the minimal runtime image, in
 `build/image-runtime`) and `./gradlew jpackageImage` (the application

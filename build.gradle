@@ -204,9 +204,10 @@ tasks.register('cleanJpackage', Delete) {
 
 /*
  * The headless runner goes into the application image as a second
- * launcher, replicapple2plus-run: headless, a console program on Windows
- * (a GUI launcher there has no stdout), and with no menu entry or desktop
- * shortcut of its own, since it's for the command line.
+ * launcher, replicapple2plus-run: headless, and a console program on
+ * Windows (a GUI launcher there has no stdout). JDK 17's jpackage reads no
+ * menu or shortcut settings for an added launcher, so the installers give
+ * it the same menu entry and desktop shortcut as the application.
  */
 def headlessLauncherProperties = layout.buildDirectory.file('jpackage-launchers/replicapple2plus-run.properties')
 
@@ -222,9 +223,6 @@ tasks.register('jpackageImage', Exec) {
             'main-class=com.nordstrom.emulator.HeadlessRunner',
             'java-options=-Djava.awt.headless=true',
             'win-console=true',
-            'win-menu=false',
-            'win-shortcut=false',
-            'linux-shortcut=false',
         ].join('\n') + '\n'
         commandLine jdkTool('jpackage'), '--type', 'app-image',
             '--name', appName, '--app-version', jpackageSafeVersion, '--vendor', appVendor,
