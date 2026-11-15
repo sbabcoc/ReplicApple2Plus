@@ -1331,6 +1331,13 @@ screen by hand, on macOS and on Termux/PRoot Debian alike. See
   only by the strobe, so the gap was left to run-to-run variation and once
   fell under 100 ms. A person always pauses longer, so `--wait SECONDS`
   states the pause in the script rather than slowing all typing.
+- **In the installers:** jpackage builds `replicapple2plus-run` into the
+  application image as a second launcher (`--add-launcher`), so an
+  installed copy can run headless too. Its properties make it headless,
+  a console launcher on Windows (a GUI launcher there has no stdout), and
+  keep it out of the menus and desktop. Checked on Linux with a jpackage
+  app image: the launcher passes the runner's stdout and exit status
+  through.
 - **Tests:** `RunnerOptionsTest` (step order, escapes, refused
   arguments) and `HeadlessRunnerTest` (System Master booted, `PRINT 6*7`
   typed, `42` seen and written, the image unchanged; a timeout's status

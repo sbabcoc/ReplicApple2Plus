@@ -659,8 +659,18 @@ See [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8 for the details.
 programs whose results are read off the screen, from a script or a
 Makefile. It boots drive 1 to the `]` prompt, types a script through the
 emulated keyboard, runs unthrottled until given text is on screen, and
-writes the screen's text out. `./gradlew installDist` puts its launcher
-beside the application's:
+writes the screen's text out. The installers include its launcher,
+`replicapple2plus-run`, beside the application's, by default at:
+
+| Platform | Launcher |
+|---|---|
+| macOS | `/Applications/ReplicApple2Plus.app/Contents/MacOS/replicapple2plus-run` |
+| Linux | `/opt/replicapple2plus/bin/replicapple2plus-run` |
+| Windows | `C:\Program Files\ReplicApple2Plus\replicapple2plus-run.exe` |
+
+Installed, it finds the ROMs in the emulator folder chosen at first start.
+From a checkout, `./gradlew installDist` puts the launcher beside the
+application's:
 
 ```
 build/install/ReplicApple2Plus/bin/replicapple2plus-run \
@@ -738,7 +748,9 @@ on each:
 
 The Windows installer adds a Start-menu entry and a desktop shortcut, and
 the Linux one a desktop menu entry; on macOS, the `.dmg` offers the app
-for the Applications folder.
+for the Applications folder. Each installer also carries the headless runner's
+launcher, `replicapple2plus-run` (see Running a program headless), with no
+menu entry or shortcut of its own; on Windows it's a console program.
 
 Related tasks: `./gradlew runtime` (just the minimal runtime image, in
 `build/image-runtime`) and `./gradlew jpackageImage` (the application

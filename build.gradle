@@ -202,18 +202,37 @@ tasks.register('cleanJpackage', Delete) {
     delete jpackageDir // jpackage won't write over an existing image or installer
 }
 
+/*
+ * The headless runner goes into the application image as a second
+ * launcher, replicapple2plus-run: headless, a console program on Windows
+ * (a GUI launcher there has no stdout), and with no menu entry or desktop
+ * shortcut of its own, since it's for the command line.
+ */
+def headlessLauncherProperties = layout.buildDirectory.file('jpackage-launchers/replicapple2plus-run.properties')
+
 tasks.register('jpackageImage', Exec) {
     group = 'distribution'
     description = 'Builds the application image -- the app and its runtime -- with jpackage.'
     dependsOn 'runtime', 'installDist', 'cleanJpackage'
     outputs.dir jpackageDir
     doFirst {
+        def properties = headlessLauncherProperties.get().asFile
+        properties.parentFile.mkdirs()
+        properties.text = [
+            'main-class=com.nordstrom.emulator.HeadlessRunner',
+            'java-options=-Djava.awt.headless=true',
+            'win-console=true',
+            'win-menu=false',
+            'win-shortcut=false',
+            'linux-shortcut=false',
+        ].join('\n') + '\n'
         commandLine jdkTool('jpackage'), '--type', 'app-image',
             '--name', appName, '--app-version', jpackageSafeVersion, '--vendor', appVendor,
             '--input', layout.buildDirectory.dir("install/${project.name}/lib").get().asFile.absolutePath,
             '--main-jar', tasks.named('jar', Jar).get().archiveFileName.get(),
             '--main-class', application.mainClass.get(),
             '--runtime-image', runtimeImageDir.get().asFile.absolutePath,
+            '--add-launcher', "replicapple2plus-run=${properties.absolutePath}",
             '--dest', jpackageDir.get().asFile.absolutePath
     }
 }
