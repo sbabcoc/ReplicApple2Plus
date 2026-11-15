@@ -676,11 +676,13 @@ build/install/ReplicApple2Plus/bin/replicapple2plus-run \
   needed (plus the VideoTerm's two with `--videoterm`).
 - **Disks:** `--d1` (to boot) and `--d2`, DSK or WOZ. The runner works on
   copies, so the images given are never changed.
-- **Script:** `--type TEXT` and `--expect TEXT`, any number, in order.
+- **Script:** `--type TEXT`, `--expect TEXT` and `--wait SECONDS`, any
+  number, in order.
   Typing goes through the same feeder as Paste, paced by the keyboard
   strobe; in `TEXT`, `\r` or `\n` is Return, `\\` a backslash and `\xHH`
   the key with Apple II code `HH` (`\x03` is Ctrl-C). `--expect` waits for
-  `TEXT` on screen; `--until TEXT` ends the run.
+  `TEXT` on screen; `--wait` runs on for a time, as a person pauses before
+  typing, for programs that time their input; `--until TEXT` ends the run.
 - **Screen:** the display the main window would show -- the VideoTerm's
   80 columns when the Soft Video Switch selects them, otherwise the text
   page, or a marked Soft-70 screen in full-screen hi-res -- as Copy

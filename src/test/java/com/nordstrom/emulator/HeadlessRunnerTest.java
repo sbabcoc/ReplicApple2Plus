@@ -81,6 +81,14 @@ class HeadlessRunnerTest {
     }
 
     @Test
+    @RequiresRoms(Rom.SYSTEM)
+    void aWaitPastTheTimeoutTimesOut() throws IOException {
+        int status = run("--d1", master().toString(), "--wait", "5", "--until", "]", "--timeout", "1");
+        assertEquals(HeadlessRunner.TIMED_OUT, status, err.toString(StandardCharsets.US_ASCII));
+        assertTrue(err.toString(StandardCharsets.US_ASCII).contains("--wait"));
+    }
+
+    @Test
     void aMissingDiskIsASetupFailure() {
         assertEquals(HeadlessRunner.SETUP_FAILED,
             run("--d1", dir.resolve("absent.dsk").toString(), "--until", "X", "--roms", dir.toString()));

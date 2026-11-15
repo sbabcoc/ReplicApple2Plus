@@ -16,7 +16,7 @@ class RunnerOptionsTest {
     void stepsKeepTheirOrder() {
         RunnerOptions options = RunnerOptions.parse(new String[] {
             "--d1", "master.woz", "--d2", "test.dsk", "--videoterm",
-            "--type", "BRUN CSWTEST,D2\\r", "--expect", "TYPE A WORD", "--type", "HELLO\\r",
+            "--type", "BRUN CSWTEST,D2\\r", "--expect", "TYPE A WORD", "--wait", "0.5", "--type", "HELLO\\r",
             "--until", "PRESS A KEY", "--timeout", "30"});
         assertEquals(Path.of("master.woz"), options.drive1);
         assertEquals(Path.of("test.dsk"), options.drive2);
@@ -24,6 +24,7 @@ class RunnerOptionsTest {
         assertEquals(List.of(
             new RunnerOptions.Type(List.of("BRUN CSWTEST,D2\n")),
             new RunnerOptions.Expect("TYPE A WORD"),
+            new RunnerOptions.Wait(0.5),
             new RunnerOptions.Type(List.of("HELLO\n"))), options.steps);
         assertEquals("PRESS A KEY", options.until);
         assertEquals(30.0, options.timeout);
@@ -55,6 +56,8 @@ class RunnerOptionsTest {
             () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", ""}));
         assertThrows(IllegalArgumentException.class,
             () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X", "--timeout", "0"}));
+        assertThrows(IllegalArgumentException.class,
+            () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X", "--wait", "soon"}));
         assertThrows(IllegalArgumentException.class,
             () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X", "--bogus"}));
         assertTrue(RunnerOptions.parse(new String[] {"--help"}).help);

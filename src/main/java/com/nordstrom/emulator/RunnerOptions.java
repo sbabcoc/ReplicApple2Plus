@@ -7,8 +7,8 @@ import java.util.List;
 /**
  * The command line of {@link HeadlessRunner}. Unlike the application's
  * {@code CliArgs}, flags here can repeat and their order matters: each
- * {@code --type} and {@code --expect} is a step of the run's script, taken
- * in the order given.
+ * {@code --type}, {@code --expect} and {@code --wait} is a step of the run's
+ * script, taken in the order given.
  * <p>
  * Text given to {@code --type} may carry escapes, since a shell can't
  * easily pass a Return or a control key: {@code \r} or {@code \n} is
@@ -21,13 +21,14 @@ final class RunnerOptions {
     static final String USAGE = String.join(System.lineSeparator(),
         "Usage: replicapple2plus-run --d1 MASTER.dsk|.woz [--d2 TEST.dsk|.woz] [--roms DIR]",
         "           [--videoterm] [--language-card]",
-        "           [--type TEXT | --expect TEXT]... --until TEXT",
+        "           [--type TEXT | --expect TEXT | --wait SECONDS]... --until TEXT",
         "           [--timeout SECONDS] [--boot-timeout SECONDS] [--screen FILE]",
         "",
         "Boots drive 1 to the ] prompt, then follows the script: --type types TEXT",
         "(\\r or \\n is Return, \\\\ a backslash, \\xHH the key with Apple II code HH);",
-        "--expect waits until TEXT is on screen. The run finishes when the --until TEXT",
-        "is on screen, and the screen's text goes to --screen FILE, or stdout.",
+        "--expect waits until TEXT is on screen; --wait runs on for SECONDS, as a",
+        "person pauses before typing. The run finishes when the --until TEXT is on",
+        "screen, and the screen's text goes to --screen FILE, or stdout.",
         "Times are seconds of emulated time: --boot-timeout (default 60) to reach the",
         "prompt, --timeout (default 120) for the script and --until after it.",
         "",
@@ -38,13 +39,16 @@ final class RunnerOptions {
     static final double DEFAULT_BOOT_TIMEOUT = 60;
 
     /** One step of the script. */
-    sealed interface Step permits Type, Expect {}
+    sealed interface Step permits Type, Expect, Wait {}
 
     /** Types keys: text segments and raw key codes, in order. */
     record Type(List<Object> segments) implements Step {}
 
     /** Waits until the text is on screen. */
     record Expect(String text) implements Step {}
+
+    /** Runs on for a time before the next step. */
+    record Wait(double seconds) implements Step {}
 
     Path roms;
     boolean videoTerm;
@@ -76,6 +80,7 @@ final class RunnerOptions {
                 case "--d2" -> options.drive2 = Path.of(value(args, ++i, flag));
                 case "--type" -> options.steps.add(new Type(keys(value(args, ++i, flag))));
                 case "--expect" -> options.steps.add(new Expect(text(value(args, ++i, flag), flag)));
+                case "--wait" -> options.steps.add(new Wait(seconds(value(args, ++i, flag), flag)));
                 case "--until" -> options.until = text(value(args, ++i, flag), flag);
                 case "--timeout" -> options.timeout = seconds(value(args, ++i, flag), flag);
                 case "--boot-timeout" -> options.bootTimeout = seconds(value(args, ++i, flag), flag);

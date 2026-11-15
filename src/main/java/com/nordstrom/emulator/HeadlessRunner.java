@@ -179,6 +179,11 @@ public final class HeadlessRunner {
                     if (status != FINISHED) {
                         return status;
                     }
+                } else if (step instanceof RunnerOptions.Wait wait) {
+                    int status = pause(machine, wait.seconds(), deadline, options, out, err);
+                    if (status != FINISHED) {
+                        return status;
+                    }
                 }
             }
             int status = await(machine, options.until, deadline, options, out, err, "--until");
@@ -212,6 +217,26 @@ public final class HeadlessRunner {
         }
         err.println(flag + " \"" + text + "\" not seen: " + machine.describe(outcome));
         return write(machine, options, out, err, outcome == Machine.Outcome.STOPPED ? STOPPED : TIMED_OUT);
+    }
+
+    /**
+     * Runs on for {@code seconds}, within what's left of the run's time.
+     *
+     * @return {@link #FINISHED} once the time has passed; otherwise the run's final status, with the screen written
+     */
+    private static int pause(Machine machine, double seconds, long deadline, RunnerOptions options,
+                             PrintStream out, PrintStream err) {
+        double left = Math.max(0, deadline - machine.cycles()) / CYCLES_PER_SECOND;
+        Machine.Outcome outcome = machine.runUntil(screen -> false, Math.min(seconds, left));
+        if (outcome == Machine.Outcome.STOPPED) {
+            err.println("--wait " + seconds + ": " + machine.describe(outcome));
+            return write(machine, options, out, err, STOPPED);
+        }
+        if (seconds > left) {
+            err.println("--wait " + seconds + " runs past --timeout: " + machine.describe(outcome));
+            return write(machine, options, out, err, TIMED_OUT);
+        }
+        return FINISHED;
     }
 
     /** Writes the screen's text out, and returns {@code status} -- or {@link #SETUP_FAILED} if it can't be written. */

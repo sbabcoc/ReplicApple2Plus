@@ -1324,10 +1324,17 @@ screen by hand, on macOS and on Termux/PRoot Debian alike. See
   `--timeout` covers the script after the prompt; booting has its own
   `--boot-timeout`, so a slow test doesn't eat into the boot's allowance
   or the reverse.
+- **`--wait`, added after the first run on macOS:** a2lib's timertest
+  failed once in its emutest run and passed six times standalone. Its two
+  INPUT checks need 100 ms of counted time between printing the prompt and
+  `fgets` returning; the runner typed as soon as it saw the prompt, paced
+  only by the strobe, so the gap was left to run-to-run variation and once
+  fell under 100 ms. A person always pauses longer, so `--wait SECONDS`
+  states the pause in the script rather than slowing all typing.
 - **Tests:** `RunnerOptionsTest` (step order, escapes, refused
   arguments) and `HeadlessRunnerTest` (System Master booted, `PRINT 6*7`
   typed, `42` seen and written, the image unchanged; a timeout's status
-  and screen; a missing disk), the latter needing the system ROM and the
+  and screen; a `--wait` past the timeout; a missing disk), the latter needing the system ROM and the
   System Master image the transfer tests use.
 
 ---
