@@ -6,10 +6,12 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The headless runner's command line: the script's steps in order, and the escapes in typed text. */
+/** The headless runner's command line: the script's steps in order, the machine, and the escapes in typed text. */
 class RunnerOptionsTest {
 
     @Test
@@ -61,5 +63,33 @@ class RunnerOptionsTest {
         assertThrows(IllegalArgumentException.class,
             () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X", "--bogus"}));
         assertTrue(RunnerOptions.parse(new String[] {"--help"}).help);
+    }
+
+    @Test
+    void theMachineCanComeFromAConfigurationOrAnEmulatorFolder() {
+        RunnerOptions options = RunnerOptions.parse(new String[] {
+            "--config", "cpm.ini", "--plugins", "a:b", "--folder", "emu", "--real-time", "--prompt", "A>",
+            "--until", "A>"});
+        assertEquals(Path.of("cpm.ini"), options.config);
+        assertEquals("a:b", options.plugins);
+        assertEquals(Path.of("emu"), options.folder);
+        assertTrue(options.realTime);
+        assertEquals("A>", options.prompt);
+        assertNull(options.drive1, "the configuration can name the boot disk");
+    }
+
+    @Test
+    void theDefaultsAreTheApplesoftPromptUnthrottled() {
+        RunnerOptions options = RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X"});
+        assertEquals("]", options.prompt);
+        assertFalse(options.realTime);
+        assertNull(options.config);
+        assertNull(options.folder);
+    }
+
+    @Test
+    void anEmptyPromptIsRefused() {
+        assertThrows(IllegalArgumentException.class,
+            () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X", "--prompt", ""}));
     }
 }

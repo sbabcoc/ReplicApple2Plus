@@ -19,24 +19,35 @@ import java.util.List;
 final class RunnerOptions {
 
     static final String USAGE = String.join(System.lineSeparator(),
-        "Usage: replicapple2plus-run --d1 MASTER.dsk|.woz [--d2 TEST.dsk|.woz] [--roms DIR]",
-        "           [--videoterm] [--language-card]",
+        "Usage: replicapple2plus-run [--d1 BOOT.dsk|.woz] [--d2 DISK.dsk|.woz]",
+        "           [--folder DIR] [--config slots.ini] [--plugins DIR[:DIR...]] [--roms DIR]",
+        "           [--videoterm] [--language-card] [--real-time] [--prompt TEXT]",
         "           [--type TEXT | --expect TEXT | --wait SECONDS]... --until TEXT",
         "           [--timeout SECONDS] [--boot-timeout SECONDS] [--screen FILE]",
         "",
-        "Boots drive 1 to the ] prompt, then follows the script: --type types TEXT",
-        "(\\r or \\n is Return, \\\\ a backslash, \\xHH the key with Apple II code HH);",
-        "--expect waits until TEXT is on screen; --wait runs on for SECONDS, as a",
-        "person pauses before typing. The run finishes when the --until TEXT is on",
-        "screen, and the screen's text goes to --screen FILE, or stdout.",
+        "Boots drive 1 to the --prompt (default ]), then follows the script: --type",
+        "types TEXT (\\r or \\n is Return, \\\\ a backslash, \\xHH the key with Apple II",
+        "code HH); --expect waits until TEXT is on screen; --wait runs on for SECONDS,",
+        "as a person pauses before typing. The run finishes when the --until TEXT is",
+        "on screen, and the screen's text goes to --screen FILE, or stdout.",
+        "",
+        "The machine is a Disk II in slot 6, plus the VideoTerm (--videoterm) and a",
+        "Language Card (--language-card) if asked -- or the cards a slot configuration",
+        "names: --config, else the slots.ini of the emulator folder --folder gives.",
+        "Plug-in jars come from --plugins, else the emulator folder's plugins/; ROMs",
+        "from --roms, else its roms/. --d1 and --d2 go in the drives of the Disk II",
+        "the machine boots, in place of any the configuration names.",
+        "",
         "Times are seconds of emulated time: --boot-timeout (default 60) to reach the",
-        "prompt, --timeout (default 120) for the script and --until after it.",
+        "prompt, --timeout (default 120) for the script and --until after it. The run",
+        "is unthrottled unless --real-time paces it at the II+'s 1.023 MHz.",
         "",
         "Exit status: 0 finished; 1 bad arguments or setup; 2 didn't boot;",
         "3 timed out; 4 the machine stopped (the CPU halted).");
 
     static final double DEFAULT_TIMEOUT = 120;
     static final double DEFAULT_BOOT_TIMEOUT = 60;
+    static final String DEFAULT_PROMPT = "]";
 
     /** One step of the script. */
     sealed interface Step permits Type, Expect, Wait {}
@@ -51,12 +62,17 @@ final class RunnerOptions {
     record Wait(double seconds) implements Step {}
 
     Path roms;
+    Path folder;
+    Path config;
+    String plugins;
     boolean videoTerm;
     boolean languageCard;
     Path drive1;
     Path drive2;
     final List<Step> steps = new ArrayList<>();
     String until;
+    String prompt = DEFAULT_PROMPT;
+    boolean realTime;
     double timeout = DEFAULT_TIMEOUT;
     double bootTimeout = DEFAULT_BOOT_TIMEOUT;
     Path screen;
@@ -75,7 +91,12 @@ final class RunnerOptions {
                 case "--help", "-h" -> options.help = true;
                 case "--videoterm" -> options.videoTerm = true;
                 case "--language-card" -> options.languageCard = true;
+                case "--real-time" -> options.realTime = true;
                 case "--roms" -> options.roms = Path.of(value(args, ++i, flag));
+                case "--folder" -> options.folder = Path.of(value(args, ++i, flag));
+                case "--config" -> options.config = Path.of(value(args, ++i, flag));
+                case "--plugins" -> options.plugins = value(args, ++i, flag);
+                case "--prompt" -> options.prompt = text(value(args, ++i, flag), flag);
                 case "--d1" -> options.drive1 = Path.of(value(args, ++i, flag));
                 case "--d2" -> options.drive2 = Path.of(value(args, ++i, flag));
                 case "--type" -> options.steps.add(new Type(keys(value(args, ++i, flag))));
@@ -89,7 +110,8 @@ final class RunnerOptions {
             }
         }
         if (!options.help) {
-            if (options.drive1 == null) {
+            // a configuration can name the boot disk itself; whether it does is known once it's loaded
+            if (options.drive1 == null && options.config == null && options.folder == null) {
                 throw new IllegalArgumentException("--d1 is required: the disk to boot");
             }
             if (options.until == null) {

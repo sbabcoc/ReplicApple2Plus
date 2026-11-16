@@ -657,9 +657,9 @@ See [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8 for the details.
 
 `HeadlessRunner` runs an Apple II program with no window -- for test
 programs whose results are read off the screen, from a script or a
-Makefile. It boots drive 1 to the `]` prompt, types a script through the
-emulated keyboard, runs unthrottled until given text is on screen, and
-writes the screen's text out. The installers include its launcher,
+Makefile. It boots drive 1 to a prompt, types a script through the
+emulated keyboard, runs until given text is on screen, and writes the
+screen's text out. The installers include its launcher,
 `replicapple2plus-run`, beside the application's, by default at:
 
 | Platform | Launcher |
@@ -668,7 +668,8 @@ writes the screen's text out. The installers include its launcher,
 | Linux | `/opt/replicapple2plus/bin/replicapple2plus-run` |
 | Windows | `C:\Program Files\ReplicApple2Plus\replicapple2plus-run.exe` |
 
-Installed, it finds the ROMs in the emulator folder chosen at first start.
+Installed, it finds the ROMs and plug-ins in the emulator folder chosen at
+first start.
 The installers also give it a menu entry (and, on Windows, a desktop
 shortcut) beside the application's; opened from there, it only shows its
 usage.
@@ -682,13 +683,34 @@ build/install/ReplicApple2Plus/bin/replicapple2plus-run \
     --until 'PRESS A KEY' --timeout 60 --screen cswtest.txt
 ```
 
+and CP/M on the SoftCard II, from a slot configuration like the one in
+[Running CP/M](#running-cpm-on-the-softcard-ii):
+
+```
+build/install/ReplicApple2Plus/bin/replicapple2plus-run \
+    --config cpm.ini --plugins /path/to/SoftCard2/build/libs \
+    --prompt 'A>' --type 'STAT\r' --until 'Space:' --screen stat.txt
+```
+
 - **Machine:** the system ROM and a Disk II in slot 6; `--videoterm` adds
   the VideoTerm in slot 3, `--language-card` a Language Card in slot 0.
-  ROMs come from `--roms DIR`, else the emulator folder's `roms/`, else
-  the classpath, as for the application; only `system-rom.rom` is
-  needed (plus the VideoTerm's two with `--videoterm`).
-- **Disks:** `--d1` (to boot) and `--d2`, DSK or WOZ. The runner works on
-  copies, so the images given are never changed.
+  Or a slot configuration names the cards, plug-ins included, as for the
+  application: `--config slots.ini`, else the `slots.ini` of the emulator
+  folder `--folder DIR` gives (an emulator folder the application chose
+  supplies ROMs and plug-ins, never the configuration). `--videoterm` and
+  `--language-card` don't combine with a configuration. Plug-in jars come
+  from `--plugins DIR[:DIR...]`, else the emulator folder's `plugins/`;
+  ROMs from `--roms DIR`, else its `roms/`, else the classpath. Only
+  `system-rom.rom` is needed, plus what the cards need (the VideoTerm's
+  two).
+- **Disks:** `--d1` (to boot) and `--d2`, DSK or WOZ, go in the drives of
+  the Disk II the machine boots -- the highest-numbered slot's, as the
+  Autostart ROM chooses -- in place of any the configuration names; with
+  a configuration, `--d1` is needed only if it names no `drive1`. The
+  runner works on copies of every image, given or named, so none is ever
+  changed.
+- **Prompt:** booting is done when the screen's last line is `--prompt
+  TEXT` -- `]` by default; `A>` for CP/M.
 - **Script:** `--type TEXT`, `--expect TEXT` and `--wait SECONDS`, any
   number, in order.
   Typing goes through the same feeder as Paste, paced by the keyboard
@@ -697,7 +719,8 @@ build/install/ReplicApple2Plus/bin/replicapple2plus-run \
   `TEXT` on screen; `--wait` runs on for a time, as a person pauses before
   typing, for programs that time their input; `--until TEXT` ends the run.
 - **Screen:** the display the main window would show -- the VideoTerm's
-  80 columns when the Soft Video Switch selects them, otherwise the text
+  80 columns when the Soft Video Switch selects them (as under CP/M on
+  the SoftCard II, whose console the VideoTerm is), otherwise the text
   page, or a marked Soft-70 screen in full-screen hi-res -- as Copy
   Screen Text reads it. It goes to `--screen FILE`, or stdout, whatever
   the outcome.
@@ -706,6 +729,12 @@ build/install/ReplicApple2Plus/bin/replicapple2plus-run \
   second; `--timeout`
   (default 120) for the script and the `--until` text. A boot that fails
   is retried with a fresh power-on, up to three in all.
+- **Speed:** unthrottled, which suits a program that sees only emulated
+  time. `--real-time` holds the run to the II+'s 1.023 MHz, for programs
+  that deal with the world outside -- an Uthernet II client's timeouts
+  against a real server. A run that falls well behind (a busy host)
+  starts keeping time afresh rather than sprinting to catch up, as the
+  application does.
 - **Exit status:** 0 finished; 1 bad arguments or setup (a missing disk or
   ROM); 2 didn't boot; 3 timed out; 4 the machine stopped (the CPU
   halted).

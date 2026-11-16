@@ -1355,6 +1355,65 @@ screen by hand, on macOS and on Termux/PRoot Debian alike. See
   and screen; a `--wait` past the timeout; a missing disk), the latter needing the system ROM and the
   System Master image the transfer tests use.
 
+### Headless runner for every project: machine configuration, real time, CP/M -- done
+
+At Scott's request, so Uthernet2, SoftCard2 and later projects can test
+on the runner as a2lib does: a machine with their cards installed, a pace
+for programs that talk to the outside world, and CP/M's screen. See
+`HeadlessRunner.java` and `RunnerOptions.java`; usage is in README.md.
+
+- **Machine configuration:** the application's own mechanism, not a
+  second one -- `SlotCardLoader` against a `PluginLoader` class loader.
+  The options are the application's names (`--config`, `--plugins`,
+  `--roms`) rather than a runner-only `--slots`, so one configuration and
+  one plug-ins path serve both, plus `--folder` for a whole emulator
+  folder. An emulator folder the application remembered supplies ROMs
+  and plug-ins, as before for ROMs, but never `slots.ini`: a run would
+  otherwise depend on whatever the application was last set up to run.
+  `--videoterm` and `--language-card` describe the built-in machine and
+  are refused beside a configuration, rather than merged into it.
+- **Boot disk:** `--d1`/`--d2` go to the highest-numbered slot's Disk II,
+  the one the Autostart ROM boots (the application's Disk menu takes the
+  first found, which for a slot 5 and slot 6 pair is the other one). With
+  a configuration, `--d1` is optional when it names a `drive1`.
+- **Copies:** every image a configuration loads is replaced by a copy
+  before the machine runs, through each card's `removableDrives`, so the
+  rule that a run never changes its inputs holds for named images too,
+  and for any plug-in card with drives.
+- **Power-ons:** a boot retry now calls each card's `release` before the
+  next machine is built, as Reboot does -- the Uthernet II's listening
+  ports would otherwise still be held by the discarded card.
+- **Real time:** `--real-time` paces at 1,023,000 cycles a second,
+  checked at each screen look (about once a frame), sleeping off any lead.
+  A run more than 100 ms behind starts keeping time afresh, the
+  application's own limit (five 20 ms ticks in `EmulationLoop`), so the
+  guest never runs faster than a II+ to make up lost time.
+- **CP/M's screen:** no new capture was needed. The SoftCard II's 6502
+  code initializes a type-4 console through `$C800`, the VideoTerm
+  firmware's SETUP, which ends at `$C82A: STA $C059` (see
+  HARDWARE-REFERENCE.md), so AN0 is on and the default `SWITCHED` mode
+  shows the 80 columns; the runner had only to find the VideoTerm among
+  the configuration's cards, as the application does. What was missing
+  was the boot's end: the prompt was fixed at Applesoft's `]`, so
+  `--prompt` names it (`A>` for CP/M). The firmware's 1-in-32 skipped
+  SETUP leaves the screen dark, which reads as a boot that didn't reach
+  the prompt and is powered on again.
+- **Tests:** `RunnerOptionsTest` (the new options and defaults, an empty
+  prompt refused) and `HeadlessRunnerTest` (card flags beside a
+  configuration refused; a folder without `slots.ini` still needs `--d1`;
+  `RealTime` sleeping off a lead and starting afresh when far behind;
+  with the ROMs and the System Master, a configuration naming the boot
+  disk, left unchanged, and a `--real-time` boot and 3-second wait taking
+  at least 4 s of real time). Checked in development with the classes
+  compiled directly (no JUnit there): the non-ROM cases, one emulated
+  second paced in 0.999 s with a real sleeper, and configurations through
+  loading -- no Disk II, an empty drive 1, an unknown type, and a slot 5
+  plus slot 6 pair whose slot 6 disk was copied in -- up to the system
+  ROM, which wasn't available. With the ROMs, all ten `HeadlessRunnerTest`
+  tests ran and passed. On Termux/PRoot Debian, a SoftCard II slot
+  configuration with `--plugins` and `--prompt 'A>'` booted CP/M 2.28B,
+  typed `STAT`, and read `A: R/W, Space:` off the VideoTerm's screen.
+
 ---
 
 ## Component development history (moved from README.md)
