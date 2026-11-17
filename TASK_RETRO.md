@@ -1282,6 +1282,23 @@ See `system/MarkedScreenText.java` and `system/ScreenText.java`.
   with another version or outside the range ignored; a marker ignored in
   mixed and lo-res modes.
 
+### Copy Screen Text: the marker's encoding 2 -- done
+
+At Scott's request, so Copy works on the Soft-70 screens of Uthernet2's
+TELNET and GOPHER, which now write a2lib's marker. Their buffer holds
+plain ASCII (`$20` a blank), not a2lib's encoding 1, so a2lib DESIGN.md
+3.9 gained encoding 2, plain ASCII, and `MarkedScreenText` now reads the
+marker's encoding byte (offset 11), which it used to ignore.
+
+- **Decoding:** encoding 1 as before; encoding 2, the byte with bit 7
+  dropped, anything outside `$20`-`$7E` a blank.
+- **Other encodings** (0 is reserved for the text screen's codes) make
+  the marker not count, as another version does, rather than being
+  decoded as encoding 1 into garbage.
+- **Verified** by `ScreenTextTest`: an encoding-2 screen at `$0800`, as
+  the utilities place it, with text past column 70 and a control byte;
+  markers in encodings 0 and 3 ignored. The earlier tests are unchanged.
+
 ### Headless test runner -- done
 
 At Scott's request, so a2lib can have a `make emutest` in place of

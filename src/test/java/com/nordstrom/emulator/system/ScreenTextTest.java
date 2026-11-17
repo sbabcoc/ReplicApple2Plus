@@ -37,12 +37,20 @@ class ScreenTextTest {
 
     /** Writes a version-1 text marker at {@code marker}, with its 80 x 24 buffer (all blank) right after it. */
     private static void mark(Ram ram, int marker, int version) {
+        mark(ram, marker, version, 1);
+    }
+
+    /**
+     * Writes a text marker in an encoding at {@code marker}, with its 80 x 24
+     * buffer right after it: all zero, a blank screen in encoding 1.
+     */
+    private static void mark(Ram ram, int marker, int version, int encoding) {
         byte[] signature = "A2SCR80".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
         for (int i = 0; i < signature.length; i++) {
             ram.bytes[marker + i] = signature[i];
         }
         int buffer = marker + 16;
-        int[] fields = {version, 80, 24, 70, 1, buffer & 0xFF, buffer >> 8, buffer & 0xFF, buffer >> 8};
+        int[] fields = {version, 80, 24, 70, encoding, buffer & 0xFF, buffer >> 8, buffer & 0xFF, buffer >> 8};
         for (int i = 0; i < fields.length; i++) {
             ram.bytes[marker + 7 + i] = fields[i];
         }
@@ -140,6 +148,42 @@ class ScreenTextTest {
         ScanlineModes.LineMode[] hires = frame(ScanlineModes.Source.HIRES, false);
         assertTrue(ScreenText.markedTextShown(ram, hires));
         assertEquals(expected, ScreenText.capture(ram, hires));
+    }
+
+    /** Writes ASCII text into a marked buffer as encoding 2 keeps it: the characters themselves. */
+    private static void putAscii(Ram ram, int marker, int row, int col, String text) {
+        for (int i = 0; i < text.length(); i++) {
+            ram.bytes[marker + 16 + row * 80 + col + i] = text.charAt(i);
+        }
+    }
+
+    @Test
+    void copiesPlainAsciiTextInEncodingTwo() {
+        Ram ram = new Ram();
+        int marker = 0x0800;                     // where Uthernet2's TELNET and GOPHER put it
+        mark(ram, marker, 1, 2);
+        Arrays.fill(ram.bytes, marker + 16, marker + 16 + 80 * 24, ' ');
+        putAscii(ram, marker, 0, 0, "Connect to host: bbs.example.com");
+        putAscii(ram, marker, 1, 76, "Zz~!");     // past the 70 columns in view
+        ram.bytes[marker + 16 + 2 * 80] = 0x07;  // not in the encoding: a blank
+        putAscii(ram, marker, 2, 1, "x");
+        String expected = String.join("\n",
+            "Connect to host: bbs.example.com", " ".repeat(76) + "Zz~!", " x");
+        ScanlineModes.LineMode[] hires = frame(ScanlineModes.Source.HIRES, false);
+        assertTrue(ScreenText.markedTextShown(ram, hires));
+        assertEquals(expected, ScreenText.capture(ram, hires));
+    }
+
+    @Test
+    void markersInOtherEncodingsAreIgnored() {
+        Ram ram = new Ram();
+        mark(ram, 0x0800, 1, 0);                 // encoding 0: reserved
+        putAscii(ram, 0x0800, 0, 0, "RESERVED");
+        mark(ram, 0x1000, 1, 3);
+        putAscii(ram, 0x1000, 0, 0, "UNKNOWN");
+        ScanlineModes.LineMode[] hires = frame(ScanlineModes.Source.HIRES, false);
+        assertFalse(ScreenText.markedTextShown(ram, hires));
+        assertEquals("", ScreenText.capture(ram, hires));
     }
 
     @Test

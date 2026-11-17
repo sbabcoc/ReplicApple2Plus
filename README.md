@@ -179,9 +179,10 @@ Companion documents:
   [Running CP/M](#running-cpm-on-the-softcard-ii)), Type File..., and Open
   Emulator Folder (see [The emulator folder](#the-emulator-folder));
   **Edit** menu: Copy Screen Text, Copy Screen Image, and Paste. Copy
-  Screen Text also copies a2lib's Soft-70 hi-res text -- all 80 columns,
-  including those panned out of view -- found through the marker a2lib
-  documents (a2lib DESIGN.md 3.9). Typed or
+  Screen Text also copies a2lib's Soft-70 hi-res text, and that of
+  Uthernet2's TELNET and GOPHER -- all 80 columns, including those panned
+  out of view -- found through the marker a2lib documents (a2lib
+  DESIGN.md 3.9), in either of its encodings. Typed or
   pasted text is fed to the
   keyboard at exactly the pace the running software reads it, and a line
   at a time -- after each Return, the next line waits for the screen to
