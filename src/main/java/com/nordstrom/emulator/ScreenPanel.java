@@ -11,8 +11,6 @@ import javax.swing.JPanel;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 
 /**
@@ -42,21 +40,16 @@ import java.awt.image.BufferedImage;
  * so whoever drives real time (the application's own timer loop) is
  * the natural owner of it, not the thing being painted.
  * <p>
- * Each line is assembled as the 560 dots of the video signal, two per
- * emulated pixel, because a monochrome monitor shows detail finer than a
- * pixel: lo-res colors as dot patterns, and hi-res bytes with the palette
- * bit set a dot late. At {@link #SCALE} 3 a dot is a screen pixel
- * and a half wide, so each screen column is drawn with the share of each dot
- * it covers ({@link #screenColumns}): a pair of equal dots stays a crisp
- * 3-pixel cell, and a lone dot stays where it really is.
+ * The picture itself comes from {@link ScreenImage}, which screenshots
+ * taken without a window use too, so they show what this panel shows.
  */
 final class ScreenPanel extends JPanel {
 
     /** How many real screen pixels each emulated pixel occupies. */
-    static final int SCALE = 3;
+    static final int SCALE = ScreenImage.SCALE;
 
-    private static final int WIDTH = TextScreenRenderer.COLUMNS * TextScreenRenderer.GLYPH_WIDTH * SCALE;
-    private static final int HEIGHT = TextScreenRenderer.ROWS * TextScreenRenderer.GLYPH_HEIGHT * SCALE;
+    private static final int WIDTH = ScreenImage.WIDTH;
+    private static final int HEIGHT = ScreenImage.HEIGHT;
 
     private final MotherboardBus bus;
     private final ScanlineModes scanlineModes;
@@ -114,82 +107,7 @@ final class ScreenPanel extends JPanel {
             EightyColumnView.paint(g, switchedVideoTerm, getWidth(), getHeight(), monitor.lit());
             return;
         }
-        boolean color = monitor.decodesColor();
-        int lit = monitor.lit().getRGB();
-        boolean[][] textPixels = TextScreenRenderer.render(bus, bus.videoSoftSwitches(), flashVisible);
-        Color[][] loResColors = color ? LoResRenderer.render(bus, bus.videoSoftSwitches()) : null;
-        boolean[][] loResDots = color ? null : LoResRenderer.dots(bus, bus.videoSoftSwitches());
-        Color[][] hiResColors = color ? HiResRenderer.render(bus, bus.videoSoftSwitches()) : null;
-        boolean[][] hiResDots = color ? null : HiResRenderer.dots(bus, bus.videoSoftSwitches());
-        ScanlineModes.LineMode[] modes = scanlineModes.completedFrame();
-
-        int pixelsPerLine = textPixels[0].length;
-        int[] dots = new int[pixelsPerLine * 2];
-        BufferedImage image = new BufferedImage(pixelsPerLine * SCALE, textPixels.length, BufferedImage.TYPE_INT_RGB);
-        for (int row = 0; row < textPixels.length; row++) {
-            ScanlineModes.Source source = modes[row].source();
-            for (int x = 0; x < pixelsPerLine; x++) {
-                switch (source) {
-                    case TEXT -> setPair(dots, x, textPixels[row][x] ? lit : 0);
-                    case LORES -> {
-                        if (color) {
-                            setPair(dots, x, loResColors[row][x].getRGB());
-                        } else {
-                            dots[2 * x] = loResDots[row][2 * x] ? lit : 0;
-                            dots[2 * x + 1] = loResDots[row][2 * x + 1] ? lit : 0;
-                        }
-                    }
-                    case HIRES -> {
-                        if (color) {
-                            setPair(dots, x, hiResColors[row][x].getRGB());
-                        } else {
-                            dots[2 * x] = hiResDots[row][2 * x] ? lit : 0;
-                            dots[2 * x + 1] = hiResDots[row][2 * x + 1] ? lit : 0;
-                        }
-                    }
-                }
-            }
-            image.setRGB(0, row, image.getWidth(), 1, screenColumns(dots, SCALE), 0, image.getWidth());
-        }
-        Graphics2D g2 = (Graphics2D) g.create();
-        try {
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g2.drawImage(image, 0, 0, image.getWidth(), image.getHeight() * SCALE, null);
-        } finally {
-            g2.dispose();
-        }
-    }
-
-    private static void setPair(int[] dots, int pixel, int rgb) {
-        dots[2 * pixel] = rgb;
-        dots[2 * pixel + 1] = rgb;
-    }
-
-    /**
-     * One line of dots as screen columns: each column's color is the mix of
-     * the dots it covers, weighted by how much of the column each covers.
-     *
-     * @param dots  the line's dots, as RGB values, two per emulated pixel
-     * @param scale screen pixels per emulated pixel
-     * @return {@code dots.length / 2 * scale} RGB values
-     */
-    static int[] screenColumns(int[] dots, int scale) {
-        // In half-columns, dot d spans [d*scale, (d+1)*scale) and column k spans [2k, 2k+2).
-        int[] columns = new int[dots.length / 2 * scale];
-        for (int k = 0; k < columns.length; k++) {
-            int start = 2 * k;
-            int end = start + 2;
-            int r = 0;
-            int gr = 0;
-            int b = 0;
-            for (int d = start / scale; d * scale < end; d++) {
-                int share = Math.min(end, (d + 1) * scale) - Math.max(start, d * scale);
-                r += share * ((dots[d] >> 16) & 0xFF);
-                gr += share * ((dots[d] >> 8) & 0xFF);
-                b += share * (dots[d] & 0xFF);
-            }
-            columns[k] = ((r / 2) << 16) | ((gr / 2) << 8) | (b / 2);
-        }
-        return columns;
+        BufferedImage image = ScreenImage.of(bus, scanlineModes.completedFrame(), null, monitor, flashVisible);
+        g.drawImage(image, 0, 0, null);
     }
 }

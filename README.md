@@ -660,7 +660,8 @@ See [TRANSFER-CARD.md](TRANSFER-CARD.md) section 8 for the details.
 programs whose results are read off the screen, from a script or a
 Makefile. It boots drive 1 to a prompt, types a script through the
 emulated keyboard, runs until given text is on screen, and writes the
-screen's text out. The installers include its launcher,
+screen's text out -- and, when asked, pictures of the screen along the
+way, for documentation. The installers include its launcher,
 `replicapple2plus-run`, beside the application's, by default at:
 
 | Platform | Launcher |
@@ -712,19 +713,36 @@ build/install/ReplicApple2Plus/bin/replicapple2plus-run \
   changed.
 - **Prompt:** booting is done when the screen's last line is `--prompt
   TEXT` -- `]` by default; `A>` for CP/M.
-- **Script:** `--type TEXT`, `--expect TEXT` and `--wait SECONDS`, any
-  number, in order.
+- **Script:** `--type TEXT`, `--expect TEXT`, `--wait SECONDS` and
+  `--snap FILE`, any number, in order.
   Typing goes through the same feeder as Paste, paced by the keyboard
   strobe; in `TEXT`, `\r` or `\n` is Return, `\\` a backslash and `\xHH`
   the key with Apple II code `HH` (`\x03` is Ctrl-C). `--expect` waits for
   `TEXT` on screen; `--wait` runs on for a time, as a person pauses before
-  typing, for programs that time their input; `--until TEXT` ends the run.
+  typing, for programs that time their input; `--snap` saves a picture
+  (below); `--until TEXT` ends the run.
 - **Screen:** the display the main window would show -- the VideoTerm's
   80 columns when the Soft Video Switch selects them (as under CP/M on
   the SoftCard II, whose console the VideoTerm is), otherwise the text
   page, or a marked Soft-70 screen in full-screen hi-res -- as Copy
   Screen Text reads it. It goes to `--screen FILE`, or stdout, whatever
   the outcome.
+- **Pictures:** `--snap FILE` saves a PNG of that same display as the main
+  window shows it, 840 x 576, on the monitor `--monitor` names: `color`
+  (the default, as in the window), `white`, `green` or `amber`, as in the
+  toolbar. A monochrome monitor shows hi-res text, such as Soft-70's, with
+  no color fringes. Put an `--expect` before a `--snap`, so the picture
+  is taken once the screen shows what it should; typed keys are still
+  arriving right after a `--type`. For example, a Soft-70 program's
+  screen on a green monitor:
+  ```
+  replicapple2plus-run --d1 "DOS 3.3 System Master.woz" --d2 a2libtests.dsk \
+      --type 'BRUN S70TEST,D2\r' --expect 'PRESS A KEY' \
+      --snap s70test.png --monitor green --until 'PRESS A KEY'
+  ```
+  The window and the runner draw with the same code, `ScreenImage`, which
+  other projects' tests can call as well -- `ScreenImage.hiRes` takes
+  hi-res page 1 from any `MemoryBus`, such as a test harness's own memory.
 - **Time** is emulated seconds: `--boot-timeout` (default 60) to reach
   the prompt, which must stand unchanged, with the drive stopped, for a
   second; `--timeout`
@@ -798,7 +816,8 @@ lands in `build/jpackage` too.
   (audio-paced emulation thread), `ScreenPanel`, `DiskMenu`, `EditMenu`,
   `ToolbarControls`, keyboard input, text injection and command history
   (`CommandRecall`, `CommandHistory`), the headless runner
-  (`HeadlessRunner`, `RunnerOptions`), plus the
+  (`HeadlessRunner`, `RunnerOptions`), the screen as an image for the
+  window and screenshots (`ScreenImage`, `MonitorType`), plus the
   `MemoryBus` and `InterruptLines` contracts shared by `cpu` and
   `system`.
 - `.../cpu/` -- the 6502 core.

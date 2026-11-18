@@ -34,6 +34,25 @@ class RunnerOptionsTest {
     }
 
     @Test
+    void aSnapIsAStepAndTheMonitorIsChosenByName() {
+        RunnerOptions options = RunnerOptions.parse(new String[] {
+            "--d1", "m.dsk", "--expect", "]", "--snap", "prompt.png", "--type", "X", "--snap", "x.png",
+            "--monitor", "Amber", "--until", "X"});
+        assertEquals(List.of(
+            new RunnerOptions.Expect("]"),
+            new RunnerOptions.Snap(Path.of("prompt.png")),
+            new RunnerOptions.Type(List.of("X")),
+            new RunnerOptions.Snap(Path.of("x.png"))), options.steps);
+        assertEquals(MonitorType.AMBER, options.monitor);
+        assertEquals(MonitorType.COLOR, RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X"}).monitor,
+            "the main window's default");
+        assertThrows(IllegalArgumentException.class,
+            () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--monitor", "sepia", "--until", "X"}));
+        assertThrows(IllegalArgumentException.class,
+            () -> RunnerOptions.parse(new String[] {"--d1", "m.dsk", "--until", "X", "--snap"}));
+    }
+
+    @Test
     void escapesBecomeReturnsBackslashesAndKeyCodes() {
         assertEquals(List.of("A\nB\n"), RunnerOptions.keys("A\\rB\\n"));
         assertEquals(List.of("C:\\"), RunnerOptions.keys("C:\\\\"));

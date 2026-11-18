@@ -4,6 +4,8 @@ import com.nordstrom.emulator.RequiresRoms.Rom;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -89,6 +91,39 @@ class HeadlessRunnerTest {
         int status = run("--d1", master().toString(), "--wait", "5", "--until", "]", "--timeout", "1");
         assertEquals(HeadlessRunner.TIMED_OUT, status, err.toString(StandardCharsets.US_ASCII));
         assertTrue(err.toString(StandardCharsets.US_ASCII).contains("--wait"));
+    }
+
+    @Test
+    @RequiresRoms(Rom.SYSTEM)
+    void aSnapSavesThePictureTheMainWindowWouldShowOnTheMonitorChosen() throws IOException {
+        Path picture = dir.resolve("prompt.png");
+        int status = run("--d1", master().toString(), "--type", "PRINT 6*7\\r", "--expect", "42",
+            "--snap", picture.toString(), "--monitor", "green", "--until", "42");
+        assertEquals(HeadlessRunner.FINISHED, status, err.toString(StandardCharsets.US_ASCII));
+        BufferedImage image = ImageIO.read(picture.toFile());
+        assertEquals(ScreenImage.WIDTH, image.getWidth());
+        assertEquals(ScreenImage.HEIGHT, image.getHeight());
+        int green = MonitorType.GREEN.lit().getRGB() & 0xFFFFFF;
+        int lit = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y) & 0xFFFFFF;
+                assertTrue(rgb == 0 || rgb == green, "text is whole cells of the phosphor's color: "
+                    + Integer.toHexString(rgb) + " at " + x + "," + y);
+                lit += rgb == green ? 1 : 0;
+            }
+        }
+        assertTrue(lit > 0, "the prompt and the answer are drawn");
+    }
+
+    @Test
+    @RequiresRoms(Rom.SYSTEM)
+    void aSnapThatCantBeWrittenIsASetupFailureWithTheScreenWritten() throws IOException {
+        Path picture = dir.resolve("no such folder").resolve("prompt.png");
+        int status = run("--d1", master().toString(), "--snap", picture.toString(), "--until", "]");
+        assertEquals(HeadlessRunner.SETUP_FAILED, status);
+        assertTrue(err.toString(StandardCharsets.US_ASCII).contains(picture.toString()));
+        assertTrue(out.toString(StandardCharsets.US_ASCII).contains("]"), "the screen, as it was left");
     }
 
     @Test

@@ -1282,6 +1282,34 @@ See `system/MarkedScreenText.java` and `system/ScreenText.java`.
   with another version or outside the range ignored; a marker ignored in
   mixed and lo-res modes.
 
+### Screen pictures: ScreenImage, and the runner's --snap and --monitor -- done
+
+At Scott's request, so monochrome screenshots can be taken everywhere --
+the runner, and other projects' documentation -- not only from the window
+with Copy Screen Image.
+
+- **`ScreenImage`** (public) now makes the picture `ScreenPanel` used to
+  make itself: `of` for what the main window shows (the VideoTerm's 80
+  columns when switched in, else text, lo-res, hi-res or a mid-frame mix),
+  `hiRes` for hi-res page 1 from any `MemoryBus` (a test harness's own
+  memory), and `write` for PNG. The panel now draws its image, so the
+  window and a screenshot can't drift apart. `MonitorType` is public, with
+  `named` for command lines.
+- **Runner:** `--snap FILE`, a script step, saves that picture as a PNG;
+  `--monitor color|white|green|amber` picks the monitor (default color, as
+  the window's).
+- **Verified:** the panel's output before and after the move, painted for
+  text, lo-res, hi-res and two mixed screens on all four monitors, is
+  identical pixel for pixel (with a stand-in character ROM, the same in
+  both runs, since the real one isn't distributed). `ScreenImageTest`
+  covers `hiRes` (a lit pixel's 3 x 3 cell, the palette bit's half-pixel
+  shift, page 1 only, color) and PNG output; `ScreenImageColumnsTest` is
+  the old column test, moved with the code. `RunnerOptionsTest` covers the
+  new options; two `HeadlessRunnerTest` runs, which need the System ROM
+  and the System Master, check a `--snap` on a green monitor (only black
+  and the phosphor's color, text drawn) and a `--snap` that can't be
+  written (exit 1, the screen still written).
+
 ### Copy Screen Text: the marker's encoding 2 -- done
 
 At Scott's request, so Copy works on the Soft-70 screens of Uthernet2's

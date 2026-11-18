@@ -246,6 +246,13 @@ public final class HeadlessRunner {
                     if (status != FINISHED) {
                         return status;
                     }
+                } else if (step instanceof RunnerOptions.Snap snap) {
+                    try {
+                        machine.snap(snap.file(), options.monitor);
+                    } catch (IOException | UncheckedIOException e) {
+                        err.println("Couldn't write the screen's picture to " + snap.file() + ": " + e.getMessage());
+                        return write(machine, options, out, err, SETUP_FAILED);
+                    }
                 }
             }
             int status = await(machine, options.until, deadline, options, out, err, "--until");
@@ -450,6 +457,11 @@ public final class HeadlessRunner {
         }
 
         /** @return the text of the display the main window would show */
+        /** Saves the screen as the main window would show it on {@code monitor}, as a PNG file. */
+        void snap(Path file, MonitorType monitor) throws IOException {
+            ScreenImage.write(ScreenImage.of(bus, bus.scanlineModes().completedFrame(), videoTerm, monitor, true), file);
+        }
+
         String screen() {
             if (videoTerm != null && videoTerm.shownInMainWindow(bus.videoSoftSwitches())) {
                 return VideoTermRenderer.text(videoTerm);

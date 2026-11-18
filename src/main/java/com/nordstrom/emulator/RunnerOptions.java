@@ -7,8 +7,8 @@ import java.util.List;
 /**
  * The command line of {@link HeadlessRunner}. Unlike the application's
  * {@code CliArgs}, flags here can repeat and their order matters: each
- * {@code --type}, {@code --expect} and {@code --wait} is a step of the run's
- * script, taken in the order given.
+ * {@code --type}, {@code --expect}, {@code --wait} and {@code --snap} is a
+ * step of the run's script, taken in the order given.
  * <p>
  * Text given to {@code --type} may carry escapes, since a shell can't
  * easily pass a Return or a control key: {@code \r} or {@code \n} is
@@ -22,14 +22,17 @@ final class RunnerOptions {
         "Usage: replicapple2plus-run [--d1 BOOT.dsk|.woz] [--d2 DISK.dsk|.woz]",
         "           [--folder DIR] [--config slots.ini] [--plugins DIR[:DIR...]] [--roms DIR]",
         "           [--videoterm] [--language-card] [--real-time] [--prompt TEXT]",
-        "           [--type TEXT | --expect TEXT | --wait SECONDS]... --until TEXT",
+        "           [--type TEXT | --expect TEXT | --wait SECONDS | --snap FILE]... --until TEXT",
         "           [--timeout SECONDS] [--boot-timeout SECONDS] [--screen FILE]",
+        "           [--monitor color|white|green|amber]",
         "",
         "Boots drive 1 to the --prompt (default ]), then follows the script: --type",
         "types TEXT (\\r or \\n is Return, \\\\ a backslash, \\xHH the key with Apple II",
         "code HH); --expect waits until TEXT is on screen; --wait runs on for SECONDS,",
-        "as a person pauses before typing. The run finishes when the --until TEXT is",
-        "on screen, and the screen's text goes to --screen FILE, or stdout.",
+        "as a person pauses before typing; --snap saves a PNG of the screen as the",
+        "main window shows it, on the --monitor (default color). The run finishes when",
+        "the --until TEXT is on screen, and the screen's text goes to --screen FILE,",
+        "or stdout.",
         "",
         "The machine is a Disk II in slot 6, plus the VideoTerm (--videoterm) and a",
         "Language Card (--language-card) if asked -- or the cards a slot configuration",
@@ -50,7 +53,7 @@ final class RunnerOptions {
     static final String DEFAULT_PROMPT = "]";
 
     /** One step of the script. */
-    sealed interface Step permits Type, Expect, Wait {}
+    sealed interface Step permits Type, Expect, Wait, Snap {}
 
     /** Types keys: text segments and raw key codes, in order. */
     record Type(List<Object> segments) implements Step {}
@@ -60,6 +63,9 @@ final class RunnerOptions {
 
     /** Runs on for a time before the next step. */
     record Wait(double seconds) implements Step {}
+
+    /** Saves a picture of the screen, as the main window shows it, to a PNG file. */
+    record Snap(Path file) implements Step {}
 
     Path roms;
     Path folder;
@@ -76,6 +82,7 @@ final class RunnerOptions {
     double timeout = DEFAULT_TIMEOUT;
     double bootTimeout = DEFAULT_BOOT_TIMEOUT;
     Path screen;
+    MonitorType monitor = MonitorType.COLOR;
     boolean help;
 
     /**
@@ -102,6 +109,8 @@ final class RunnerOptions {
                 case "--type" -> options.steps.add(new Type(keys(value(args, ++i, flag))));
                 case "--expect" -> options.steps.add(new Expect(text(value(args, ++i, flag), flag)));
                 case "--wait" -> options.steps.add(new Wait(seconds(value(args, ++i, flag), flag)));
+                case "--snap" -> options.steps.add(new Snap(Path.of(value(args, ++i, flag))));
+                case "--monitor" -> options.monitor = MonitorType.named(value(args, ++i, flag));
                 case "--until" -> options.until = text(value(args, ++i, flag), flag);
                 case "--timeout" -> options.timeout = seconds(value(args, ++i, flag), flag);
                 case "--boot-timeout" -> options.bootTimeout = seconds(value(args, ++i, flag), flag);
